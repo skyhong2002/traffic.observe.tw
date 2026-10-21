@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>台灣網站流量月報｜流量觀察</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --ring: rgba(11, 11, 11, 0.1);
+  --series-1: #2a78d6;
+  --series-1-wash: #cde2fb;
+  --up: #006300;
+  --down: #d03b3b;
+  --accent: #2a78d6;
+  --other: #c3c2b7;
+  --hover-row: #f3f3ef;
+  --sel-row: #eaf2fc;
+  --bar-bg: rgba(249, 249, 247, .94);
+  --tip-ink: #f0efec;
+}
+/* Dark mode: the palette's dark steps, not an inverted light theme. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #f0efec;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --ring: rgba(255, 255, 255, 0.1);
+    --series-1: #3987e5;
+    --series-1-wash: #184f95;
+    --up: #0ca30c;
+    --down: #e66767;
+    --accent: #3987e5;
+    --other: #4a4a46;
+    --hover-row: #222220;
+    --sel-row: #14304f;
+    --bar-bg: rgba(13, 13, 13, .92);
+    --tip-ink: #0b0b0b;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--page); }
+body {
+  margin: 0;
+  color: var(--ink);
+  font: 16px/1.65 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", sans-serif;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 24px; }
+.masthead { border-bottom: 1px solid var(--grid); background: var(--surface); }
+.masthead .wrap { padding-top: 28px; padding-bottom: 20px; }
+.kicker { font-size: 13px; letter-spacing: .08em; color: var(--muted); margin: 0; }
+h1 { font-size: 34px; line-height: 1.25; margin: 6px 0 4px; font-weight: 700; letter-spacing: .01em; }
+.dek { color: var(--ink-2); margin: 0 0 18px; max-width: 46em; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; font-size: 14px; color: var(--ink-2); }
+.controls label { display: inline-flex; gap: 8px; align-items: center; }
+select, button {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--axis); border-radius: 6px; padding: 5px 8px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--ink-2); }
+.presets { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.presets button { padding: 3px 10px; border-radius: 999px; font-size: 13px; color: var(--ink-2); }
+.presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.range-note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+.lede { padding: 34px 0 8px; }
+.lede h2 { font-size: 22px; margin: 0 0 6px; }
+.lede p { margin: 0; color: var(--ink-2); max-width: 48em; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin: 22px 0 8px; }
+.card {
+  background: var(--surface); border: 1px solid var(--ring); border-radius: 10px; padding: 16px 18px;
+  cursor: pointer; text-align: left; font: inherit; color: inherit;
+}
+.card:hover { border-color: var(--axis); }
+.card .label { font-size: 13px; color: var(--muted); }
+.card .who { font-size: 18px; font-weight: 650; margin: 4px 0 2px; line-height: 1.35; }
+.card .fig { font-size: 26px; font-weight: 650; line-height: 1.2; }
+.card .sub { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+.card ul { margin: 6px 0 0; padding-left: 1.1em; font-size: 14px; }
+
+.chips-bar { position: sticky; top: 0; z-index: 5; background: var(--bar-bg); backdrop-filter: blur(6px); border-bottom: 1px solid var(--grid); }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 10px 0; scrollbar-width: thin; }
+.chips a {
+  flex: none; font-size: 14px; color: var(--ink-2); border: 1px solid var(--grid); background: var(--surface);
+  border-radius: 999px; padding: 3px 12px; white-space: nowrap;
+}
+.chips a.on { border-color: var(--accent); color: var(--accent); }
+.chips a small { color: var(--muted); margin-left: 4px; }
+
+section.topic { padding: 34px 0 10px; scroll-margin-top: 56px; }
+section.topic header { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: baseline; justify-content: space-between; }
+section.topic h2 { font-size: 24px; margin: 0; }
+.summary { font-size: 14px; color: var(--ink-2); margin: 4px 0 14px; }
+.summary b { color: var(--ink); font-weight: 600; }
+
+.scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; border-top: 1px solid var(--grid); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; text-align: right; vertical-align: middle; }
+th { font-weight: 500; color: var(--muted); font-size: 13px; background: var(--page); }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover { color: var(--ink); }
+th .arrow { display: inline-block; width: 1em; color: var(--accent); }
+td.num, th.num { font-variant-numeric: tabular-nums; }
+td.l, th.l { text-align: left; }
+td.rank { color: var(--muted); width: 2.5em; font-variant-numeric: tabular-nums; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--hover-row); }
+tbody tr.sel td, tbody tr.hl td { background: var(--sel-row); }
+.site-name { font-weight: 600; }
+.site-domain { display: block; font-size: 12px; color: var(--muted); }
+.tag { font-size: 11px; color: var(--muted); border: 1px solid var(--grid); border-radius: 4px; padding: 0 4px; margin-left: 6px; font-weight: 400; }
+.delta { font-variant-numeric: tabular-nums; }
+.delta.up { color: var(--up); }
+.delta.down { color: var(--down); }
+.delta.na { color: var(--muted); }
+.radar { color: var(--ink-2); font-size: 13px; }
+.more { margin: 12px 0 0; }
+.more button { font-size: 13px; }
+.empty { color: var(--muted); padding: 18px 0; }
+
+/* Side panel */
+.backdrop { position: fixed; inset: 0; background: rgba(11, 11, 11, .18); opacity: 0; pointer-events: none; transition: opacity .15s; z-index: 20; }
+.backdrop.open { opacity: 1; pointer-events: auto; }
+aside.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); background: var(--surface);
+  border-left: 1px solid var(--ring); box-shadow: -8px 0 30px rgba(0, 0, 0, .08);
+  transform: translateX(100%); transition: transform .18s ease; z-index: 21; overflow-y: auto; padding: 22px 24px 40px;
+}
+aside.panel.open { transform: none; }
+.panel .close { position: sticky; top: 0; float: right; }
+/* biome-ignore lint/style/noDescendingSpecificity: panel headings are styled after the section ones on purpose */
+.panel h2 { font-size: 24px; margin: 0 0 2px; line-height: 1.3; padding-right: 60px; }
+.panel .meta { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.panel h3 { font-size: 15px; margin: 24px 0 4px; }
+.panel .note { font-size: 12px; color: var(--muted); margin: 2px 0 6px; }
+.panel .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 8px 0 0; }
+.panel .stats div { border: 1px solid var(--ring); border-radius: 8px; padding: 8px 10px; }
+.panel .stats span { display: block; font-size: 12px; color: var(--muted); }
+.panel .stats b { font-size: 18px; font-weight: 650; }
+.panel table { font-size: 13px; }
+
+/* Charts */
+svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
+svg .gridline { stroke: var(--grid); stroke-width: 1; }
+svg .baseline { stroke: var(--axis); stroke-width: 1; }
+svg .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+svg .line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+svg .dot { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+svg .gapmark { stroke: var(--axis); stroke-width: 1; stroke-dasharray: 2 3; }
+svg .band { fill: var(--series-1-wash); opacity: .55; }
+svg .from { fill: var(--surface); stroke: var(--series-1); stroke-width: 1.5; }
+svg .cross { stroke: var(--ink-2); stroke-width: 1; }
+.spark { width: 120px; height: 30px; }
+.tip {
+  position: fixed; z-index: 40; pointer-events: none; background: var(--ink); color: var(--tip-ink); font-size: 12px; line-height: 1.5;
+  padding: 6px 9px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); opacity: 0; transition: opacity .08s; max-width: 240px;
+}
+.tip.show { opacity: 1; }
+/* biome-ignore lint/style/noDescendingSpecificity: tooltip text after card text on purpose */
+.tip b { font-weight: 600; }
+
+/* Shared site header (same links as the other pages; the server fills the sign-in slot). */
+.site { display: flex; flex-wrap: wrap; gap: 4px 18px; align-items: baseline; padding: 10px 24px; border-bottom: 1px solid var(--grid); background: var(--surface); font-size: 14px; }
+.site strong { font-size: 16px; }
+.site a { color: var(--ink-2); }
+.site a.on, .site strong a { color: var(--ink); }
+.site .who { margin-left: auto; color: var(--muted); }
+.site .who form { display: inline; }
+.site .who button { font-size: 13px; padding: 1px 8px; }
+.chips.sources { padding-bottom: 0; }
+.chips.sources a { border-style: dashed; }
+.chips.sources a.on { border-style: solid; }
+.chips .lbl { flex: none; font-size: 13px; color: var(--muted); align-self: center; margin-right: 2px; }
+
+/* Rank trajectory (排名軌跡) */
+.bump { margin: 6px 0 22px; position: relative; }
+.bump .bar { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; color: var(--ink-2); margin-bottom: 6px; }
+.bump .bar h3 { font-size: 16px; margin: 0; color: var(--ink); }
+.bump .seg { display: inline-flex; }
+.bump .seg button { border-radius: 0; padding: 2px 10px; font-size: 13px; }
+.bump .seg button:first-child { border-radius: 6px 0 0 6px; }
+.bump .seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.bump .seg button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); position: relative; }
+.bump .note { font-size: 12px; color: var(--muted); margin: 4px 0 0; }
+.bump svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+.bump .bl path { fill: none; stroke: var(--other); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.bump .bl circle { fill: var(--other); stroke: var(--surface); stroke-width: 1.5; }
+.bump .bl.on path { stroke: var(--series-1); stroke-width: 2.5; }
+.bump .bl.on circle { fill: var(--series-1); }
+.bump .bl.dim { opacity: .3; }
+.bump .bl.hov path { stroke: var(--ink-2); }
+.bump .bl.hov circle { fill: var(--ink-2); }
+.bump .bl.on.hov path { stroke: var(--series-1); }
+.bump .bl.on.hov circle { fill: var(--series-1); }
+.bump .bl { cursor: pointer; }
+.bump text.end { font-size: 12px; fill: var(--ink-2); }
+.bump text.end.on { fill: var(--ink); font-weight: 600; }
+.bump .tick { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+footer.method { border-top: 1px solid var(--grid); margin-top: 40px; padding: 24px 0 60px; color: var(--ink-2); font-size: 13px; }
+footer.method p { max-width: 52em; }
+
+@media (max-width: 640px) {
+  .wrap { padding: 0 16px; }
+  .site { padding: 8px 16px; gap: 2px 12px; }
+  h1 { font-size: 26px; }
+  .masthead .wrap { padding-top: 20px; }
+  section.topic h2 { font-size: 20px; }
+  .cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .card { padding: 12px; }
+  .card .fig { font-size: 21px; }
+  .card .who { font-size: 15px; }
+  aside.panel { width: 100vw; padding: 16px 16px 40px; border-left: 0; }
+  .panel .stats b { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { aside.panel, .backdrop { transition: none; } }
+</style>
+</head>
+<body>
+<header class="site"><strong><a href="/">流量觀察</a></strong><a href="/" class="on">月報</a><a href="/table/">表格</a><a href="/topics/">分類概況</a><a href="/status/">抓取狀態</a><a href="/watch/">追蹤網域</a><a href="/api/v1/">API</a><span class="who"><!--who--></span></header>
+<div class="masthead">
+  <div class="wrap">
+    <p class="kicker">流量觀察・月報</p>
+    <h1 id="title">台灣網站流量月報</h1>
+    <p class="dek" id="dek">載入中…</p>
+    <div class="controls">
+      <label>本期 <select id="to"></select></label>
+      <label>比較 <select id="from"></select></label>
+      <span class="presets" id="presets"></span>
+    </div>
+    <p class="range-note" id="rangeNote"></p>
+  </div>
+</div>
+
+<main class="wrap">
+  <div class="lede">
+    <h2 id="ledeTitle">本期重點</h2>
+    <p id="ledeText"></p>
+    <div class="cards" id="cards"></div>
+  </div>
+</main>
+
+<div class="chips-bar"><div class="wrap"><nav class="chips sources" id="sources" aria-label="來源"></nav><nav class="chips" id="chips" aria-label="分類"></nav></div></div>
+
+<main class="wrap" id="sections"></main>
+
+<div class="wrap">
+  <footer class="method">
+    <p>流量是 Similarweb 對整個網域的每月造訪估算（百萬次），不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比，AI＝造訪 × GenAI 導流占比，與 GeneHong「Similar Web」試算表的算法相同。Similarweb 沒有的月份以試算表數字補上並標「表」。資料缺月（如 2025 年 1–2 月）在走勢圖上斷開，不補線。</p>
+    <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
+    <p id="generated"></p>
+  </footer>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="panel" id="panel" aria-hidden="true" role="dialog" aria-label="網站詳情"></aside>
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+'use strict';
+const UNLABELLED = '未分類';
+const TOP = 20;
+const TOPIC_TOP = 10;
+const SPARK_MONTHS = 12;
+const BUMP_MONTHS = 12;
+// GeneHong's sheet is the hand-curated list, so its domains and the ones added on /watch/ are one source: 手動.
+const SOURCE_LABEL = { tag: '媒體（tag）', blog: '部落格（blog）', manual: '手動' };
+const SOURCE_OF = { sheet: 'manual' };
+const state = { data: null, from: null, to: null, sort: {}, expanded: new Set(), selected: null, active: null, source: null, hl: null, bumpTop: 10 };
+
+// ---------- formatting ----------
+const monthLabel = (m) => `${m.slice(0, 4)} 年 ${Number(m.slice(4))} 月`;
+const monthShort = (m) => `${m.slice(2, 4)}/${m.slice(4)}`;
+const nf = (n, d = 2) => (n == null ? '—' : n.toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }));
+const visits = (n) => (n == null ? '—' : n >= 100 ? nf(n, 1) : n >= 10 ? nf(n, 2) : nf(n, 3));
+const pct = (n, d = 1) => (n == null ? '—' : `${(n * 100).toFixed(d)}%`);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function deltaHtml(d) {
+  if (d == null) return '<span class="delta na">—</span>';
+  if (d === 'new') return '<span class="delta na" title="比較月份沒有這個網站的資料">無前期</span>';
+  const cls = d > 0.0005 ? 'up' : d < -0.0005 ? 'down' : 'na';
+  const arrow = cls === 'up' ? '▲' : cls === 'down' ? '▼' : '';
+  return `<span class="delta ${cls}">${arrow}${Math.abs(d * 100).toFixed(1)}%</span>`;
+}
+function radarText(r) {
+  if (!r) return '';
+  if (r.rank != null) return `第 ${r.rank} 名`;
+  if (r.bucket != null) return `前 ${r.bucket.toLocaleString('en-US')} 名`;
+  if (r.gt != null) return `未入前 ${r.gt.toLocaleString('en-US')} 名`;
+  return '';
+}
+
+// ---------- data helpers ----------
+const V = 0, S = 1, A = 2, T = 3, SHEET = 4;
+function calendar(first, last) {
+  const out = [];
+  let y = Number(first.slice(0, 4)), m = Number(first.slice(4));
+  for (;;) {
+    const key = `${y}${String(m).padStart(2, '0')}`;
+    out.push(key);
+    if (key === last) return out;
+    if (++m > 12) { m = 1; y++; }
+  }
+}
+const topicsOf = (s) => (s.topics?.length ? s.topics : [UNLABELLED]);
+const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
+function row(domain, s) {
+  const now = s.m[state.to];
+  if (!now || now[V] == null) return null;
+  const before = s.m[state.from];
+  const change = before?.[V] ? now[V] / before[V] - 1 : before ? null : 'new';
+  const radar = (state.data.radar[domain] || []).at(-1) || null;
+  return {
+    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], prev: before ? before[V] : null,
+    change, search: now[S], ai: now[A], taiwan: now[T], sheet: !!now[SHEET], radar,
+    radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
+  };
+}
+function rowsFor(topic) {
+  const out = [];
+  for (const [d, s] of Object.entries(state.data.sites)) {
+    if (!inSource(s)) continue;
+    if (topic && !topicsOf(s).includes(topic)) continue;
+    const r = row(d, s);
+    if (r) out.push(r);
+  }
+  out.sort((a, b) => b.visits - a.visits);
+  out.forEach((r, i) => { r.rank = i + 1; });
+  return out;
+}
+function rankMap(month) {
+  const list = Object.entries(state.data.sites).filter(([, s]) => inSource(s) && s.m[month]?.[V] != null).sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
+  return new Map(list.map(([d], i) => [d, i + 1]));
+}
+const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
+
+// ---------- tooltip ----------
+const tip = document.getElementById('tip');
+function showTip(html, x, y) {
+  tip.innerHTML = html;
+  tip.classList.add('show');
+  const w = tip.offsetWidth, h = tip.offsetHeight;
+  let left = x + 14, top = y - h - 10;
+  if (left + w > innerWidth - 8) left = x - w - 14;
+  if (top < 8) top = y + 16;
+  tip.style.left = `${Math.max(8, left)}px`;
+  tip.style.top = `${top}px`;
+}
+const hideTip = () => tip.classList.remove('show');
+
+// ---------- line chart (sparkline and full) ----------
+// points: [{key, value|null}] along calendar months; gaps break the line.
+function lineChart(points, { width, height, pad = { t: 8, r: 8, b: 8, l: 8 }, axes = false, fmt = visits, tickFmt = null, band = null, mark = null, yMin0 = true, label = '' }) {
+  const vals = points.map((p) => p.value).filter((v) => v != null);
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('class', axes ? 'chart' : 'spark');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', label);
+  if (!vals.length) return svg;
+  let lo = yMin0 ? 0 : Math.min(...vals), hi = Math.max(...vals);
+  if (hi === lo) hi = lo + (hi || 1);
+  if (axes) {
+    // nice upper bound
+    const step = niceStep((hi - lo) / 4);
+    hi = Math.ceil(hi / step) * step;
+    if (!yMin0) lo = Math.floor(lo / step) * step;
+  } else hi *= 1.04;
+  const iw = width - pad.l - pad.r, ih = height - pad.t - pad.b;
+  const x = (i) => pad.l + (points.length === 1 ? iw / 2 : (i / (points.length - 1)) * iw);
+  const y = (v) => pad.t + ih - ((v - lo) / (hi - lo)) * ih;
+  let html = '';
+  if (band) {
+    const i0 = points.findIndex((p) => p.key === band[0]), i1 = points.findIndex((p) => p.key === band[1]);
+    if (i0 >= 0 && i1 >= 0) {
+      const a = Math.min(i0, i1), b = Math.max(i0, i1);
+      html += `<rect class="band" x="${x(a) - 3}" y="${pad.t}" width="${x(b) - x(a) + 6}" height="${ih}" rx="3"></rect>`;
+    }
+  }
+  if (axes) {
+    const step = niceStep((hi - lo) / 4);
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      html += `<line class="${v === lo ? 'baseline' : 'gridline'}" x1="${pad.l}" x2="${width - pad.r}" y1="${y(v)}" y2="${y(v)}"></line>`;
+      html += `<text class="tick" x="${pad.l - 6}" y="${y(v) + 4}" text-anchor="end">${(tickFmt || axisNum(step))(v)}</text>`;
+    }
+    const every = Math.max(1, Math.ceil(points.length / 7));
+    points.forEach((p, i) => {
+      const last = i === points.length - 1;
+      if ((i % every === 0 && (last || points.length - 1 - i >= every / 2 + 0.5)) || last)
+        html += `<text class="tick" x="${x(i)}" y="${height - pad.b + 16}" text-anchor="middle">${monthShort(p.key)}</text>`;
+    });
+  }
+  // segments split at gaps; mark gaps with a dotted connector so missing months read as missing
+  let seg = [], lastIdx = null;
+  const segs = [];
+  points.forEach((p, i) => {
+    if (p.value == null) { if (seg.length) segs.push(seg); seg = []; return; }
+    if (lastIdx != null && i - lastIdx > 1 && axes)
+      html += `<line class="gapmark" x1="${x(lastIdx)}" x2="${x(i)}" y1="${y(points[lastIdx].value)}" y2="${y(p.value)}"></line>`;
+    seg.push([x(i), y(p.value)]);
+    lastIdx = i;
+  });
+  if (seg.length) segs.push(seg);
+  for (const s of segs) {
+    if (s.length === 1) html += `<circle class="dot" cx="${s[0][0]}" cy="${s[0][1]}" r="${axes ? 3 : 2}"></circle>`;
+    else html += `<path class="line" d="M${s.map((p) => p.map((n) => n.toFixed(1)).join(',')).join('L')}"></path>`;
+  }
+  const lastI = points.map((p) => p.value != null).lastIndexOf(true);
+  if (lastI >= 0 && !axes) html += `<circle class="dot" cx="${x(lastI)}" cy="${y(points[lastI].value)}" r="2.5"></circle>`;
+  // the comparison month as a hollow dot (sparklines)
+  if (mark) {
+    const mi = points.findIndex((p) => p.key === mark);
+    if (mi >= 0 && points[mi].value != null) html += `<circle class="from" cx="${x(mi)}" cy="${y(points[mi].value)}" r="2.5"></circle>`;
+  }
+  html += `<line class="cross" x1="0" x2="0" y1="${pad.t}" y2="${pad.t + ih}" visibility="hidden"></line><circle class="dot hover" r="4" visibility="hidden"></circle>`;
+  html += `<rect x="0" y="0" width="${width}" height="${height}" fill="transparent"></rect>`;
+  svg.innerHTML = html;
+  const cross = svg.querySelector('.cross'), hdot = svg.querySelector('.hover');
+  const move = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * width;
+    let i = Math.round(((px - pad.l) / iw) * (points.length - 1));
+    i = Math.max(0, Math.min(points.length - 1, i));
+    const p = points[i];
+    cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+    if (p.value != null) { hdot.setAttribute('cx', x(i)); hdot.setAttribute('cy', y(p.value)); hdot.setAttribute('visibility', 'visible'); }
+    else hdot.setAttribute('visibility', 'hidden');
+    showTip(`<b>${monthLabel(p.key)}</b><br>${p.value == null ? '沒有資料' : `${label ? `${esc(label)} ` : ''}${fmt(p.value)}`}${p.extra ? `<br>${p.extra}` : ''}`, ev.clientX, ev.clientY);
+  };
+  const leave = () => { cross.setAttribute('visibility', 'hidden'); hdot.setAttribute('visibility', 'hidden'); hideTip(); };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerleave', leave);
+  return svg;
+}
+/** Axis numbers with just enough decimals for the step. */
+const axisNum = (step) => (v) => v.toLocaleString('zh-TW', { maximumFractionDigits: Math.max(0, -Math.floor(Math.log10(step))), minimumFractionDigits: 0 });
+const axisPct = (step) => (v) => `${(v * 100).toLocaleString('zh-TW', { maximumFractionDigits: Math.max(0, -Math.floor(Math.log10(step * 100))) })}%`;
+function niceStep(raw) {
+  if (raw <= 0) return 1;
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / p;
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
+}
+
+// ---------- header controls ----------
+function fillSelects() {
+  const months = state.data.months;
+  const opts = (sel) => [...months].reverse().map((m) => `<option value="${m}"${m === sel ? ' selected' : ''}>${monthLabel(m)}</option>`).join('');
+  document.getElementById('to').innerHTML = opts(state.to);
+  document.getElementById('from').innerHTML = [...months].reverse().filter((m) => m < state.to).map((m) => `<option value="${m}"${m === state.from ? ' selected' : ''}>${monthLabel(m)}</option>`).join('');
+  const prevYear = `${Number(state.to.slice(0, 4)) - 1}${state.to.slice(4)}`;
+  const idx = months.indexOf(state.to);
+  const presets = [
+    ['上個月', months[idx - 1]],
+    ['3 個月前', months[idx - 3]],
+    ['6 個月前', months[idx - 6]],
+    ['去年同月', months.includes(prevYear) ? prevYear : null],
+  ].filter(([, m]) => m);
+  document.getElementById('presets').innerHTML = presets.map(([l, m]) => `<button type="button" data-from="${m}" aria-pressed="${m === state.from}">${l}</button>`).join('');
+}
+function readHash() {
+  // The hash wins; ?month=&topic=&source= (links from /topics/ and old URLs) is the fallback.
+  const q = new URLSearchParams(location.hash.slice(1));
+  const search = new URLSearchParams(location.search);
+  if (!q.has('to') && search.has('month')) q.set('to', search.get('month'));
+  for (const k of ['topic', 'source']) if (!q.has(k) && search.has(k)) q.set(k, search.get(k));
+  const months = state.data.months;
+  state.to = months.includes(q.get('to')) ? q.get('to') : months.at(-1);
+  const i = months.indexOf(state.to);
+  state.from = months.includes(q.get('from')) && q.get('from') < state.to ? q.get('from') : months[i - 1] ?? months[0];
+  state.active = q.get('topic');
+  const wanted = SOURCE_OF[q.get('source')] ?? q.get('source');
+  state.source = state.data.sources.some((o) => o.source === wanted) ? wanted : null;
+  state.hl = q.get('hl');
+  state.bumpTop = q.get('top') === '20' ? 20 : 10;
+}
+function writeHash() {
+  const q = new URLSearchParams({ to: state.to, from: state.from });
+  if (state.active) q.set('topic', state.active);
+  if (state.source) q.set('source', state.source);
+  if (state.hl) q.set('hl', state.hl);
+  if (state.bumpTop !== 10) q.set('top', String(state.bumpTop));
+  if (state.selected) q.set('site', state.selected);
+  history.replaceState(null, '', `${location.pathname}#${q}`);
+}
+
+// ---------- page ----------
+function render() {
+  fillSelects();
+  const all = rowsFor(null);
+  const ranksFrom = rankMap(state.from);
+  const total = sum(all.map((r) => r.visits));
+  const totalPrev = sum(all.filter((r) => r.prev != null).map((r) => r.prev));
+  const totalNowBoth = sum(all.filter((r) => r.prev != null).map((r) => r.visits));
+  const gap = state.data.months.indexOf(state.to) - state.data.months.indexOf(state.from);
+  document.getElementById('title').textContent = `${monthLabel(state.to)} 台灣網站流量月報`;
+  document.getElementById('dek').textContent = `${state.source ? `${SOURCE_LABEL[state.source] ?? state.source}追蹤的網域中，` : ''}${all.length} 個網站本期有 Similarweb 月造訪估算，和 ${monthLabel(state.from)}比較。點任何一列看完整歷史。`;
+  // Source filter: who asked for the domain (a domain can be in several lists).
+  const srcAll = state.data.sources;
+  const withData = (g) => Object.values(state.data.sites).filter((s) => (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === g) && s.m[state.to]?.[V] != null).length;
+  document.getElementById('sources').innerHTML =
+    `<span class="lbl">來源</span><a href="#" data-source=""${state.source ? '' : ' class="on"'}>所有來源</a>` +
+    srcAll
+      .map((o) => `<a href="#" data-source="${esc(o.source)}"${state.source === o.source ? ' class="on"' : ''} title="追蹤 ${o.domains} 個網域，本期有數字 ${withData(o.source)} 個${o.source === 'manual' ? '（含 GeneHong 試算表名單）' : ''}">${esc(SOURCE_LABEL[o.source] ?? o.source)}<small>${withData(o.source)}/${o.domains}</small></a>`)
+      .join('');
+  const calGap = calendar(state.from, state.to).length - 1;
+  document.getElementById('rangeNote').textContent = `比較區間：${monthLabel(state.from)} → ${monthLabel(state.to)}（${calGap} 個月${calGap !== gap ? `，中間有 ${calGap - gap} 個月沒有資料` : ''}）。表格的「區間變化」與上方重點都依這個區間計算。`;
+
+  // headline cards
+  const both = all.filter((r) => typeof r.change === 'number');
+  const sizable = both.filter((r) => r.visits >= 1 && r.prev >= 1);
+  const grow = [...sizable].sort((a, b) => b.change - a.change)[0];
+  const fall = [...sizable].sort((a, b) => a.change - b.change)[0];
+  const aiTop = [...all].filter((r) => r.ai != null).sort((a, b) => b.ai - a.ai)[0];
+  const newTop = all.slice(0, TOP).filter((r) => !(ranksFrom.get(r.domain) <= TOP));
+  const cards = [];
+  cards.push(`<div class="card" data-site="${all[0]?.domain}"><div class="label">本期第一</div><div class="who">${esc(all[0]?.name)}</div><div class="fig">${visits(all[0]?.visits)}<small style="font-size:14px;font-weight:400"> 百萬</small></div><div class="sub">${deltaHtml(all[0]?.change)} 與 ${monthShort(state.from)} 相比</div></div>`);
+  if (grow) cards.push(`<div class="card" data-site="${grow.domain}"><div class="label">最大成長（造訪 ≥ 1 百萬）</div><div class="who">${esc(grow.name)}</div><div class="fig">${deltaHtml(grow.change)}</div><div class="sub">${visits(grow.prev)} → ${visits(grow.visits)} 百萬</div></div>`);
+  if (fall) cards.push(`<div class="card" data-site="${fall.domain}"><div class="label">最大衰退（造訪 ≥ 1 百萬）</div><div class="who">${esc(fall.name)}</div><div class="fig">${deltaHtml(fall.change)}</div><div class="sub">${visits(fall.prev)} → ${visits(fall.visits)} 百萬</div></div>`);
+  if (aiTop) cards.push(`<div class="card" data-site="${aiTop.domain}"><div class="label">AI 導流最多</div><div class="who">${esc(aiTop.name)}</div><div class="fig">${visits(aiTop.ai)}<small style="font-size:14px;font-weight:400"> 百萬</small></div><div class="sub">占該站造訪 ${pct(aiTop.ai / aiTop.visits, 2)}</div></div>`);
+  cards.push(`<div class="card" data-jump="all"><div class="label">新進前 ${TOP}</div>${newTop.length ? `<ul>${newTop.slice(0, 4).map((r) => `<li>${esc(r.name)} <span style="color:var(--muted)">#${r.rank}${ranksFrom.get(r.domain) ? `（原 #${ranksFrom.get(r.domain)}）` : '（新）'}</span></li>`).join('')}</ul>` : `<div class="sub">前 ${TOP} 名與 ${monthShort(state.from)} 相同</div>`}</div>`);
+  document.getElementById('cards').innerHTML = cards.join('');
+  const totalChange = totalPrev ? totalNowBoth / totalPrev - 1 : null;
+  document.getElementById('ledeText').innerHTML = `兩個月份都有資料的 ${both.length} 個網站，合計造訪 ${deltaHtml(totalChange)}（${visits(totalPrev)} → ${visits(totalNowBoth)} 百萬）。本期全部 ${all.length} 個網站合計 ${visits(total)} 百萬次造訪。`;
+
+  // topic order: by site count, 未分類 last
+  const counts = new Map();
+  for (const r of all) for (const t of r.topics) counts.set(t, (counts.get(t) || 0) + 1);
+  const topics = [...counts.keys()].sort((a, b) => (a === UNLABELLED) - (b === UNLABELLED) || counts.get(b) - counts.get(a));
+  if (state.active && !counts.has(state.active)) state.active = null;
+  document.getElementById('chips').innerHTML =
+    `<span class="lbl">分類</span><a href="#" data-topic=""${state.active ? '' : ' class="on"'}>全部<small>${all.length}</small></a>` +
+    topics.map((t) => `<a href="#" data-topic="${esc(t)}"${state.active === t ? ' class="on"' : ''}>${esc(t)}<small>${counts.get(t)}</small></a>`).join('');
+
+  const sections = document.getElementById('sections');
+  sections.innerHTML = '';
+  const list = state.active ? [state.active] : [null, ...topics];
+  // ranks are within each section (all is already sorted by visits)
+  const ranked = (t) => (t === null ? all : all.filter((r) => r.topics.includes(t)).map((r, i) => ({ ...r, rank: i + 1 })));
+  for (const t of list) sections.append(section(t, ranked(t), state.active ? TOP : t === null ? TOP : TOPIC_TOP));
+  drawBumps();
+  writeHash();
+}
+
+const COLS = [
+  { key: 'rank', label: '名次', cls: 'rank', sort: (r) => r.rank, dir: 1 },
+  { key: 'name', label: '網站', cls: 'l', sort: null },
+  { key: 'visits', label: '本期流量', cls: 'num', sort: (r) => r.visits, dir: -1, title: '百萬次造訪' },
+  { key: 'change', label: '區間變化', cls: 'num', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1 },
+  { key: 'spark', label: `近 ${SPARK_MONTHS} 個月`, cls: 'l', sort: null },
+  { key: 'search', label: '搜尋S', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪（百萬）' },
+  { key: 'ai', label: 'AI', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪（百萬）' },
+  { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1 },
+  { key: 'radar', label: 'Radar 全球', cls: 'l', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期' },
+];
+
+function section(topic, rows, limit) {
+  const id = topic ?? '__all';
+  const el = document.createElement('section');
+  el.className = 'topic';
+  el.id = `t-${encodeURIComponent(id)}`;
+  const withPrev = rows.filter((r) => r.prev != null);
+  const tNow = sum(withPrev.map((r) => r.visits)), tPrev = sum(withPrev.map((r) => r.prev));
+  const tAll = sum(rows.map((r) => r.visits));
+  const share = (k) => {
+    const has = rows.filter((r) => r[k] != null);
+    const base = sum(has.map((r) => r.visits));
+    return base ? sum(has.map((r) => r[k])) / base : null;
+  };
+  const srch = share('search'), aiS = share('ai');
+  el.innerHTML = `<header><h2>${topic == null ? '全部網站' : esc(topic)}</h2></header>
+${topic != null && topic === state.active ? `<div class="bump" data-topic="${esc(topic)}"></div><h3 style="font-size:16px;margin:0">${esc(topic)}・全部網站</h3>` : ''}
+<p class="summary">${rows.length} 個網站，本期合計 <b>${visits(tAll)}</b> 百萬；兩期都有資料者 ${deltaHtml(tPrev ? tNow / tPrev - 1 : null)}。搜尋占比 <b>${pct(srch)}</b>，AI 占比 <b>${pct(aiS, 2)}</b>。</p>
+<div class="scroll"><table><thead><tr></tr></thead><tbody></tbody></table></div><div class="more"></div>`;
+  const sort = state.sort[id] || { key: 'rank', dir: 1 };
+  const col = COLS.find((c) => c.key === sort.key);
+  const sorted = [...rows].sort((a, b) => {
+    const va = col.sort(a), vb = col.sort(b);
+    if (va == null && vb == null) return a.rank - b.rank;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (va - vb) * sort.dir || a.rank - b.rank;
+  });
+  el.querySelector('thead tr').innerHTML = COLS.map((c) => {
+    const on = c.key === sort.key;
+    return `<th class="${c.cls}${c.sort ? ' sortable' : ''}" data-key="${c.key}"${c.title ? ` title="${c.title}"` : ''}${c.sort ? ` aria-sort="${on ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}"` : ''}>${c.label}${c.sort ? `<span class="arrow">${on ? (sort.dir === 1 ? '↑' : '↓') : ''}</span>` : ''}</th>`;
+  }).join('');
+  for (const th of el.querySelectorAll('th.sortable'))
+    th.addEventListener('click', () => {
+      const c = COLS.find((x) => x.key === th.dataset.key);
+      const cur = state.sort[id];
+      state.sort[id] = { key: c.key, dir: cur && cur.key === c.key ? -cur.dir : c.dir };
+      el.replaceWith(section(topic, rows, limit));
+    });
+  const shown = state.expanded.has(id) ? sorted : sorted.slice(0, limit);
+  const tbody = el.querySelector('tbody');
+  const months = state.data.months;
+  const spanEnd = state.to;
+  const cal = calendar(months[0], spanEnd).slice(-SPARK_MONTHS);
+  for (const r of shown) {
+    const tr = document.createElement('tr');
+    tr.dataset.site = r.domain;
+    if (r.domain === state.selected) tr.className = 'sel';
+    else if (r.domain === state.hl) tr.className = 'hl';
+    tr.innerHTML = `<td class="rank">${r.rank}</td>
+<td class="l"><span class="site-name">${esc(r.name)}</span>${r.sheet ? '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''}<span class="site-domain">${esc(r.domain)}</span></td>
+<td class="num">${visits(r.visits)}</td><td class="num">${deltaHtml(r.change)}</td><td class="l spark-cell" title="空心點：比較月份；實心點：本期"></td>
+<td class="num">${visits(r.search)}</td><td class="num">${visits(r.ai)}</td><td class="num">${pct(r.taiwan)}</td><td class="l radar">${radarText(r.radar)}</td>`;
+    const s = state.data.sites[r.domain];
+    const pts = cal.map((k) => ({ key: k, value: s.m[k]?.[V] ?? null }));
+    tr.querySelector('.spark-cell').append(lineChart(pts, { width: 120, height: 30, pad: { t: 4, r: 4, b: 4, l: 4 }, mark: state.from, label: '造訪（百萬）' }));
+    tbody.append(tr);
+  }
+  if (!rows.length) tbody.innerHTML = `<tr><td colspan="${COLS.length}" class="l empty">這個月份沒有資料。</td></tr>`;
+  const more = el.querySelector('.more');
+  if (sorted.length > limit) {
+    const open = state.expanded.has(id);
+    more.innerHTML = `<button type="button">${open ? `只看前 ${limit} 名` : `顯示全部 ${sorted.length} 個網站`}</button>`;
+    more.querySelector('button').addEventListener('click', () => {
+      open ? state.expanded.delete(id) : state.expanded.add(id);
+      el.replaceWith(section(topic, rows, limit));
+    });
+  }
+  return el;
+}
+
+// ---------- rank trajectory (排名軌跡) ----------
+// Sites of one topic ranked against each other month by month (Taiwan sites only:
+// the 「非台灣」 group would push every local site down). Gray lines are the top
+// 10/20 in the latest month; the highlighted site (click a line or a table row) is blue.
+const isTaiwan = (s) => s.group !== '非台灣';
+const topicRankCache = new Map();
+function topicRanks(topic, month) {
+  const key = `${state.source}|${topic}|${month}`;
+  if (!topicRankCache.has(key)) {
+    const list = Object.entries(state.data.sites)
+      .filter(([, s]) => inSource(s) && isTaiwan(s) && topicsOf(s).includes(topic) && s.m[month]?.[V] != null)
+      .sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
+    topicRankCache.set(key, new Map(list.map(([d], i) => [d, i + 1])));
+  }
+  return topicRankCache.get(key);
+}
+function bumpMonths() {
+  const all = calendar(state.data.months[0], state.to);
+  const fromIdx = all.indexOf(state.from);
+  const start = Math.max(0, Math.min(all.length - BUMP_MONTHS, fromIdx < 0 ? 0 : fromIdx));
+  return all.slice(start);
+}
+function setHighlight(domain) {
+  state.hl = domain;
+  document.querySelectorAll('tbody tr[data-site]').forEach((tr) => { tr.classList.toggle('hl', tr.dataset.site === domain && !tr.classList.contains('sel')); });
+  drawBumps();
+  writeHash();
+}
+function spreadLabels(ends, gap, lo, hi) {
+  for (let i = 1; i < ends.length; i++) if (ends[i].y - ends[i - 1].y < gap) ends[i].y = ends[i - 1].y + gap;
+  const over = ends.length ? ends.at(-1).y - hi : 0;
+  if (over > 0) for (const e of ends) e.y -= over;
+  for (let i = 0; i < ends.length; i++) if (ends[i].y < lo + i * gap) ends[i].y = lo + i * gap;
+}
+function drawBumps() {
+  topicRankCache.clear();
+  document.querySelectorAll('.bump[data-topic]').forEach((host) => { drawBump(host, host.dataset.topic); });
+}
+function drawBump(host, topic) {
+  const months = bumpMonths();
+  const N = state.bumpTop;
+  const last = months.at(-1);
+  const shown = [...topicRanks(topic, last)].slice(0, N).map(([d]) => d);
+  const hl = state.hl && state.data.sites[state.hl] && topicsOf(state.data.sites[state.hl]).includes(topic) ? state.hl : null;
+  if (hl && !shown.includes(hl)) shown.push(hl);
+  const head = `<div class="bar"><h3>排名軌跡</h3><span>${esc(topic)}・${monthShort(months[0])}–${monthShort(last)}</span>
+<span class="seg" role="group" aria-label="顯示幾名"><button type="button" data-top="10" aria-pressed="${N === 10}">前 10</button><button type="button" data-top="20" aria-pressed="${N === 20}">前 20</button></span></div>`;
+  const note = `<p class="note">同一分類的台灣網站依當月流量排名（不含「非台灣」群組${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，藍線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
+  if (!shown.length) { host.innerHTML = `${head}<p class="empty">這個分類在期間內沒有資料。</p>`; return; }
+  const width = Math.max(300, host.clientWidth || document.getElementById('sections').clientWidth);
+  const narrow = width < 520;
+  const labelW = Math.min(150, width * (narrow ? 0.34 : 0.22));
+  const LIMIT = N + 2;
+  const rowH = narrow ? (N > 10 ? 13 : 17) : N > 10 ? 16 : 21;
+  const m = { l: 30, r: labelW + 10, t: 10, b: 26 };
+  const height = m.t + m.b + rowH * (LIMIT + 0.6);
+  const iw = width - m.l - m.r;
+  const sx = (i) => m.l + (months.length === 1 ? iw / 2 : (i / (months.length - 1)) * iw);
+  const sy = (r) => m.t + (Math.min(r, LIMIT + 0.6) - 1) * rowH + rowH / 2;
+  let g = '';
+  for (const r of [1, 5, 10, 15, 20].filter((r) => r <= N)) g += `<line x1="${m.l}" x2="${width - m.r}" y1="${sy(r)}" y2="${sy(r)}" stroke="var(--grid)"/><text class="tick" x="${m.l - 8}" y="${sy(r) + 4}" text-anchor="end">${r}</text>`;
+  g += `<text class="tick" x="${m.l - 8}" y="${sy(LIMIT + 0.6) + 4}" text-anchor="end">${N}+</text>`;
+  const every = Math.max(1, Math.ceil(months.length / (narrow ? 4 : 7)));
+  months.forEach((mo, i) => {
+    if (i % every === 0 || i === months.length - 1)
+      if (i === months.length - 1 || months.length - 1 - i >= every / 2) g += `<text class="tick" x="${sx(i)}" y="${height - 8}" text-anchor="middle">${monthShort(mo)}</text>`;
+  });
+  const lines = shown.map((d) => ({
+    d,
+    pts: months.map((mo, i) => {
+      const r = topicRanks(topic, mo).get(d);
+      return { mo, i, x: sx(i), y: r == null ? null : sy(r), r };
+    }),
+  }));
+  const seg = (pts) => {
+    let d = '', open = false;
+    for (const p of pts) {
+      if (p.y == null) { open = false; continue; }
+      d += `${open ? 'L' : 'M'}${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+      open = true;
+    }
+    return d;
+  };
+  for (const L of [...lines].sort((a, b) => (a.d === hl) - (b.d === hl))) {
+    g += `<g class="bl${L.d === hl ? ' on' : ''}" data-d="${esc(L.d)}"><path d="${seg(L.pts)}"/>`;
+    for (const p of L.pts) if (p.y != null) g += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${L.d === hl ? 4 : 3}"/>`;
+    g += '</g>';
+  }
+  const ends = lines
+    .map((L) => { const p = [...L.pts].reverse().find((q) => q.y != null); return p && { d: L.d, y: p.y, r: p.r, i: p.i }; })
+    .filter(Boolean)
+    .sort((a, b) => a.y - b.y);
+  spreadLabels(ends, narrow ? 11 : 13, m.t + 4, height - m.b - 2);
+  const maxChars = Math.max(3, Math.floor((labelW - 26) / 12));
+  for (const e of ends) {
+    const name = state.data.sites[e.d].name || e.d;
+    const short = name.length > maxChars ? `${name.slice(0, maxChars - 1)}…` : name;
+    g += `<text class="end${e.d === hl ? ' on' : ''}" x="${width - m.r + 8}" y="${(e.y + 4).toFixed(1)}">${e.i === months.length - 1 ? e.r : '·'} ${esc(short)}</text>`;
+  }
+  g += `<rect class="hit" x="${m.l - 10}" y="0" width="${iw + 20}" height="${height}" fill="transparent"/>`;
+  host.innerHTML = `${head}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(topic)}分類內名次軌跡">${g}</svg>${note}`;
+  const svg = host.querySelector('svg');
+  const nearest = (ev) => {
+    const r = svg.getBoundingClientRect();
+    const px = ((ev.clientX - r.left) / r.width) * width, py = ((ev.clientY - r.top) / r.height) * height;
+    let i = Math.round(((px - m.l) / iw) * (months.length - 1));
+    i = Math.max(0, Math.min(months.length - 1, i));
+    let best = null, dist = Infinity;
+    for (const L of lines) { const q = L.pts[i]; if (q.y != null && Math.abs(q.y - py) < dist) { dist = Math.abs(q.y - py); best = { L, q }; } }
+    return dist <= rowH * 1.5 ? best : null;
+  };
+  const move = (ev) => {
+    const b = nearest(ev);
+    for (const el of svg.querySelectorAll('.bl')) {
+      const mine = !!b && el.dataset.d === b.L.d;
+      el.classList.toggle('hov', mine);
+      // The selected site stays fully drawn while another line is hovered.
+      el.classList.toggle('dim', !!b && !mine && !el.classList.contains('on'));
+      if (mine) el.parentNode.append(el);
+    }
+    if (!b) { hideTip(); return; }
+    const s = state.data.sites[b.L.d];
+    const v = s.m[b.q.mo]?.[V];
+    showTip(`<b>${esc(s.name || b.L.d)}</b><br>${monthLabel(b.q.mo)}：分類內第 ${b.q.r} 名<br>造訪 ${visits(v)} 百萬${s.m[b.q.mo]?.[SHEET] ? '（試算表）' : ''}`, ev.clientX, ev.clientY);
+  };
+  svg.addEventListener('pointermove', move);
+  svg.addEventListener('pointerdown', move);
+  svg.addEventListener('pointerleave', () => {
+    for (const el of svg.querySelectorAll('.bl')) el.classList.remove('dim', 'hov');
+    hideTip();
+  });
+  svg.addEventListener('click', (ev) => {
+    const b = nearest(ev);
+    if (b) setHighlight(b.L.d === state.hl ? null : b.L.d);
+  });
+}
+let resizeTimer;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawBumps, 150); });
+
+// ---------- side panel ----------
+const panel = document.getElementById('panel');
+const backdrop = document.getElementById('backdrop');
+function openPanel(domain) {
+  const s = state.data.sites[domain];
+  if (!s) return;
+  state.selected = domain;
+  document.querySelectorAll('tbody tr').forEach((tr) => { tr.classList.toggle('sel', tr.dataset.site === domain); });
+  const months = state.data.months;
+  const keys = Object.keys(s.m).sort();
+  const start = keys[0] < state.from ? keys[0] : state.from;
+  let cal = calendar(start, months.at(-1));
+  if (cal.length < 6) cal = calendar(months[0], months.at(-1)).slice(-6);
+  const now = s.m[state.to], before = s.m[state.from];
+  const change = now && before?.[V] ? now[V] / before[V] - 1 : null;
+  const radar = state.data.radar[domain] || [];
+  const w = Math.min(512, innerWidth - 32);
+  panel.innerHTML = `<button type="button" class="close" aria-label="關閉">關閉 ✕</button>
+<h2>${esc(s.name || domain)}</h2>
+<p class="meta">${esc(domain)}${s.group ? `・${esc(s.group)}` : ''}・${topicsOf(s).map(esc).join('、')}</p>
+<div class="stats">
+  <div><span>${monthShort(state.to)} 造訪</span><b>${visits(now?.[V])}</b></div>
+  <div><span>比 ${monthShort(state.from)}</span><b>${deltaHtml(change)}</b></div>
+  <div><span>Radar 最新</span><b style="font-size:14px">${radarText(radar.at(-1)) || '—'}</b></div>
+</div>
+<h3>每月造訪（百萬）</h3><p class="note">淺藍底為比較區間；虛線跨過沒有資料的月份。</p><div id="cv"></div>
+<h3>自然搜尋占比</h3><p class="note">只有 Similarweb 有導流資料的月份才有點；試算表月份沒有占比。</p><div id="cs"></div>
+<h3>AI 導流占比</h3><p class="note">兩個占比量級差很多，所以分開畫，各用自己的刻度。</p><div id="ca"></div>
+<h3>Cloudflare Radar 全球排名</h3><p class="note">DNS 查詢熱門度，前 100 名才有名次；不能換算成造訪量。</p>
+${radar.length ? `<div class="scroll"><table><thead><tr><th class="l">資料日期</th><th class="l">排名</th></tr></thead><tbody>${[...radar].reverse().map((p) => `<tr><td class="l">${p.date}</td><td class="l">${radarText(p)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">還沒有 Radar 資料。</p>'}
+<h3>逐月數字</h3>
+<div class="scroll"><table><thead><tr><th class="l">月份</th><th class="num">造訪</th><th class="num">搜尋S</th><th class="num">AI</th><th class="num">台灣</th></tr></thead><tbody>${[...keys].reverse().map((k) => { const v = s.m[k]; return `<tr><td class="l">${monthShort(k)}${v[SHEET] ? '<span class="tag">表</span>' : ''}</td><td class="num">${visits(v[V])}</td><td class="num">${visits(v[S])}</td><td class="num">${visits(v[A])}</td><td class="num">${pct(v[T])}</td></tr>`; }).join('')}</tbody></table></div>`;
+  const pv = cal.map((k) => ({ key: k, value: s.m[k]?.[V] ?? null, extra: s.m[k]?.[SHEET] ? '試算表數字' : '' }));
+  const ps = cal.map((k) => ({ key: k, value: s.m[k] && s.m[k][S] != null && s.m[k][V] ? s.m[k][S] / s.m[k][V] : null }));
+  const pa = cal.map((k) => ({ key: k, value: s.m[k] && s.m[k][A] != null && s.m[k][V] ? s.m[k][A] / s.m[k][V] : null }));
+  const pad = { t: 10, r: 10, b: 24, l: 52 };
+  panel.querySelector('#cv').append(lineChart(pv, { width: w, height: 200, pad, axes: true, band: [state.from, state.to], label: '造訪（百萬）' }));
+  panel.querySelector('#cs').append(lineChart(ps, { width: w, height: 120, pad, axes: true, fmt: (v) => pct(v, 1), tickFmt: axisPct(niceStep(Math.max(...ps.map((p) => p.value ?? 0)) / 4 || 0.01)), label: '自然搜尋占比' }));
+  panel.querySelector('#ca').append(lineChart(pa, { width: w, height: 120, pad, axes: true, fmt: (v) => pct(v, 2), tickFmt: axisPct(niceStep(Math.max(...pa.map((p) => p.value ?? 0)) / 4 || 0.001)), label: 'AI 導流占比' }));
+  panel.querySelector('.close').addEventListener('click', closePanel);
+  panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  backdrop.classList.add('open');
+  panel.scrollTop = 0;
+  writeHash();
+}
+function closePanel() {
+  state.selected = null;
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+  backdrop.classList.remove('open');
+  document.querySelectorAll('tbody tr.sel').forEach((tr) => { tr.classList.remove('sel'); });
+  hideTip();
+  writeHash();
+}
+
+// ---------- events ----------
+document.addEventListener('click', (ev) => {
+  const chip = ev.target.closest('#chips a');
+  if (chip) {
+    ev.preventDefault();
+    const t = chip.dataset.topic || null;
+    state.active = t;
+    render();
+    document.getElementById('sections').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const preset = ev.target.closest('#presets button');
+  if (preset) { state.from = preset.dataset.from; render(); return; }
+  const card = ev.target.closest('.card');
+  if (card?.dataset.site) { openPanel(card.dataset.site); return; }
+  if (card?.dataset.jump) { state.active = null; render(); document.getElementById('sections').scrollIntoView({ behavior: 'smooth' }); return; }
+  const src = ev.target.closest('#sources a');
+  if (src) {
+    ev.preventDefault();
+    state.source = src.dataset.source || null;
+    render();
+    return;
+  }
+  const top = ev.target.closest('.bump [data-top]');
+  if (top) { state.bumpTop = Number(top.dataset.top); drawBumps(); writeHash(); return; }
+  const tr = ev.target.closest('tbody tr[data-site]');
+  if (tr && !panel.contains(tr)) {
+    setHighlight(tr.dataset.site);
+    openPanel(tr.dataset.site);
+  }
+});
+backdrop.addEventListener('click', closePanel);
+addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closePanel(); });
+document.getElementById('to').addEventListener('change', (ev) => {
+  state.to = ev.target.value;
+  const months = state.data.months;
+  if (state.from >= state.to) state.from = months[months.indexOf(state.to) - 1] ?? months[0];
+  render();
+});
+document.getElementById('from').addEventListener('change', (ev) => { state.from = ev.target.value; render(); });
+
+fetch('/api/v1/history')
+  .then((r) => r.json())
+  .then((data) => {
+    state.data = data;
+    readHash();
+    render();
+    document.getElementById('generated').textContent = `資料時間：${new Date(data.generatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}（台北時間）。`;
+    const site = new URLSearchParams(location.hash.slice(1)).get('site');
+    if (site) openPanel(site);
+  })
+  .catch((e) => { document.getElementById('dek').textContent = `資料載入失敗：${e.message}`; });
+</script>
+</body>
+</html>

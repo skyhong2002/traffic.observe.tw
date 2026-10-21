@@ -37,7 +37,7 @@ footer{padding:1.5rem 1.2rem;color:var(--muted);font-size:.85rem;max-width:1200p
 export function layout(title: string, body: string) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${html(title)}｜流量觀察</title><style>${CSS}</style></head><body>
-<header><strong><a href="/">流量觀察</a></strong><a href="/">月排行</a><a href="/topics/">分類概況</a><a href="/status/">抓取狀態</a><a href="/watch/">追蹤網域</a><a href="/api/v1/">API</a><span class="who"><!--who--></span></header>
+<header><strong><a href="/">流量觀察</a></strong><a href="/">月報</a><a href="/table/">表格</a><a href="/topics/">分類概況</a><a href="/status/">抓取狀態</a><a href="/watch/">追蹤網域</a><a href="/api/v1/">API</a><span class="who"><!--who--></span></header>
 <main>${body}</main>
 <footer>數字是 Similarweb 對整個網域的月造訪估算（百萬次），不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比，AI＝造訪 × GenAI 導流占比，與 GeneHong「Similar Web」試算表算法相同；Similarweb 沒有的月份與網域以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。</footer>
 </body></html>`;
@@ -61,12 +61,12 @@ export function rankingPage(
   sources: Array<{ requester: string; domains: number }> = [],
 ) {
   const q = (t: string | null, src = source) =>
-    `/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}${src ? `&source=${encodeURIComponent(src)}` : ''}`;
+    `/table/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}${src ? `&source=${encodeURIComponent(src)}` : ''}`;
   const sourceChips = [`<a href="${q(topic, null)}"${source ? '' : ' class="on"'}>所有來源</a>`]
     .concat(
       sources.map(
         (o) =>
-          `<a href="${q(topic, o.requester)}"${o.requester === source ? ' class="on"' : ''}>${html(REQUESTER_LABEL[o.requester] ?? o.requester)} <small>${o.domains}</small></a>`,
+          `<a href="${q(topic, o.requester)}"${o.requester === source ? ' class="on"' : ''}>${html(SOURCE_LABEL[o.requester] ?? o.requester)} <small>${o.domains}</small></a>`,
       ),
     )
     .join('');
@@ -86,12 +86,12 @@ export function rankingPage(
     .join('');
   return layout(
     `${monthLabel(month)} ${topic ?? '全部'}`,
-    `<h1>${monthLabel(month)} 月排行 ${monthPicker(months, month, { topic })}</h1>
+    `<h1>${monthLabel(month)} 月排行 ${monthPicker(months, month, { topic, source })}</h1>
 <div class="chips">${sourceChips}</div>
 <div class="chips">${chips}</div>
 <p class="muted">${topic ?? '全部'}：這個月有數字的 ${list.length} 個網站${
       source
-        ? `（${html(REQUESTER_LABEL[source] ?? source)} 追蹤的 ${sources.find((o) => o.requester === source)?.domains ?? 0} 個網域裡；其他還在排隊或 Similarweb 沒有估算，見<a href="/watch/?list=${encodeURIComponent(source)}">清單</a>）`
+        ? `（${html(SOURCE_LABEL[source] ?? source)} 追蹤的 ${sources.find((o) => o.requester === source)?.domains ?? 0} 個網域裡；其他還在排隊或 Similarweb 沒有估算，見<a href="/watch/${source === 'manual' ? '' : `?list=${encodeURIComponent(source)}`}">清單</a>）`
         : ''
     }。<a href="/api/v1/rankings.csv?month=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}">下載 CSV</a></p>
 <div class="scroll"><table><thead><tr><th>名次</th><th class="l">網站名</th><th class="l">分類</th><th>流量</th><th>成長</th><th>上月</th><th>搜尋S</th><th>AI</th><th>搜尋占比</th><th>AI占比</th><th>台灣</th></tr></thead>
@@ -168,7 +168,7 @@ export function sitePage(site: SitePage) {
     site.name,
     `<h1>${html(site.name)} <small>${html(site.domain)}</small></h1>
 <p class="muted">${s ? `最近成功抓取 ${tw(s.lastSuccessAt) || '—'}；最近嘗試 ${tw(s.lastAttemptAt) || '—'}${s.nextAttemptAt ? `；下次最早 ${tw(s.nextAttemptAt)}` : ''}${s.failures ? `；連續失敗 ${s.failures} 次（${html(s.lastError)}）` : ''}` : '尚未抓取。'}
-${site.watchers.length ? `<br>追蹤者：${site.watchers.map((w) => `${html(w.requester)}（${w.kind === 'watch' ? '定期' : html(w.kind)}）`).join('、')}` : ''}</p>
+${site.watchers.length ? `<br>追蹤者：${site.watchers.map((w) => `${requesterLabel(w.requester)}（${w.kind === 'watch' ? '定期' : html(w.kind)}）`).join('、')}` : ''}</p>
 <h2>每月造訪（百萬）</h2><div class="scroll"><table><thead><tr><th class="l">月份</th><th>Similarweb</th><th>試算表</th><th>搜尋占比</th><th>AI占比</th><th>台灣</th></tr></thead><tbody>${monthRows}</tbody></table></div>
 ${radarRows ? `<h2>Cloudflare Radar 全球排名</h2><p class="muted">依 1.1.1.1 DNS 查詢的熱門程度；前 100 名才有名次，其餘只有級距。不能換算成造訪量。</p><div class="scroll"><table><thead><tr><th class="l">資料日期</th><th class="l">排名</th><th class="l">抓取</th></tr></thead><tbody>${radarRows}</tbody></table></div>` : ''}
 ${labelRows ? `<h2>試算表紀錄</h2><div class="scroll"><table><thead><tr><th class="l">月份</th><th class="l">名稱</th><th class="l">群組</th><th class="l">分類</th><th>流量</th></tr></thead><tbody>${labelRows}</tbody></table></div>` : ''}`,
@@ -185,7 +185,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
   return layout(
     '抓取狀態',
     `<h1>抓取狀態</h1>
-<p>每輪上限 ${status.budget} 筆${status.budget ? '' : '（<span class="down">0：目前不送出任何請求</span>）'}，優先序 ${status.priority.map(html).join(' → ')}。
+<p>每輪上限 ${status.budget} 筆${status.budget ? '' : '（<span class="down">0：目前不送出任何請求</span>）'}，優先序 ${status.priority.map(requesterLabel).join(' → ')}。
 追蹤 ${status.watched} 個網域，目前到期 ${status.due} 個。${status.coolingDownUntil ? `<br><span class="down">被拒後暫停至 ${tw(status.coolingDownUntil)}</span>` : ''}</p>
 <p class="muted">近 24 小時：${
       Object.entries(status.last24h)
@@ -195,7 +195,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
 <h2>追蹤者</h2><table><thead><tr><th class="l">服務</th><th class="l">類型</th><th>網域</th></tr></thead><tbody>${status.watchers
       .map(
         (w) =>
-          `<tr><td class="l">${html(w.requester)}</td><td class="l">${w.kind === 'watch' ? '定期' : html(w.kind)}</td><td>${w.domains}</td></tr>`,
+          `<tr><td class="l">${requesterLabel(w.requester)}</td><td class="l">${w.kind === 'watch' ? '定期' : html(w.kind)}</td><td>${w.domains}</td></tr>`,
       )
       .join('')}</tbody></table>
 <h2>最近批次</h2><div class="scroll"><table><thead><tr><th class="l">開始</th><th>上限</th><th>送出</th><th>成功</th><th>失敗</th><th class="l">備註</th></tr></thead><tbody>${
@@ -232,8 +232,13 @@ const REQUESTER_LABEL: Record<string, string> = {
   manual: '手動',
   tag: '媒體（tag）',
   blog: '部落格（blog）',
-  sheet: 'GeneHong 試算表',
+  // GeneHong's sheet is the hand-curated list: one source with the domains added on /watch/.
+  sheet: '手動（試算表匯入）',
 };
+/** The source a requester belongs to on the pages: the sheet and /watch/ are both 「手動」. */
+export const sourceOf = (requester: string) => (requester === 'sheet' ? 'manual' : requester);
+export const SOURCE_LABEL: Record<string, string> = { tag: '媒體（tag）', blog: '部落格（blog）', manual: '手動' };
+const requesterLabel = (r: string) => html(REQUESTER_LABEL[r] ?? r);
 
 export function watchPage({
   editor,
@@ -269,6 +274,8 @@ export function watchPage({
 <td>每 ${w.refreshDays ?? ''} 天</td><td class="l">${state(w)}</td><td class="l"><small>${html(w.addedBy)}<br>${tw(w.requestedAt.toISOString())}</small></td>
 <td>${removable ? `<form method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit">移除</button></form>` : ''}</td></tr>`;
   const rowsHtml = manual.map((w) => rowHtml(w, !!editor)).join('');
+  const sheet = others.find((o) => o.requester === 'sheet');
+  const services = others.filter((o) => o.requester !== 'sheet');
   const form = editor
     ? `<form method="post" action="/watch/" style="display:block"><p><label>網域或網址，一行一個（最多 200 個）<br>
 <textarea name="domains" rows="5" required placeholder="example.com.tw&#10;https://news.example.com/"></textarea></label></p>
@@ -279,19 +286,23 @@ export function watchPage({
   return layout(
     '追蹤網域',
     `<h1>追蹤網域</h1>${flash ? `<p class="flash">${html(flash)}</p>` : ''}
-<p class="muted">這裡加入的網域會排進 Similarweb 抓取（每小時一輪，優先於 tag、blog、試算表），之後依設定的週期更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，所以越早加入，留下的月份越多。</p>
+<p class="muted">這裡加入的網域會排進 Similarweb 抓取（每小時一輪，最優先），之後依設定的週期更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，所以越早加入，留下的月份越多。</p>
 ${form}
-<h2>手動追蹤 <small>${manual.length}</small></h2>
+<h2>手動追蹤 <small>${manual.length}</small></h2>${
+      sheet
+        ? `<p class="muted">GeneHong 整理的名單也算手動追蹤：另有 <a href="/watch/?list=sheet#list">${sheet.domains} 個網域由試算表匯入</a>，每 30 天更新，排在媒體與部落格之後抓取。</p>`
+        : ''
+    }
 <div class="scroll"><table><thead><tr><th class="l">網域</th><th>最新流量（百萬）</th><th>週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th></tr></thead>
 <tbody>${rowsHtml || '<tr><td colspan="6" class="l muted">還沒有手動加入的網域。</td></tr>'}</tbody></table></div>
-<h2>其他來源</h2><p class="muted">${others.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}">${html(REQUESTER_LABEL[o.requester] ?? o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>
+<h2>其他來源</h2><p class="muted">${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>
 ${
   list
     ? (
         () => {
           const got = list.rows.filter((w) => w.latestMonth).length;
           const none = list.rows.filter((w) => !w.latestMonth && (w.lastResponseAt || w.failures)).length;
-          return `<h2 id="list">${html(REQUESTER_LABEL[list.requester] ?? list.requester)} <small>${list.rows.length} 個網域：有流量數字 ${got}、Similarweb 沒有估算或失敗 ${none}、排隊中 ${list.rows.length - got - none}</small></h2>
+          return `<h2 id="list">${requesterLabel(list.requester)} <small>${list.rows.length} 個網域：有流量數字 ${got}、Similarweb 沒有估算或失敗 ${none}、排隊中 ${list.rows.length - got - none}</small></h2>
 <div class="scroll"><table><thead><tr><th class="l">網域</th><th>最新流量（百萬）</th><th>週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th></tr></thead>
 <tbody>${list.rows.map((w) => rowHtml(w, false)).join('')}</tbody></table></div>`;
         }

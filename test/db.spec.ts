@@ -214,7 +214,15 @@ describe.skipIf(!url)('with a database', () => {
     await run(pool, request);
     const ranking = (await server.inject('/api/v1/rankings?month=202609')).json();
     expect(ranking.sites[0]).toMatchObject({ domain: 'a.com.tw', visits: 1.2, rank: 1, searchVisits: 1.2 * 0.3 });
-    for (const path of ['/', '/topics/', '/site/a.com.tw/', '/status/']) expect((await server.inject(path)).statusCode).toBe(200);
+    for (const path of ['/', '/table/', '/table/?source=tag', '/topics/', '/site/a.com.tw/', '/status/'])
+      expect((await server.inject(path)).statusCode).toBe(200);
+    // The report page is static and reads everything from /api/v1/history.
+    expect((await server.inject('/')).body).toContain('/api/v1/history');
+    const history = (await server.inject('/api/v1/history')).json();
+    expect(history.months).toEqual(['202607', '202608', '202609']);
+    expect(history.sources).toEqual([{ source: 'tag', domains: 1 }]);
+    expect(history.sites['a.com.tw']).toMatchObject({ src: ['tag'], m: { '202609': [1.2, 1.2 * 0.3, 1.2 * 0.01, 0.9, 0] } });
+    expect(history.radar).toEqual({});
     expect((await server.inject('/api/v1/rankings.csv?month=202609')).body).toContain('a.com.tw');
     await server.close();
   });

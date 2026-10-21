@@ -1,9 +1,11 @@
+import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { authenticate, serviceTokens } from './auth.ts';
 import { type Pool, rows } from './db.ts';
+import { buildHistory, type History } from './history.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
-import { html, loginPage, rankingPage, type SitePage, sitePage, statusPage, topicsPage, watchPage, whoSlot } from './pages.ts';
+import { html, loginPage, rankingPage, type SitePage, sitePage, sourceOf, statusPage, topicsPage, watchPage, whoSlot } from './pages.ts';
 import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
@@ -12,6 +14,10 @@ import { serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
 
 const CACHE_MS = 60_000;
+/** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
+const HISTORY_MS = 10 * 60_000;
+// The report page (/): static HTML that reads /api/v1/history and draws everything client-side.
+const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8');
 const MAX_TRAFFIC_DOMAINS = 2000;
 
 export function buildApp(
@@ -77,7 +83,11 @@ export function buildApp(
       "SELECT DISTINCT requester, domain FROM watches WHERE kind = 'watch'",
     ).then((list) => {
       const out = new Map<string, Set<string>>();
-      for (const r of list) (out.get(r.requester) ?? out.set(r.requester, new Set()).get(r.requester))?.add(r.domain);
+      // Grouped by source as the pages show it: the sheet's domains count as 手動 (sourceOf).
+      for (const r of list) {
+        const source = sourceOf(r.requester);
+        (out.get(source) ?? out.set(source, new Set()).get(source))?.add(r.domain);
+      }
       return out;
     });
     lists.catch(() => {
@@ -90,7 +100,7 @@ export function buildApp(
     const { months, month } = await pickMonth(query.month);
     if (!month) return null;
     const lists = await watched();
-    const order = ['tag', 'blog', 'sheet', 'manual'];
+    const order = ['tag', 'blog', 'manual'];
     const sources = [...lists]
       .map(([requester, set]) => ({ requester, domains: set.size }))
       .sort((a, b) => (order.indexOf(a.requester) + 1 || 9) - (order.indexOf(b.requester) + 1 || 9));
@@ -103,10 +113,27 @@ export function buildApp(
     return { months, month, topics, topic, source, sources, list: ranking(list, topic) };
   };
 
+  let historyCache: { at: number; data: Promise<History> } | null = null;
+  const history = () => {
+    if (historyCache && Date.now() - historyCache.at < HISTORY_MS) return historyCache.data;
+    const data = buildHistory(pool);
+    data.catch(() => {
+      historyCache = null;
+    });
+    historyCache = { at: Date.now(), data };
+    return data;
+  };
+
   app.get('/healthz', async () => ({ ok: true }));
 
   // Pages.
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/', async (request, reply) => {
+  // The report: any two months compared, sources and topics filtered, rank trajectories per topic.
+  app.get('/', async (_request, reply) => {
+    reply.type('text/html; charset=utf-8');
+    return REPORT;
+  });
+  // The same month as a plain server-rendered table (works without JavaScript).
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/table/', async (request, reply) => {
     const r = await rankingFor(request.query);
     reply.type('text/html; charset=utf-8');
     return r ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources) : rankingPage('', [], [], null, []);
@@ -206,8 +233,10 @@ export function buildApp(
     source: 'Similarweb extension estimates (monthly visits per domain, in millions) plus the GeneHong sheet for months Similarweb lacks',
     endpoints: {
       'GET /api/v1/months': 'months with data, newest first',
+      'GET /api/v1/history':
+        'every month at once (oldest first): per domain [visits, search visits, AI visits, Taiwan share, from sheet], labels, sources, Cloudflare Radar periods',
       'GET /api/v1/rankings?month=YYYYMM&topic=&source=':
-        'one month, ranked by visits; topic and source (tag, blog, sheet, manual) optional',
+        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added and the GeneHong sheet) optional',
       'GET /api/v1/rankings.csv?month=YYYYMM&topic=': 'the same as CSV',
       'GET /api/v1/topics?month=YYYYMM': 'per-topic growth and search/AI shares',
       'GET /api/v1/sites/:domain': 'every month for one domain',
@@ -215,6 +244,10 @@ export function buildApp(
     },
   }));
   app.get('/api/v1/months', async () => ({ months: await availableMonths(pool) }));
+  app.get('/api/v1/history', async (_request, reply) => {
+    reply.header('cache-control', 'public, max-age=300');
+    return history();
+  });
   app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/api/v1/rankings', async (request, reply) => {
     const r = await rankingFor(request.query);
     if (!r) return reply.code(404).send({ error: 'no_data' });
