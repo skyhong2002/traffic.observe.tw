@@ -30,7 +30,7 @@
   1. 一次性查詢（blog）在提交後還沒得到回應；
   2. 定期清單（tag 每 7 天、試算表每 30 天）距上次成功超過週期；
   3. 定期清單裡還缺上個月 profile 的網域，每 3 天重試一次，直到 Similarweb 給出上個月的資料。
-- 順序依 `TRAFFIC_PRIORITY`（預設 `tag,blog,sheet`），從沒抓過的優先，再來是最舊的。
+- 順序依 `TRAFFIC_PRIORITY`（預設 `manual,tag,blog,sheet`；`manual` 是編輯在 `/watch/` 手動加入的），從沒抓過的優先，再來是最舊的。
 - 失敗（沒有資料、錯誤）隔天重試；累積三次後改成每 30 天一次。
 
 容量估算：每小時 15 筆 × 24 = 360 筆／天。tag 約 300 個網域每週一次，加上試算表約 670 個網域每月一次，大約 75 筆／天，餘裕足夠。
@@ -55,6 +55,18 @@
 - `GET /api/v1/`、`/api/v1/months`、`/api/v1/rankings?month=&topic=`、`/api/v1/rankings.csv`、`/api/v1/topics?month=`、`/api/v1/sites/<domain>`、`/api/v1/status`。
 - 有 Similarweb 數字就用 Similarweb；沒有的月份或網域用試算表數字，並標「表」。分類取試算表裡該網域截至該月最新的一列；不在表上的網域歸「未分類」。
 
+## 登入與手動追蹤（`/watch/`）
+
+用 Google 登入（`src/login.ts`，從 tag 的 `app/src/auth/google-login.ts` 簡化而來），OAuth client 與 tag 共用。只有 `TRAFFIC_ADMIN_EMAILS` 名單上的帳號會拿到 session（30 天，cookie `traffic_session`，資料庫只存 SHA-256）。名單每次請求都會重新比對，從名單移除後立刻失效。其他人看公開頁面不需要登入。
+
+| 變數 | 說明 |
+| --- | --- |
+| `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` | 與 tag 相同。兩個都沒設時關閉登入。 |
+| `TRAFFIC_PUBLIC_ORIGIN` | 預設 `https://traffic.observe.tw`。callback `$TRAFFIC_PUBLIC_ORIGIN/auth/google/callback` 必須登記在 OAuth client 的「已授權的重新導向 URI」。 |
+| `TRAFFIC_ADMIN_EMAILS` | 逗號分隔，可以手動加入或移除網域的編輯。 |
+
+`/watch/` 可以一次貼多行網域或網址，設定每 7 或 30 天更新一次，並附上備註。這些網域以請求者 `manual` 存進 `watches`，記下 `added_by`，每次加入或移除都寫進 `watch_log`。表單只接受本站 `Origin` 送出的 POST。移除只會停止抓取，已經抓到的資料會保留。
+
 ## 服務 API（`/internal/*`）
 
 只接受直接連到 loopback、沒有 `cf-connecting-ip`、`x-forwarded-for`、`tailscale-user-login` 等轉送 header 的連線，並且要帶 `Authorization: Bearer <token>`。token 從 `TRAFFIC_TOKEN_<請求者>` 讀，至少 32 字元，token 決定請求者是誰。不符合一律回 404。
@@ -63,6 +75,8 @@
 | --- | --- |
 | `POST /internal/similarweb/requests`、`GET /internal/similarweb/results?domain=` | 一次性查詢。與 tag 原本提供給 blog 的格式相同（tag `docs/similarweb-requests.md`），blog 不用改程式 |
 | `PUT /internal/v1/watch` | `{ domains: [...], refreshDays }`：用這份清單**取代**該請求者原本的定期清單 |
+| `POST /internal/v1/watch/add` | `{ domains: [...], refreshDays, note? }`：把網域**加進**該請求者的定期清單，最多 200 個，清單其他部分不變 |
+| `POST /internal/v1/watch/remove` | `{ domain }`：從該請求者的定期清單移除一個網域 |
 | `POST /internal/v1/traffic` | `{ domains: [...] }`：回傳這些網域存下的所有月份與 profile，以及抓取狀態，給要鏡像資料的服務（tag）用 |
 
 ## 從 tag 接手（順序很重要，兩邊絕不能同時打 Similarweb）

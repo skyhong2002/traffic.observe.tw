@@ -161,3 +161,111 @@ export async function fetchStates(pool: Pool, domains: string[]) {
   const list = await rows<State & { domain: string }>(pool, 'SELECT * FROM fetch_state WHERE domain IN (?)', [domains]);
   return new Map(list.map((r) => [r.domain, r]));
 }
+
+/** Requester for domains editors add by hand on /watch/. */
+export const MANUAL = 'manual';
+const MAX_ADD = 200;
+
+/**
+ * Adds domains to a requester's standing list without touching the rest (an
+ * editor on /watch/, or a service adding one domain at a time). Re-adding
+ * updates the interval and note. `by` is the editor's email or the service.
+ */
+export async function addWatches(
+  pool: Pool,
+  requester: string,
+  rawDomains: unknown,
+  refreshDays: number,
+  { by, note = null, now = new Date() }: { by: string; note?: string | null; now?: Date },
+) {
+  if (!Array.isArray(rawDomains) || !rawDomains.length || rawDomains.length > MAX_ADD) return { error: 'invalid_domains' as const };
+  if (!Number.isInteger(refreshDays) || refreshDays < 1 || refreshDays > 90) return { error: 'invalid_refresh_days' as const };
+  const accepted = [...new Set(rawDomains.map(publicDomain).filter((d): d is string => !!d))];
+  const refused = rawDomains.filter((d) => !publicDomain(d)).map(String);
+  const clean = note?.trim().slice(0, 255) || null;
+  if (accepted.length) {
+    await pool.query(
+      `INSERT INTO watches (requester, domain, kind, requested_at, refresh_days, added_by, note) VALUES ?
+       ON DUPLICATE KEY UPDATE refresh_days = VALUES(refresh_days), note = COALESCE(VALUES(note), note)`,
+      [accepted.map((d) => [requester, d, 'watch', now, refreshDays, by, clean])],
+    );
+    await pool.query('INSERT INTO watch_log (at, email, action, domain, refresh_days, note) VALUES ?', [
+      accepted.map((d) => [now, by, `add:${requester}`.slice(0, 16), d, refreshDays, clean]),
+    ]);
+  }
+  return { added: accepted, refused };
+}
+
+/** Removes one domain from a requester's standing list. */
+export async function removeWatch(pool: Pool, requester: string, rawDomain: unknown, { by, now = new Date() }: { by: string; now?: Date }) {
+  const domain = publicDomain(rawDomain);
+  if (!domain) return { error: 'invalid_domain' as const };
+  const [result] = (await pool.query("DELETE FROM watches WHERE requester = ? AND domain = ? AND kind = 'watch'", [
+    requester,
+    domain,
+  ])) as unknown as [{ affectedRows: number }];
+  if (result.affectedRows)
+    await pool.query('INSERT INTO watch_log (at, email, action, domain) VALUES (?, ?, ?, ?)', [
+      now,
+      by,
+      `del:${requester}`.slice(0, 16),
+      domain,
+    ]);
+  return { removed: result.affectedRows > 0, domain };
+}
+
+export interface WatchRow {
+  domain: string;
+  requester: string;
+  refreshDays: number | null;
+  addedBy: string | null;
+  note: string | null;
+  requestedAt: Date;
+  lastSuccessAt: Date | null;
+  lastAttemptAt: Date | null;
+  failures: number;
+  lastError: string | null;
+  latestMonth: string | null;
+  latestVisits: number | null;
+}
+
+/** One requester's standing list with fetch state, newest additions first. */
+export async function watchList(pool: Pool, requester: string): Promise<WatchRow[]> {
+  const list = await rows<{
+    domain: string;
+    refresh_days: number | null;
+    added_by: string | null;
+    note: string | null;
+    requested_at: Date;
+    last_success_at: Date | null;
+    last_attempt_at: Date | null;
+    failures: number | null;
+    last_error: string | null;
+    month: string | null;
+    visits: number | null;
+  }>(
+    pool,
+    `SELECT w.domain, w.refresh_days, w.added_by, w.note, w.requested_at,
+       s.last_success_at, s.last_attempt_at, s.failures, s.last_error, m.month, m.visits
+     FROM watches w
+     LEFT JOIN fetch_state s ON s.domain = w.domain
+     LEFT JOIN traffic_months m ON m.domain = w.domain AND m.month = (SELECT MAX(month) FROM traffic_months x WHERE x.domain = w.domain)
+     WHERE w.requester = ? AND w.kind = 'watch'
+     ORDER BY w.requested_at DESC, w.domain`,
+    [requester],
+  );
+  return list.map((r) => ({
+    domain: r.domain,
+    requester,
+    refreshDays: r.refresh_days,
+    addedBy: r.added_by,
+    note: r.note,
+    requestedAt: r.requested_at,
+    lastSuccessAt: r.last_success_at,
+    lastAttemptAt: r.last_attempt_at,
+    failures: r.failures ?? 0,
+    lastError: r.last_error,
+    latestMonth: r.month,
+    latestVisits: r.visits === null ? null : Number(r.visits),
+  }));
+}

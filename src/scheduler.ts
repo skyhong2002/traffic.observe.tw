@@ -25,8 +25,8 @@ export function runConfig(env: Record<string, string | undefined> = process.env)
     budget: num('TRAFFIC_RUN_BUDGET', 0),
     /** After a refusal nothing is sent for this long (tag's limit lifted after ~11 minutes). */
     cooldownMinutes: num('TRAFFIC_REFUSAL_COOLDOWN_MINUTES', 50),
-    /** Requesters in priority order; earlier ones are fetched first. */
-    priority: (env.TRAFFIC_PRIORITY || 'tag,blog,sheet').split(',').map((s) => s.trim()),
+    /** Requesters in priority order; earlier ones are fetched first. Editors' hand-added domains are few and wanted now. */
+    priority: (env.TRAFFIC_PRIORITY || 'manual,tag,blog,sheet').split(',').map((s) => s.trim()),
     /** One-off lookups a requester may submit per Taipei day. */
     submitPerDay: num('TRAFFIC_SUBMIT_PER_DAY', 200),
   };

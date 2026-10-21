@@ -1,5 +1,6 @@
 import type { ranking, topicSummary } from './metrics.ts';
 import { UNLABELLED } from './metrics.ts';
+import type { WatchRow } from './requests.ts';
 import type { serviceStatus } from './status.ts';
 
 // Server-rendered pages: no client framework, every table sortable by link.
@@ -27,12 +28,15 @@ th,td{padding:.3rem .55rem;border-bottom:1px solid var(--line);white-space:nowra
 th{color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--bg)}td.l,th.l{text-align:left}
 .up{color:var(--up)}.down{color:var(--down)}.tag{font-size:.75rem;border:1px solid var(--line);border-radius:4px;padding:0 .3rem;color:var(--muted);margin-left:.3rem}
 form{display:inline}select{background:var(--bg);color:var(--fg);border:1px solid var(--line);padding:.15rem .3rem}
+input,textarea,button{font:inherit;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:.25rem .45rem}
+button{cursor:pointer;border-color:var(--accent);color:var(--accent)}textarea{width:100%;max-width:40rem}.who{margin-left:auto}
+.flash{border-left:3px solid var(--accent);padding:.3rem .7rem;margin:.6rem 0}
 footer{padding:1.5rem 1.2rem;color:var(--muted);font-size:.85rem;max-width:1200px}`;
 
 export function layout(title: string, body: string) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${html(title)}｜流量觀察</title><style>${CSS}</style></head><body>
-<header><strong><a href="/">流量觀察</a></strong><a href="/">月排行</a><a href="/topics/">分類概況</a><a href="/status/">抓取狀態</a><a href="/api/v1/">API</a></header>
+<header><strong><a href="/">流量觀察</a></strong><a href="/">月排行</a><a href="/topics/">分類概況</a><a href="/status/">抓取狀態</a><a href="/watch/">追蹤網域</a><a href="/api/v1/">API</a><span class="who"><!--who--></span></header>
 <main>${body}</main>
 <footer>數字是 Similarweb 對整個網域的月造訪估算（百萬次），不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比，AI＝造訪 × GenAI 導流占比，與 GeneHong「Similar Web」試算表算法相同；Similarweb 沒有的月份與網域以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。</footer>
 </body></html>`;
@@ -171,5 +175,86 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
 <h2>最近批次</h2><div class="scroll"><table><thead><tr><th class="l">開始</th><th>上限</th><th>送出</th><th>成功</th><th>失敗</th><th class="l">備註</th></tr></thead><tbody>${
       runs || '<tr><td colspan="6" class="l muted">尚未執行。</td></tr>'
     }</tbody></table></div>`,
+  );
+}
+
+/** The header's sign-in slot (layout leaves <!--who--> for it). */
+export function whoSlot(editor: { email: string } | null, loginEnabled: boolean, path: string) {
+  if (editor)
+    return `<small>${html(editor.email)}</small> <form method="post" action="/auth/logout"><button type="submit">登出</button></form>`;
+  return loginEnabled ? `<a href="/auth/google?next=${encodeURIComponent(path)}">登入</a>` : '';
+}
+
+const LOGIN_ERRORS: Record<string, string> = {
+  not_editor: '這個 Google 帳號沒有編輯權限。需要權限請聯絡管理者。',
+  cancelled: '登入已取消。',
+  state: '登入逾時或在另一個分頁開始，請再試一次。',
+  failed: 'Google 登入失敗，請稍後再試。',
+  invalid: 'Google 回傳的資料不正確，請再試一次。',
+};
+export function loginPage(error: string | undefined, enabled: boolean) {
+  const message = error ? (LOGIN_ERRORS[error] ?? '登入失敗。') : null;
+  return layout(
+    '登入',
+    `<h1>登入</h1>${message ? `<p class="flash">${html(message)}</p>` : ''}
+<p>登入只用來手動加入要追蹤的網域；排行與資料不需登入就能看。</p>
+${enabled ? '<p><a href="/auth/google?next=/watch/">用 Google 帳號登入</a></p>' : '<p class="muted">登入尚未設定。</p>'}`,
+  );
+}
+
+const REQUESTER_LABEL: Record<string, string> = {
+  manual: '手動',
+  tag: 'tag.observe.tw',
+  blog: 'blog.observe.tw',
+  sheet: 'GeneHong 試算表',
+};
+
+export function watchPage({
+  editor,
+  loginEnabled,
+  manual,
+  others,
+  flash,
+}: {
+  editor: { email: string } | null;
+  loginEnabled: boolean;
+  manual: WatchRow[];
+  others: Array<{ requester: string; domains: number }>;
+  flash: string | null;
+}) {
+  const state = (w: WatchRow) =>
+    w.lastSuccessAt
+      ? `<span class="up">${tw(w.lastSuccessAt.toISOString())}</span>`
+      : w.failures
+        ? `<span class="down" title="${html(w.lastError)}">失敗 ${w.failures} 次</span>`
+        : w.lastAttemptAt
+          ? '抓取中'
+          : '排隊中';
+  const rowsHtml = manual
+    .map(
+      (
+        w,
+      ) => `<tr><td class="l"><a href="/site/${html(w.domain)}/">${html(w.domain)}</a>${w.note ? `<br><small>${html(w.note)}</small>` : ''}</td>
+<td>${w.latestMonth ? `${num(w.latestVisits === null ? null : w.latestVisits / 1e6)} <small>${monthLabel(w.latestMonth)}</small>` : ''}</td>
+<td>每 ${w.refreshDays ?? ''} 天</td><td class="l">${state(w)}</td><td class="l"><small>${html(w.addedBy)}<br>${tw(w.requestedAt.toISOString())}</small></td>
+<td>${editor ? `<form method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit">移除</button></form>` : ''}</td></tr>`,
+    )
+    .join('');
+  const form = editor
+    ? `<form method="post" action="/watch/" style="display:block"><p><label>網域或網址，一行一個（最多 200 個）<br>
+<textarea name="domains" rows="5" required placeholder="example.com.tw&#10;https://news.example.com/"></textarea></label></p>
+<p><label>多久更新一次 <select name="refreshDays"><option value="7">每 7 天</option><option value="30">每 30 天</option></select></label>
+<label>備註 <input name="note" maxlength="255" size="30" placeholder="為什麼要追蹤（選填）"></label>
+<button type="submit">加入追蹤</button></p></form>`
+    : `<p>${loginEnabled ? `<a href="/auth/google?next=/watch/">登入</a>後可以加入或移除網域。` : '登入尚未設定。'}</p>`;
+  return layout(
+    '追蹤網域',
+    `<h1>追蹤網域</h1>${flash ? `<p class="flash">${html(flash)}</p>` : ''}
+<p class="muted">這裡加入的網域會排進 Similarweb 抓取（每小時一輪，優先於 tag、blog、試算表），之後依設定的週期更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，所以越早加入，留下的月份越多。</p>
+${form}
+<h2>手動追蹤 <small>${manual.length}</small></h2>
+<div class="scroll"><table><thead><tr><th class="l">網域</th><th>最新流量（百萬）</th><th>週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th></tr></thead>
+<tbody>${rowsHtml || '<tr><td colspan="6" class="l muted">還沒有手動加入的網域。</td></tr>'}</tbody></table></div>
+<h2>其他來源</h2><p class="muted">${others.map((o) => `${html(REQUESTER_LABEL[o.requester] ?? o.requester)} ${o.domains} 個`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,
   );
 }

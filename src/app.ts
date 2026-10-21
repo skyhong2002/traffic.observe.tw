@@ -1,9 +1,10 @@
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { authenticate, serviceTokens } from './auth.ts';
 import { type Pool, rows } from './db.ts';
+import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
-import { html, rankingPage, type SitePage, sitePage, statusPage, topicsPage } from './pages.ts';
-import { fetchStates, lookupResults, setWatchList, submitLookup } from './requests.ts';
+import { html, loginPage, rankingPage, type SitePage, sitePage, statusPage, topicsPage, watchPage, whoSlot } from './pages.ts';
+import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { serviceStatus } from './status.ts';
@@ -12,12 +13,39 @@ import { loadTraffic } from './store.ts';
 const CACHE_MS = 60_000;
 const MAX_TRAFFIC_DOMAINS = 2000;
 
-export function buildApp(pool: Pool, { tokens = serviceTokens(), config = runConfig(), logger = true } = {}) {
+export function buildApp(
+  pool: Pool,
+  {
+    tokens = serviceTokens(),
+    config = runConfig(),
+    login = loginConfig(),
+    exchange,
+    logger = true,
+  }: {
+    tokens?: Map<string, Buffer>;
+    config?: ReturnType<typeof runConfig>;
+    login?: ReturnType<typeof loginConfig>;
+    exchange?: CodeExchange;
+    logger?: boolean;
+  } = {},
+) {
   const app = Fastify({ logger, bodyLimit: 1024 * 1024, trustProxy: false });
   // Reject /internal/* before the body is read, so outsiders get the same 404
   // whatever they send and never learn which routes exist.
   app.addHook('onRequest', async (request, reply) => {
     if (request.url.startsWith('/internal/') && !authenticate(request, reply, tokens)) return reply;
+  });
+  // HTML forms on /watch/.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) =>
+    done(null, Object.fromEntries(new URLSearchParams(body as string))),
+  );
+  const editors = registerLogin(app, pool, login, { exchange });
+  // Every page's header shows the sign-in state; pages themselves stay unaware of it.
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (typeof payload !== 'string' || !payload.includes('<!--who-->')) return payload;
+    const editor = await editors.currentEditor(request);
+    if (editor) reply.header('cache-control', 'private, no-store');
+    return payload.replace('<!--who-->', whoSlot(editor, editors.enabled, request.url));
   });
 
   // monthView reads a few thousand rows; pages and the API share one short-lived copy per month.
@@ -67,6 +95,73 @@ export function buildApp(pool: Pool, { tokens = serviceTokens(), config = runCon
     reply.type('text/html; charset=utf-8');
     if (!site) return reply.code(404).send(`<!doctype html><p>沒有 ${html(request.params.domain)} 的資料。<a href="/">回月排行</a></p>`);
     return sitePage(site);
+  });
+  app.get<{ Querystring: { error?: string } }>('/login/', async (request, reply) => {
+    reply.type('text/html; charset=utf-8');
+    return loginPage(request.query.error, editors.enabled);
+  });
+  // Editors (TRAFFIC_ADMIN_EMAILS) add and remove domains by hand.
+  app.get<{ Querystring: { added?: string; refused?: string; removed?: string; error?: string } }>('/watch/', async (request, reply) => {
+    const [editor, manual, others] = await Promise.all([
+      editors.currentEditor(request),
+      watchList(pool, MANUAL),
+      rows<{ requester: string; domains: number }>(
+        pool,
+        'SELECT requester, COUNT(DISTINCT domain) AS domains FROM watches WHERE requester <> ? GROUP BY requester ORDER BY requester',
+        [MANUAL],
+      ),
+    ]);
+    const q = request.query;
+    const flash =
+      q.error === 'invalid'
+        ? '沒有可以加入的網域。請輸入像 example.com.tw 的網域或完整網址。'
+        : q.added !== undefined
+          ? `已加入 ${Number(q.added) || 0} 個網域${Number(q.refused) ? `，${Number(q.refused)} 行看不懂而略過` : ''}。下一輪抓取會先處理。`
+          : q.removed
+            ? `已停止追蹤 ${q.removed}。已抓到的資料會保留。`
+            : null;
+    reply.type('text/html; charset=utf-8');
+    return watchPage({
+      editor,
+      loginEnabled: editors.enabled,
+      manual,
+      others: others.map((o) => ({ ...o, domains: Number(o.domains) })),
+      flash,
+    });
+  });
+  const editorPost = async (request: FastifyRequest, reply: FastifyReply) => {
+    reply.header('cache-control', 'no-store');
+    if (!editors.sameOrigin(request)) {
+      reply.code(403).send({ error: 'same-origin requests only' });
+      return null;
+    }
+    const editor = await editors.currentEditor(request);
+    if (!editor) reply.redirect('/auth/google?next=/watch/', 303);
+    return editor;
+  };
+  app.post<{ Body: { domains?: string; refreshDays?: string; note?: string } }>('/watch/', async (request, reply) => {
+    const editor = await editorPost(request, reply);
+    if (!editor) return reply;
+    const lines = String(request.body?.domains ?? '')
+      .split(/[\s,]+/)
+      .filter(Boolean);
+    const r = lines.length
+      ? await addWatches(pool, MANUAL, lines, Number(request.body?.refreshDays ?? 7), {
+          by: editor.email,
+          note: request.body?.note ?? null,
+        })
+      : { error: 'invalid_domains' as const };
+    if ('error' in r || !r.added.length) return reply.redirect('/watch/?error=invalid', 303);
+    request.log.info({ by: editor.email, added: r.added }, 'manual watch added');
+    return reply.redirect(`/watch/?added=${r.added.length}&refused=${r.refused.length}`, 303);
+  });
+  app.post<{ Body: { domain?: string } }>('/watch/remove', async (request, reply) => {
+    const editor = await editorPost(request, reply);
+    if (!editor) return reply;
+    const r = await removeWatch(pool, MANUAL, request.body?.domain, { by: editor.email });
+    if ('error' in r) return reply.redirect('/watch/?error=invalid', 303);
+    request.log.info({ by: editor.email, domain: r.domain }, 'manual watch removed');
+    return reply.redirect(`/watch/?removed=${encodeURIComponent(r.domain)}`, 303);
   });
   app.get('/status/', async (_request, reply) => {
     reply.type('text/html; charset=utf-8');
@@ -174,6 +269,23 @@ export function buildApp(pool: Pool, { tokens = serviceTokens(), config = runCon
     const requester = authenticate(request, reply, tokens);
     if (!requester) return reply;
     const r = await setWatchList(pool, requester, request.body?.domains, Number(request.body?.refreshDays ?? 7));
+    if ('error' in r) return reply.code(400).send({ error: r.error });
+    return r;
+  });
+  // { domains: [...], refreshDays, note? } → added to the requester's standing list; the rest of the list stays.
+  app.post<{ Body: { domains?: unknown; refreshDays?: unknown; note?: unknown } }>('/internal/v1/watch/add', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const note = typeof request.body?.note === 'string' ? request.body.note : null;
+    const r = await addWatches(pool, requester, request.body?.domains, Number(request.body?.refreshDays ?? 7), { by: requester, note });
+    if ('error' in r) return reply.code(400).send({ error: r.error });
+    return r;
+  });
+  // { domain } → removed from the requester's standing list (stored data stays).
+  app.post<{ Body: { domain?: unknown } }>('/internal/v1/watch/remove', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const r = await removeWatch(pool, requester, request.body?.domain, { by: requester });
     if ('error' in r) return reply.code(400).send({ error: r.error });
     return r;
   });
