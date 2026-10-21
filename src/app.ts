@@ -5,19 +5,31 @@ import { type Pool, rows } from './db.ts';
 import { buildHistory, type History } from './history.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
-import { html, loginPage, rankingPage, type SitePage, sitePage, sourceOf, statusPage, topicsPage, watchPage, whoSlot } from './pages.ts';
+import {
+  loginPage,
+  notFoundPage,
+  rankingPage,
+  type SitePage,
+  sitePage,
+  sourceOf,
+  statusPage,
+  topicsPage,
+  watchPage,
+  whoSlot,
+} from './pages.ts';
 import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
+import { STYLE, STYLE_HREF } from './style.ts';
 
 const CACHE_MS = 60_000;
 /** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
 const HISTORY_MS = 10 * 60_000;
 // The report page (/): static HTML that reads /api/v1/history and draws everything client-side.
-const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8');
+const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8').replace('<!--style-->', STYLE_HREF);
 const MAX_TRAFFIC_DOMAINS = 2000;
 
 export function buildApp(
@@ -125,6 +137,10 @@ export function buildApp(
   };
 
   app.get('/healthz', async () => ({ ok: true }));
+  // The shared stylesheet; pages link it with a content hash (style.ts), so it can be cached for long.
+  app.get('/style.css', async (_request, reply) =>
+    reply.type('text/css; charset=utf-8').header('cache-control', 'public, max-age=86400').send(STYLE),
+  );
 
   // Pages.
   // The report: any two months compared, sources and topics filtered, rank trajectories per topic.
@@ -147,7 +163,7 @@ export function buildApp(
     const domain = publicDomain(request.params.domain);
     const site = domain ? await siteData(pool, domain) : null;
     reply.type('text/html; charset=utf-8');
-    if (!site) return reply.code(404).send(`<!doctype html><p>沒有 ${html(request.params.domain)} 的資料。<a href="/">回月排行</a></p>`);
+    if (!site) return reply.code(404).send(notFoundPage(request.params.domain));
     return sitePage(site);
   });
   app.get<{ Querystring: { error?: string } }>('/login/', async (request, reply) => {

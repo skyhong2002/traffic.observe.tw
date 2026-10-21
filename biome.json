@@ -12,5 +12,11 @@
       "suspicious": { "noAssignInExpressions": "off" }
     }
   },
-  "javascript": { "formatter": { "quoteStyle": "single" } }
+  "javascript": { "formatter": { "quoteStyle": "single" } },
+  "overrides": [
+    {
+      "includes": ["src/style.css"],
+      "linter": { "rules": { "style": { "noDescendingSpecificity": "off" } } }
+    }
+  ]
 }
