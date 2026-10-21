@@ -1,0 +1,16 @@
+[Unit]
+Description=traffic.observe.tw web and API (pages, /api/v1, /internal for local services)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/traffic.observe.tw
+EnvironmentFile=%h/Projects/traffic.observe.tw/.env
+Environment=NODE_ENV=production
+ExecStart=%h/.local/bin/node src/server.ts
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
