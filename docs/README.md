@@ -88,6 +88,8 @@
 3. 確認 tag worker 這一輪顯示 `via: traffic.observe.tw` 以後，才把本服務的 `TRAFFIC_RUN_BUDGET` 改成 15，重啟 worker。
 4. 回滾：先把本服務的 budget 改回 0，再移除 tag 的兩個設定並重啟 tag。
 
+2026-10-21 20:00（台北時間）已完成接手：tag `771a4ebc` 的 API、gateway、worker 都已上線，回滾腳本在 `~/tag-analysis-private/f1-release/traffic-service-771a4ebc-20261021/rollback.sh`；本服務 budget 為 15。blog worker 改為直接呼叫本服務（blog `b195eb8`，drop-in `blog-observe-worker.service.d/96-traffic-b195eb8.conf`）。blog gateway 的管理頁查詢仍經 tag 轉送，等 blog 下次發版就會改成直連。
+
 ## 部署
 
 systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `systemctl --user enable --now`，2026-10-21 已啟用）。公開網址 `traffic.observe.tw` 經 Cloudflare Tunnel（observe-steamos）指到 `http://127.0.0.1:18150`；經 tunnel 進來的請求帶 `cf-connecting-ip`，所以 `/internal/*` 一律 404。
