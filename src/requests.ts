@@ -223,6 +223,8 @@ export interface WatchRow {
   requestedAt: Date;
   lastSuccessAt: Date | null;
   lastAttemptAt: Date | null;
+  /** Similarweb answered (with or without visits). */
+  lastResponseAt: Date | null;
   failures: number;
   lastError: string | null;
   latestMonth: string | null;
@@ -239,6 +241,7 @@ export async function watchList(pool: Pool, requester: string): Promise<WatchRow
     requested_at: Date;
     last_success_at: Date | null;
     last_attempt_at: Date | null;
+    last_response_at: Date | null;
     failures: number | null;
     last_error: string | null;
     month: string | null;
@@ -246,7 +249,7 @@ export async function watchList(pool: Pool, requester: string): Promise<WatchRow
   }>(
     pool,
     `SELECT w.domain, w.refresh_days, w.added_by, w.note, w.requested_at,
-       s.last_success_at, s.last_attempt_at, s.failures, s.last_error, m.month, m.visits
+       s.last_success_at, s.last_attempt_at, s.last_response_at, s.failures, s.last_error, m.month, m.visits
      FROM watches w
      LEFT JOIN fetch_state s ON s.domain = w.domain
      LEFT JOIN traffic_months m ON m.domain = w.domain AND m.month = (SELECT MAX(month) FROM traffic_months x WHERE x.domain = w.domain)
@@ -263,6 +266,7 @@ export async function watchList(pool: Pool, requester: string): Promise<WatchRow
     requestedAt: r.requested_at,
     lastSuccessAt: r.last_success_at,
     lastAttemptAt: r.last_attempt_at,
+    lastResponseAt: r.last_response_at,
     failures: r.failures ?? 0,
     lastError: r.last_error,
     latestMonth: r.month,

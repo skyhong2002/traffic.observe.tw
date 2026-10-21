@@ -57,8 +57,19 @@ export function rankingPage(
   topics: Array<{ topic: string; sites: number }>,
   topic: string | null,
   list: ReturnType<typeof ranking>,
+  source: string | null = null,
+  sources: Array<{ requester: string; domains: number }> = [],
 ) {
-  const q = (t: string | null) => `/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}`;
+  const q = (t: string | null, src = source) =>
+    `/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}${src ? `&source=${encodeURIComponent(src)}` : ''}`;
+  const sourceChips = [`<a href="${q(topic, null)}"${source ? '' : ' class="on"'}>所有來源</a>`]
+    .concat(
+      sources.map(
+        (o) =>
+          `<a href="${q(topic, o.requester)}"${o.requester === source ? ' class="on"' : ''}>${html(REQUESTER_LABEL[o.requester] ?? o.requester)} <small>${o.domains}</small></a>`,
+      ),
+    )
+    .join('');
   const chips = [`<a href="${q(null)}"${topic ? '' : ' class="on"'}>全部</a>`]
     .concat(
       topics.map((t) => `<a href="${q(t.topic)}"${t.topic === topic ? ' class="on"' : ''}>${html(t.topic)} <small>${t.sites}</small></a>`),
@@ -76,8 +87,13 @@ export function rankingPage(
   return layout(
     `${monthLabel(month)} ${topic ?? '全部'}`,
     `<h1>${monthLabel(month)} 月排行 ${monthPicker(months, month, { topic })}</h1>
+<div class="chips">${sourceChips}</div>
 <div class="chips">${chips}</div>
-<p class="muted">${topic ?? '全部'}：${list.length} 個網站。<a href="/api/v1/rankings.csv?month=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}">下載 CSV</a></p>
+<p class="muted">${topic ?? '全部'}：這個月有數字的 ${list.length} 個網站${
+      source
+        ? `（${html(REQUESTER_LABEL[source] ?? source)} 追蹤的 ${sources.find((o) => o.requester === source)?.domains ?? 0} 個網域裡；其他還在排隊或 Similarweb 沒有估算，見<a href="/watch/?list=${encodeURIComponent(source)}">清單</a>）`
+        : ''
+    }。<a href="/api/v1/rankings.csv?month=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}">下載 CSV</a></p>
 <div class="scroll"><table><thead><tr><th>名次</th><th class="l">網站名</th><th class="l">分類</th><th>流量</th><th>成長</th><th>上月</th><th>搜尋S</th><th>AI</th><th>搜尋占比</th><th>AI占比</th><th>台灣</th></tr></thead>
 <tbody>${rowsHtml || '<tr><td colspan="11" class="l muted">這個月份沒有資料。</td></tr>'}</tbody></table></div>`,
   );
@@ -214,8 +230,8 @@ ${enabled ? '<p><a href="/auth/google?next=/watch/">用 Google 帳號登入</a><
 
 const REQUESTER_LABEL: Record<string, string> = {
   manual: '手動',
-  tag: 'tag.observe.tw',
-  blog: 'blog.observe.tw',
+  tag: '媒體（tag）',
+  blog: '部落格（blog）',
   sheet: 'GeneHong 試算表',
 };
 
@@ -225,31 +241,34 @@ export function watchPage({
   manual,
   others,
   flash,
+  list = null,
 }: {
   editor: { email: string } | null;
   loginEnabled: boolean;
   manual: WatchRow[];
   others: Array<{ requester: string; domains: number }>;
   flash: string | null;
+  /** Another requester's standing list, shown read-only. */
+  list?: { requester: string; rows: WatchRow[] } | null;
 }) {
   const state = (w: WatchRow) =>
     w.lastSuccessAt
       ? `<span class="up">${tw(w.lastSuccessAt.toISOString())}</span>`
-      : w.failures
-        ? `<span class="down" title="${html(w.lastError)}">失敗 ${w.failures} 次</span>`
-        : w.lastAttemptAt
-          ? '抓取中'
-          : '排隊中';
-  const rowsHtml = manual
-    .map(
-      (
-        w,
-      ) => `<tr><td class="l"><a href="/site/${html(w.domain)}/">${html(w.domain)}</a>${w.note ? `<br><small>${html(w.note)}</small>` : ''}</td>
+      : w.lastResponseAt
+        ? `<span class="muted" title="Similarweb 有回應但沒有造訪量估算，小網站常見">Similarweb 沒有估算</span>`
+        : w.failures
+          ? `<span class="down" title="${html(w.lastError)}">失敗 ${w.failures} 次</span>`
+          : w.lastAttemptAt
+            ? '抓取中'
+            : '排隊中';
+  const rowHtml = (
+    w: WatchRow,
+    removable: boolean,
+  ) => `<tr><td class="l"><a href="/site/${html(w.domain)}/">${html(w.domain)}</a>${w.note ? `<br><small>${html(w.note)}</small>` : ''}</td>
 <td>${w.latestMonth ? `${num(w.latestVisits === null ? null : w.latestVisits / 1e6)} <small>${monthLabel(w.latestMonth)}</small>` : ''}</td>
 <td>每 ${w.refreshDays ?? ''} 天</td><td class="l">${state(w)}</td><td class="l"><small>${html(w.addedBy)}<br>${tw(w.requestedAt.toISOString())}</small></td>
-<td>${editor ? `<form method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit">移除</button></form>` : ''}</td></tr>`,
-    )
-    .join('');
+<td>${removable ? `<form method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit">移除</button></form>` : ''}</td></tr>`;
+  const rowsHtml = manual.map((w) => rowHtml(w, !!editor)).join('');
   const form = editor
     ? `<form method="post" action="/watch/" style="display:block"><p><label>網域或網址，一行一個（最多 200 個）<br>
 <textarea name="domains" rows="5" required placeholder="example.com.tw&#10;https://news.example.com/"></textarea></label></p>
@@ -265,7 +284,20 @@ ${form}
 <h2>手動追蹤 <small>${manual.length}</small></h2>
 <div class="scroll"><table><thead><tr><th class="l">網域</th><th>最新流量（百萬）</th><th>週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th></tr></thead>
 <tbody>${rowsHtml || '<tr><td colspan="6" class="l muted">還沒有手動加入的網域。</td></tr>'}</tbody></table></div>
-<h2>其他來源</h2><p class="muted">${others.map((o) => `${html(REQUESTER_LABEL[o.requester] ?? o.requester)} ${o.domains} 個`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,
+<h2>其他來源</h2><p class="muted">${others.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}">${html(REQUESTER_LABEL[o.requester] ?? o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>
+${
+  list
+    ? (
+        () => {
+          const got = list.rows.filter((w) => w.latestMonth).length;
+          const none = list.rows.filter((w) => !w.latestMonth && (w.lastResponseAt || w.failures)).length;
+          return `<h2 id="list">${html(REQUESTER_LABEL[list.requester] ?? list.requester)} <small>${list.rows.length} 個網域：有流量數字 ${got}、Similarweb 沒有估算或失敗 ${none}、排隊中 ${list.rows.length - got - none}</small></h2>
+<div class="scroll"><table><thead><tr><th class="l">網域</th><th>最新流量（百萬）</th><th>週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th></tr></thead>
+<tbody>${list.rows.map((w) => rowHtml(w, false)).join('')}</tbody></table></div>`;
+        }
+      )()
+    : ''
+}`,
   );
 }
 

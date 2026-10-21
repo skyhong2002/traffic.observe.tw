@@ -68,22 +68,48 @@ export function buildApp(
     topicSummary(list)
       .map((t) => ({ topic: t.topic, sites: t.sites }))
       .sort((a, b) => b.sites - a.sites);
-  const rankingFor = async (query: { month?: string; topic?: string }) => {
+  // Standing lists per requester (tag's outlets, blog's blogs, the sheet, hand-added), for the source filter.
+  let watchedCache: { at: number; lists: Promise<Map<string, Set<string>>> } | null = null;
+  const watched = () => {
+    if (watchedCache && Date.now() - watchedCache.at < CACHE_MS) return watchedCache.lists;
+    const lists = rows<{ requester: string; domain: string }>(
+      pool,
+      "SELECT DISTINCT requester, domain FROM watches WHERE kind = 'watch'",
+    ).then((list) => {
+      const out = new Map<string, Set<string>>();
+      for (const r of list) (out.get(r.requester) ?? out.set(r.requester, new Set()).get(r.requester))?.add(r.domain);
+      return out;
+    });
+    lists.catch(() => {
+      watchedCache = null;
+    });
+    watchedCache = { at: Date.now(), lists };
+    return lists;
+  };
+  const rankingFor = async (query: { month?: string; topic?: string; source?: string }) => {
     const { months, month } = await pickMonth(query.month);
     if (!month) return null;
-    const list = await view(month);
+    const lists = await watched();
+    const order = ['tag', 'blog', 'sheet', 'manual'];
+    const sources = [...lists]
+      .map(([requester, set]) => ({ requester, domains: set.size }))
+      .sort((a, b) => (order.indexOf(a.requester) + 1 || 9) - (order.indexOf(b.requester) + 1 || 9));
+    const source = typeof query.source === 'string' && lists.has(query.source) ? query.source : null;
+    const all = await view(month);
+    const only = source ? lists.get(source) : null;
+    const list = only ? all.filter((s) => only.has(s.domain)) : all;
     const topics = topicList(list);
     const topic = topics.some((t) => t.topic === query.topic) ? (query.topic as string) : null;
-    return { months, month, topics, topic, list: ranking(list, topic) };
+    return { months, month, topics, topic, source, sources, list: ranking(list, topic) };
   };
 
   app.get('/healthz', async () => ({ ok: true }));
 
   // Pages.
-  app.get<{ Querystring: { month?: string; topic?: string } }>('/', async (request, reply) => {
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/', async (request, reply) => {
     const r = await rankingFor(request.query);
     reply.type('text/html; charset=utf-8');
-    return r ? rankingPage(r.month, r.months, r.topics, r.topic, r.list) : rankingPage('', [], [], null, []);
+    return r ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources) : rankingPage('', [], [], null, []);
   });
   app.get<{ Querystring: { month?: string } }>('/topics/', async (request, reply) => {
     const { months, month } = await pickMonth(request.query.month);
@@ -102,34 +128,39 @@ export function buildApp(
     return loginPage(request.query.error, editors.enabled);
   });
   // Editors (TRAFFIC_ADMIN_EMAILS) add and remove domains by hand.
-  app.get<{ Querystring: { added?: string; refused?: string; removed?: string; error?: string } }>('/watch/', async (request, reply) => {
-    const [editor, manual, others] = await Promise.all([
-      editors.currentEditor(request),
-      watchList(pool, MANUAL),
-      rows<{ requester: string; domains: number }>(
-        pool,
-        'SELECT requester, COUNT(DISTINCT domain) AS domains FROM watches WHERE requester <> ? GROUP BY requester ORDER BY requester',
-        [MANUAL],
-      ),
-    ]);
-    const q = request.query;
-    const flash =
-      q.error === 'invalid'
-        ? '沒有可以加入的網域。請輸入像 example.com.tw 的網域或完整網址。'
-        : q.added !== undefined
-          ? `已加入 ${Number(q.added) || 0} 個網域${Number(q.refused) ? `，${Number(q.refused)} 行看不懂而略過` : ''}。下一輪抓取會先處理。`
-          : q.removed
-            ? `已停止追蹤 ${q.removed}。已抓到的資料會保留。`
-            : null;
-    reply.type('text/html; charset=utf-8');
-    return watchPage({
-      editor,
-      loginEnabled: editors.enabled,
-      manual,
-      others: others.map((o) => ({ ...o, domains: Number(o.domains) })),
-      flash,
-    });
-  });
+  app.get<{ Querystring: { added?: string; refused?: string; removed?: string; error?: string; list?: string } }>(
+    '/watch/',
+    async (request, reply) => {
+      const [editor, manual, others] = await Promise.all([
+        editors.currentEditor(request),
+        watchList(pool, MANUAL),
+        rows<{ requester: string; domains: number }>(
+          pool,
+          'SELECT requester, COUNT(DISTINCT domain) AS domains FROM watches WHERE requester <> ? GROUP BY requester ORDER BY requester',
+          [MANUAL],
+        ),
+      ]);
+      const q = request.query;
+      const listOf = typeof q.list === 'string' && others.some((o) => o.requester === q.list) ? q.list : null;
+      const flash =
+        q.error === 'invalid'
+          ? '沒有可以加入的網域。請輸入像 example.com.tw 的網域或完整網址。'
+          : q.added !== undefined
+            ? `已加入 ${Number(q.added) || 0} 個網域${Number(q.refused) ? `，${Number(q.refused)} 行看不懂而略過` : ''}。下一輪抓取會先處理。`
+            : q.removed
+              ? `已停止追蹤 ${q.removed}。已抓到的資料會保留。`
+              : null;
+      reply.type('text/html; charset=utf-8');
+      return watchPage({
+        editor,
+        loginEnabled: editors.enabled,
+        manual,
+        others: others.map((o) => ({ ...o, domains: Number(o.domains) })),
+        flash,
+        list: listOf ? { requester: listOf, rows: await watchList(pool, listOf) } : null,
+      });
+    },
+  );
   const editorPost = async (request: FastifyRequest, reply: FastifyReply) => {
     reply.header('cache-control', 'no-store');
     if (!editors.sameOrigin(request)) {
@@ -175,7 +206,8 @@ export function buildApp(
     source: 'Similarweb extension estimates (monthly visits per domain, in millions) plus the GeneHong sheet for months Similarweb lacks',
     endpoints: {
       'GET /api/v1/months': 'months with data, newest first',
-      'GET /api/v1/rankings?month=YYYYMM&topic=': 'one month, ranked by visits; topic optional',
+      'GET /api/v1/rankings?month=YYYYMM&topic=&source=':
+        'one month, ranked by visits; topic and source (tag, blog, sheet, manual) optional',
       'GET /api/v1/rankings.csv?month=YYYYMM&topic=': 'the same as CSV',
       'GET /api/v1/topics?month=YYYYMM': 'per-topic growth and search/AI shares',
       'GET /api/v1/sites/:domain': 'every month for one domain',
@@ -183,12 +215,12 @@ export function buildApp(
     },
   }));
   app.get('/api/v1/months', async () => ({ months: await availableMonths(pool) }));
-  app.get<{ Querystring: { month?: string; topic?: string } }>('/api/v1/rankings', async (request, reply) => {
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/api/v1/rankings', async (request, reply) => {
     const r = await rankingFor(request.query);
     if (!r) return reply.code(404).send({ error: 'no_data' });
-    return { month: r.month, topic: r.topic, topics: r.topics, sites: r.list };
+    return { month: r.month, topic: r.topic, source: r.source, topics: r.topics, sites: r.list };
   });
-  app.get<{ Querystring: { month?: string; topic?: string } }>('/api/v1/rankings.csv', async (request, reply) => {
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/api/v1/rankings.csv', async (request, reply) => {
     const r = await rankingFor(request.query);
     if (!r) return reply.code(404).send({ error: 'no_data' });
     const cell = (v: unknown) =>
