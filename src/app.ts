@@ -4,6 +4,7 @@ import { type Pool, rows } from './db.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
 import { html, loginPage, rankingPage, type SitePage, sitePage, statusPage, topicsPage, watchPage, whoSlot } from './pages.ts';
+import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
@@ -289,6 +290,31 @@ export function buildApp(
     if ('error' in r) return reply.code(400).send({ error: r.error });
     return r;
   });
+  // { domains: [...] } → every stored Cloudflare Radar period, for services that mirror the ranking.
+  app.post<{ Body: { domains?: unknown } }>('/internal/v1/radar', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const raw = request.body?.domains;
+    if (!Array.isArray(raw) || raw.length > MAX_TRAFFIC_DOMAINS) return reply.code(400).send({ error: 'invalid_domains' });
+    const domains = [...new Set(raw.map(publicDomain).filter((d): d is string => !!d))];
+    const [periods, run] = await Promise.all([loadRadar(pool, domains), lastRadarRun(pool)]);
+    return {
+      source: 'cloudflare-radar',
+      scope: 'global',
+      lastRun: run
+        ? {
+            startedAt: run.started_at.toISOString(),
+            finishedAt: run.finished_at?.toISOString() ?? null,
+            sent: run.sent,
+            ok: run.ok,
+            failed: run.failed,
+            blocked: !!run.blocked,
+            note: run.note,
+          }
+        : null,
+      domains: Object.fromEntries(periods),
+    };
+  });
   // { domains: [...] } → every stored month and profile, plus fetch state, for services that mirror the data.
   app.post<{ Body: { domains?: unknown } }>('/internal/v1/traffic', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
@@ -335,7 +361,7 @@ export function buildApp(
 }
 
 export async function siteData(pool: Pool, domain: string): Promise<SitePage | null> {
-  const [traffic, labels, watchers, [state]] = await Promise.all([
+  const [traffic, labels, watchers, [state], radar] = await Promise.all([
     loadTraffic(pool, [domain]),
     rows<{
       month: string;
@@ -364,9 +390,10 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       failures: number;
       last_error: string | null;
     }>(pool, 'SELECT last_success_at, last_attempt_at, next_attempt_at, failures, last_error FROM fetch_state WHERE domain = ?', [domain]),
+    loadRadar(pool, [domain]),
   ]);
   const t = traffic.get(domain);
-  if (!t && !labels.length && !watchers.length) return null;
+  if (!t && !labels.length && !watchers.length && !radar.size) return null;
   const sheetByMonth = new Map<string, (typeof labels)[number]>();
   for (const l of labels) if (!sheetByMonth.has(l.month) || sheetByMonth.get(l.month)?.adjusted) sheetByMonth.set(l.month, l);
   const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys()])].sort();
@@ -396,6 +423,7 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       };
     }),
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),
+    radar: radar.get(domain) ?? [],
     state: state
       ? {
           lastSuccessAt: state.last_success_at?.toISOString() ?? null,

@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
+import { radarLabel } from '../src/pages.ts';
+import { runRadar } from '../src/radar.ts';
 import { runConfig, runOnce } from '../src/scheduler.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
@@ -327,6 +329,71 @@ describe.skipIf(!url)('with a database', () => {
       removed: true,
       domain: 'b.com.tw',
     });
+    await server.close();
+  });
+
+  it('fetches Cloudflare Radar for every watched domain once a day and serves the periods', async () => {
+    const now = new Date('2026-10-21T19:35:00Z');
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+      [
+        ['tag', 'a.com.tw', 'watch', now, 7],
+        ['sheet', 'b.com.tw', 'watch', now, 30],
+        ['manual', 'c.com.tw', 'watch', now, 7],
+        ['sheet', 'a.com.tw', 'watch', now, 30],
+      ],
+    ]);
+    const sent: string[] = [];
+    const answer: Record<string, unknown> = { 'a.com.tw': 12, 'b.com.tw': '20000', 'c.com.tw': '>200000' };
+    const request = (async (url: string, init: RequestInit) => {
+      expect((init.headers as Record<string, string>).authorization).toBe('Bearer radar-token');
+      const domain = decodeURIComponent(new URL(url).pathname.split('/').pop() as string);
+      sent.push(domain);
+      const v = answer[domain];
+      return Response.json({
+        success: true,
+        result: {
+          details_0: typeof v === 'number' ? { rank: v } : { bucket: v },
+          meta: { dateRange: [{ startTime: '2026-10-19T00:00:00Z', endTime: '2026-10-20T00:00:00Z' }] },
+        },
+      });
+    }) as unknown as typeof fetch;
+    const go = (at: Date) => runRadar(pool, { token: 'radar-token', request, now: () => at, pauseMs: 0 });
+    expect(await runRadar(pool, { token: null })).toEqual({ skipped: 'no CLOUDFLARE_RADAR_API_TOKEN' });
+    expect(await go(now)).toMatchObject({ due: 3, sent: 3, ok: 3, blocked: false });
+    expect(sent.sort()).toEqual(['a.com.tw', 'b.com.tw', 'c.com.tw']);
+    // Answered within 20 hours: nothing is due.
+    expect(await go(new Date(now.getTime() + 3_600_000))).toMatchObject({ due: 0, sent: 0 });
+    const ranks = await rows<{ domain: string; rank: number | null; bucket: number | null; bucket_lower_bound: number | null }>(
+      pool,
+      'SELECT domain, `rank`, bucket, bucket_lower_bound FROM radar_ranks ORDER BY domain',
+    );
+    expect(ranks.map((r) => [r.domain, radarLabel({ rank: r.rank, bucket: r.bucket, bucketLowerBound: r.bucket_lower_bound })])).toEqual([
+      ['a.com.tw', '第 12 名'],
+      ['b.com.tw', '前 20,000 名'],
+      ['c.com.tw', '未入前 200,000 名'],
+    ]);
+    // A refusal stops the batch.
+    const refused = (async () => new Response('no', { status: 429 })) as unknown as typeof fetch;
+    expect(
+      await runRadar(pool, { token: 'radar-token', request: refused, now: () => new Date(now.getTime() + 86_400_000), pauseMs: 0 }),
+    ).toMatchObject({
+      sent: 1,
+      blocked: true,
+    });
+    const server = app();
+    const res = await server.inject({
+      method: 'POST',
+      url: '/internal/v1/radar',
+      headers: { authorization: `Bearer ${TAG}` },
+      payload: { domains: ['a.com.tw', 'z.com.tw'] },
+    });
+    expect(res.json()).toMatchObject({
+      scope: 'global',
+      lastRun: { blocked: true, sent: 1 },
+      domains: { 'a.com.tw': [{ rank: 12, bucket: null, dateEnd: '2026-10-20T00:00:00.000Z' }] },
+    });
+    expect(Object.keys(res.json().domains)).toEqual(['a.com.tw']);
+    expect((await server.inject('/site/c.com.tw/')).body).toContain('未入前 200,000 名');
     await server.close();
   });
 });

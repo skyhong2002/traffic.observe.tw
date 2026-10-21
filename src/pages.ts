@@ -1,5 +1,6 @@
 import type { ranking, topicSummary } from './metrics.ts';
 import { UNLABELLED } from './metrics.ts';
+import type { RadarPeriod } from './radar.ts';
 import type { WatchRow } from './requests.ts';
 import type { serviceStatus } from './status.ts';
 
@@ -114,6 +115,7 @@ export interface SitePage {
     taiwanShare: number | null;
   }>;
   watchers: Array<{ requester: string; kind: string; requestedAt: string }>;
+  radar: RadarPeriod[];
   state: {
     lastSuccessAt: string | null;
     lastAttemptAt: string | null;
@@ -138,6 +140,13 @@ export function sitePage(site: SitePage) {
         `<tr><td class="l">${monthLabel(l.month)}</td><td class="l">${html(l.name)}</td><td class="l">${html(l.group)}</td><td class="l">${html(l.topics)}</td><td>${num(l.visits)}${l.adjusted ? '<span class="tag">人工調整</span>' : ''}</td></tr>`,
     )
     .join('');
+  const radarRows = [...site.radar]
+    .reverse()
+    .map(
+      (r) =>
+        `<tr><td class="l">${tw(r.dateEnd).split(' ')[0]}</td><td class="l">${radarLabel(r)}</td><td class="l"><small>${tw(r.fetchedAt)}</small></td></tr>`,
+    )
+    .join('');
   const s = site.state;
   return layout(
     site.name,
@@ -145,6 +154,7 @@ export function sitePage(site: SitePage) {
 <p class="muted">${s ? `最近成功抓取 ${tw(s.lastSuccessAt) || '—'}；最近嘗試 ${tw(s.lastAttemptAt) || '—'}${s.nextAttemptAt ? `；下次最早 ${tw(s.nextAttemptAt)}` : ''}${s.failures ? `；連續失敗 ${s.failures} 次（${html(s.lastError)}）` : ''}` : '尚未抓取。'}
 ${site.watchers.length ? `<br>追蹤者：${site.watchers.map((w) => `${html(w.requester)}（${w.kind === 'watch' ? '定期' : html(w.kind)}）`).join('、')}` : ''}</p>
 <h2>每月造訪（百萬）</h2><div class="scroll"><table><thead><tr><th class="l">月份</th><th>Similarweb</th><th>試算表</th><th>搜尋占比</th><th>AI占比</th><th>台灣</th></tr></thead><tbody>${monthRows}</tbody></table></div>
+${radarRows ? `<h2>Cloudflare Radar 全球排名</h2><p class="muted">依 1.1.1.1 DNS 查詢的熱門程度；前 100 名才有名次，其餘只有級距。不能換算成造訪量。</p><div class="scroll"><table><thead><tr><th class="l">資料日期</th><th class="l">排名</th><th class="l">抓取</th></tr></thead><tbody>${radarRows}</tbody></table></div>` : ''}
 ${labelRows ? `<h2>試算表紀錄</h2><div class="scroll"><table><thead><tr><th class="l">月份</th><th class="l">名稱</th><th class="l">群組</th><th class="l">分類</th><th>流量</th></tr></thead><tbody>${labelRows}</tbody></table></div>` : ''}`,
   );
 }
@@ -258,3 +268,13 @@ ${form}
 <h2>其他來源</h2><p class="muted">${others.map((o) => `${html(REQUESTER_LABEL[o.requester] ?? o.requester)} ${o.domains} 個`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,
   );
 }
+
+/** "第 12 名", "前 20,000 名" or "未入前 200,000 名"; never a guessed place. */
+export const radarLabel = (r: Pick<RadarPeriod, 'rank' | 'bucket' | 'bucketLowerBound'>) =>
+  r.rank !== null
+    ? `第 ${r.rank} 名`
+    : r.bucket !== null
+      ? `前 ${r.bucket.toLocaleString('en-US')} 名`
+      : r.bucketLowerBound !== null
+        ? `未入前 ${r.bucketLowerBound.toLocaleString('en-US')} 名`
+        : '';

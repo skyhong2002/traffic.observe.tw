@@ -35,6 +35,18 @@
 
 容量估算：每小時 15 筆 × 24 = 360 筆／天。tag 約 300 個網域每週一次，加上試算表約 670 個網域每月一次，大約 75 筆／天，餘裕足夠。
 
+## Cloudflare Radar（`src/radar.ts`）
+
+2026-10-21 從 tag 搬過來，token `CLOUDFLARE_RADAR_API_TOKEN` 只放在本服務。用的是官方 API，權限為 Account → Radar → Read，沒有 Similarweb 那種 IP 限制。
+
+- 每天台北時間 `TRAFFIC_RADAR_HOUR`（預設 3）點、在 Similarweb 那輪之後跑一次，涵蓋所有追蹤中的網域（各請求者都算）。
+- 順序：從沒抓到的先抓，再來是最舊的。20 小時內抓過的跳過。每筆間隔 1 秒，最長 25 分鐘。
+- 401／403／429 時整批停止，連續三次錯誤也停止。
+- 每一期都存進 `radar_ranks`（網域 × 資料日期），以較新的抓取為準；`radar_state` 記錄每個網域的抓取狀態，`radar_runs` 記錄每一批。
+- 只有前 100 名有確切名次，其餘是級距（「前 20,000 名」）。`>200000` 存成 `bucket_lower_bound`，顯示為「未入前 200,000 名」。Radar 排名不能換算成造訪量。
+- `POST /internal/v1/radar` `{ domains }` 回傳各網域的所有期別。tag 的 `media-radar` job 每天 05:15 從這裡鏡像。
+- `tools/import-tag.ts` 會一併複製 tag 的 `media_radar_ranks`：2026-10-21 匯入 304 個網域、919 期。
+
 ## 試算表
 
 `node --env-file=.env tools/import-sheet.ts` 會下載公開匯出的 xlsx，重寫各月份的 `sheet_rows`，並把最新兩個分頁的網域設成 `sheet` 的定期清單。來源表維持唯讀；只讀公式的快取結果，不執行公式。

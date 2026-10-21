@@ -1,10 +1,11 @@
 // One-time copy from tag's database (read only): every Similarweb month and
 // profile tag fetched, the fetch times (so nothing is refetched right away),
-// blog's queued lookups, and tag's outlets as requester `tag` (weekly).
+// blog's queued lookups, tag's outlets as requester `tag` (weekly), and every
+// Cloudflare Radar period (media_radar_ranks).
 // Sheet-seeded (genehong) months are left out; tools/import-sheet.ts keeps the
 // sheet itself. Safe to rerun: newer rows win, as in saveTraffic.
 //   node --env-file=.env tools/import-tag.ts --tag-db mysql://…/tag_observe
-import { createPool, rows } from '../src/db.ts';
+import { chunk, createPool, rows } from '../src/db.ts';
 import { setWatchList } from '../src/requests.ts';
 import type { DomainTraffic, TrafficProfile } from '../src/similarweb.ts';
 import { saveTraffic } from '../src/store.ts';
@@ -87,6 +88,38 @@ try {
     );
   }
   console.log('lookups', lookups.length);
+
+  // Cloudflare Radar: every period tag kept, and when each domain last answered.
+  const radar = await rows<{
+    domain: string;
+    date_end: Date;
+    date_start: Date;
+    rank: number | null;
+    bucket: number | null;
+    bucket_lower_bound: number | null;
+    first_seen_at: Date;
+    fetched_at: Date;
+  }>(tag, 'SELECT domain, date_end, date_start, `rank`, bucket, bucket_lower_bound, first_seen_at, fetched_at FROM media_radar_ranks');
+  for (const part of chunk(radar))
+    await pool.query(
+      `INSERT INTO radar_ranks (domain, date_end, date_start, \`rank\`, bucket, bucket_lower_bound, first_seen_at, fetched_at) VALUES ?
+       ON DUPLICATE KEY UPDATE \`rank\` = IF(VALUES(fetched_at) >= fetched_at, VALUES(\`rank\`), \`rank\`),
+         bucket = IF(VALUES(fetched_at) >= fetched_at, VALUES(bucket), bucket),
+         bucket_lower_bound = IF(VALUES(fetched_at) >= fetched_at, VALUES(bucket_lower_bound), bucket_lower_bound),
+         first_seen_at = LEAST(first_seen_at, VALUES(first_seen_at)), fetched_at = GREATEST(fetched_at, VALUES(fetched_at))`,
+      [part.map((r) => [r.domain, r.date_end, r.date_start, r.rank, r.bucket, r.bucket_lower_bound, r.first_seen_at, r.fetched_at])],
+    );
+  const answered = new Map<string, Date>();
+  for (const r of radar)
+    if (!answered.has(r.domain) || (answered.get(r.domain) as Date) < r.fetched_at) answered.set(r.domain, r.fetched_at);
+  for (const [domain, at] of answered)
+    await pool.query(
+      `INSERT INTO radar_state (domain, last_attempt_at, last_success_at) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE last_success_at = GREATEST(COALESCE(last_success_at, 0), VALUES(last_success_at)),
+         last_attempt_at = GREATEST(COALESCE(last_attempt_at, 0), VALUES(last_attempt_at))`,
+      [domain, at, at],
+    );
+  console.log('radar', { periods: radar.length, domains: answered.size });
 } finally {
   await Promise.all([tag.end(), pool.end()]);
 }
