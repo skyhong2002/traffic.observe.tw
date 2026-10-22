@@ -95,15 +95,20 @@ export function rankingPage(
   list: ReturnType<typeof ranking>,
   source: string | null = null,
   sources: Array<{ requester: string; domains: number }> = [],
+  foreign = false,
+  hidden = 0,
 ) {
-  const q = (t: string | null, src = source) =>
-    `/table/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}${src ? `&source=${encodeURIComponent(src)}` : ''}`;
+  const q = (t: string | null, src = source, f = foreign) =>
+    `/table/?month=${month}${t ? `&topic=${encodeURIComponent(t)}` : ''}${src ? `&source=${encodeURIComponent(src)}` : ''}${f ? '&foreign=1' : ''}`;
   const sourceChips = [`<span class="lbl">來源</span><a href="${q(topic, null)}"${source ? '' : ' class="on"'}>所有來源</a>`]
     .concat(
       sources.map(
         (o) =>
           `<a href="${q(topic, o.requester)}"${o.requester === source ? ' class="on"' : ''}>${html(SOURCE_LABEL[o.requester] ?? o.requester)}<small>${o.domains}</small></a>`,
       ),
+    )
+    .concat(
+      `<span class="lbl">範圍</span><a href="${q(topic, source, !foreign)}"${foreign ? ' class="on"' : ''} aria-pressed="${foreign}" title="「非台灣」群組的網站照列但不排名次">含非台灣${foreign ? '' : `<small>${hidden}</small>`}</a>`,
     )
     .join('');
   const chips = [`<span class="lbl">分類</span><a href="${q(null)}"${topic ? '' : ' class="on"'}>全部</a>`]
@@ -122,21 +127,22 @@ export function rankingPage(
 <td class="num">${pct(s.searchShare)}</td><td class="num">${pct(s.aiShare, 2)}</td><td class="num">${pct(s.taiwanShare)}</td></tr>`,
     )
     .join('');
-  const csv = `/api/v1/rankings.csv?month=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}`;
+  const csv = `/api/v1/rankings.csv?month=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}${source ? `&source=${encodeURIComponent(source)}` : ''}${foreign ? '&foreign=1' : ''}`;
   const sourceNote = source
     ? `${html(SOURCE_LABEL[source] ?? source)}追蹤的 ${sources.find((o) => o.requester === source)?.domains ?? 0} 個網域裡，這個月有數字的有 ${list.length} 個；其他還在排隊或 Similarweb 沒有估算，見<a href="/watch/${source === 'manual' ? '' : `?list=${encodeURIComponent(source)}#list`}">清單</a>。`
     : `這個月有數字的 ${list.length} 個網站。`;
+  const foreignNote = hidden ? `另有 ${hidden} 個「非台灣」網站沒有列出，點上方「含非台灣」顯示。` : '';
   return layout(
     month ? `${monthLabel(month)} ${topic ?? '全部'}` : '表格',
     {
       kicker: '流量觀察・表格',
       title: month ? `${monthLong(month)}排行` : '月排行',
-      dek: `依造訪量排序的完整表格，成長與上月名次都跟前一個月比；名次只算台灣網站，「非台灣」群組照列但不排名。要比較任意兩個月或看排名軌跡，請用<a href="/${month ? `#to=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}` : ''}">月報</a>。`,
-      controls: month ? `${monthPicker(months, month, { topic, source })}<a href="${csv}">下載 CSV</a>` : '',
+      dek: `依造訪量排序的完整表格，成長與上月名次都跟前一個月比；只列台灣網站並排名；「含非台灣」會加列「非台灣」群組，但不給名次。要比較任意兩個月或看排名軌跡，請用<a href="/${month ? `#to=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}` : ''}">月報</a>。`,
+      controls: month ? `${monthPicker(months, month, { topic, source, foreign: foreign ? '1' : null })}<a href="${csv}">下載 CSV</a>` : '',
     },
     `<div class="chips-bar"><div class="wrap"><nav class="chips sources" aria-label="來源">${sourceChips}</nav><nav class="chips" aria-label="分類">${chips}</nav></div></div>
 <main class="wrap"><section class="topic"><header><h2>${html(topic ?? '全部網站')}</h2></header>
-<p class="summary">${sourceNote}</p>
+<p class="summary">${sourceNote}${foreignNote}</p>
 ${table(
   '<th>名次</th><th class="l">網站</th><th class="l">分類</th><th class="num">流量</th><th class="num">成長</th><th class="num">上月</th><th class="num">搜尋S</th><th class="num">AI</th><th class="num">搜尋占比</th><th class="num">AI 占比</th><th class="num">台灣</th>',
   rowsHtml,

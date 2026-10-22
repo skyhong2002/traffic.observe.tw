@@ -56,7 +56,7 @@ const BUMP_MONTHS = 12;
 // GeneHong's sheet is the hand-curated list, so its domains and the ones added on /watch/ are one source: 手動.
 const SOURCE_LABEL = { tag: '媒體（tag）', blog: '部落格（blog）', manual: '手動' };
 const SOURCE_OF = { sheet: 'manual' };
-const state = { data: null, from: null, to: null, sort: {}, expanded: new Set(), selected: null, active: null, source: null, hl: null, bumpTop: 10 };
+const state = { data: null, from: null, to: null, sort: {}, expanded: new Set(), selected: null, active: null, source: null, hl: null, bumpTop: 10, foreign: false };
 
 // ---------- formatting ----------
 const monthLabel = (m) => `${m.slice(0, 4)} 年 ${Number(m.slice(4))} 月`;
@@ -110,16 +110,20 @@ function row(domain, s) {
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
 }
+// 「非台灣」 sites are hidden until the reader turns on 「含非台灣」.
 function rowsFor(topic) {
   const out = [];
   for (const [d, s] of Object.entries(state.data.sites)) {
-    if (!inSource(s)) continue;
+    if (!inSource(s) || (!state.foreign && !isTaiwan(s))) continue;
     if (topic && !topicsOf(s).includes(topic)) continue;
     const r = row(d, s);
     if (r) out.push(r);
   }
   out.sort((a, b) => b.visits - a.visits);
   return numberRanks(out);
+}
+function hiddenForeign() {
+  return Object.values(state.data.sites).filter((s) => inSource(s) && !isTaiwan(s) && s.m[state.to]?.[V] != null).length;
 }
 function rankMap(month) {
   const list = Object.entries(state.data.sites).filter(([, s]) => inSource(s) && isTaiwan(s) && s.m[month]?.[V] != null).sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
@@ -267,6 +271,7 @@ function readHash() {
   state.source = state.data.sources.some((o) => o.source === wanted) ? wanted : null;
   state.hl = q.get('hl');
   state.bumpTop = q.get('top') === '20' ? 20 : 10;
+  state.foreign = q.get('foreign') === '1';
 }
 function writeHash() {
   const q = new URLSearchParams({ to: state.to, from: state.from });
@@ -274,6 +279,7 @@ function writeHash() {
   if (state.source) q.set('source', state.source);
   if (state.hl) q.set('hl', state.hl);
   if (state.bumpTop !== 10) q.set('top', String(state.bumpTop));
+  if (state.foreign) q.set('foreign', '1');
   if (state.selected) q.set('site', state.selected);
   history.replaceState(null, '', `${location.pathname}#${q}`);
 }
@@ -296,7 +302,8 @@ function render() {
     `<span class="lbl">來源</span><a href="#" data-source=""${state.source ? '' : ' class="on"'}>所有來源</a>` +
     srcAll
       .map((o) => `<a href="#" data-source="${esc(o.source)}"${state.source === o.source ? ' class="on"' : ''} title="追蹤 ${o.domains} 個網域，本期有數字 ${withData(o.source)} 個${o.source === 'manual' ? '（含 GeneHong 試算表名單）' : ''}">${esc(SOURCE_LABEL[o.source] ?? o.source)}<small>${withData(o.source)}/${o.domains}</small></a>`)
-      .join('');
+      .join('') +
+    `<span class="lbl">範圍</span><a href="#" data-foreign${state.foreign ? ' class="on"' : ''} aria-pressed="${state.foreign}" title="「非台灣」群組的網站照列但不排名次">含非台灣${state.foreign ? '' : `<small>${hiddenForeign()}</small>`}</a>`;
   const calGap = calendar(state.from, state.to).length - 1;
   document.getElementById('rangeNote').textContent = `比較區間：${monthLabel(state.from)} → ${monthLabel(state.to)}（${calGap} 個月${calGap !== gap ? `，中間有 ${calGap - gap} 個月沒有資料` : ''}）。表格的「區間變化」與上方重點都依這個區間計算。`;
 
@@ -629,6 +636,13 @@ document.addEventListener('click', (ev) => {
   const card = ev.target.closest('.card');
   if (card?.dataset.site) { openPanel(card.dataset.site); return; }
   if (card?.dataset.jump) { state.active = null; render(); document.getElementById('sections').scrollIntoView({ behavior: 'smooth' }); return; }
+  const foreign = ev.target.closest('#sources a[data-foreign]');
+  if (foreign) {
+    ev.preventDefault();
+    state.foreign = !state.foreign;
+    render();
+    return;
+  }
   const src = ev.target.closest('#sources a');
   if (src) {
     ev.preventDefault();

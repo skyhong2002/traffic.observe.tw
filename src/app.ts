@@ -108,7 +108,8 @@ export function buildApp(
     watchedCache = { at: Date.now(), lists };
     return lists;
   };
-  const rankingFor = async (query: { month?: string; topic?: string; source?: string }) => {
+  // 「非台灣」 sites are hidden unless foreign=1; they never take a rank either way.
+  const rankingFor = async (query: { month?: string; topic?: string; source?: string; foreign?: string }) => {
     const { months, month } = await pickMonth(query.month);
     if (!month) return null;
     const lists = await watched();
@@ -122,7 +123,10 @@ export function buildApp(
     const list = only ? all.filter((s) => only.has(s.domain)) : all;
     const topics = topicList(list);
     const topic = topics.some((t) => t.topic === query.topic) ? (query.topic as string) : null;
-    return { months, month, topics, topic, source, sources, list: ranking(list, topic) };
+    const foreign = query.foreign === '1';
+    const placed = ranking(list, topic);
+    const shown = foreign ? placed : placed.filter((s) => s.rank !== null);
+    return { months, month, topics, topic, source, sources, foreign, hidden: placed.length - shown.length, list: shown };
   };
 
   let historyCache: { at: number; data: Promise<History> } | null = null;
@@ -149,10 +153,12 @@ export function buildApp(
     return REPORT;
   });
   // The same month as a plain server-rendered table (works without JavaScript).
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/table/', async (request, reply) => {
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>('/table/', async (request, reply) => {
     const r = await rankingFor(request.query);
     reply.type('text/html; charset=utf-8');
-    return r ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources) : rankingPage('', [], [], null, []);
+    return r
+      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.foreign, r.hidden)
+      : rankingPage('', [], [], null, []);
   });
   app.get<{ Querystring: { month?: string } }>('/topics/', async (request, reply) => {
     const { months, month } = await pickMonth(request.query.month);
@@ -252,7 +258,7 @@ export function buildApp(
       'GET /api/v1/history':
         'every month at once (oldest first): per domain [visits, search visits, AI visits, Taiwan share, from sheet], labels, sources, Cloudflare Radar periods',
       'GET /api/v1/rankings?month=YYYYMM&topic=&source=':
-        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added and the GeneHong sheet) optional',
+        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added and the GeneHong sheet) optional; foreign=1 adds the unranked 非台灣 sites',
       'GET /api/v1/rankings.csv?month=YYYYMM&topic=': 'the same as CSV',
       'GET /api/v1/topics?month=YYYYMM': 'per-topic growth and search/AI shares',
       'GET /api/v1/sites/:domain': 'every month for one domain',
@@ -264,57 +270,63 @@ export function buildApp(
     reply.header('cache-control', 'public, max-age=300');
     return history();
   });
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/api/v1/rankings', async (request, reply) => {
-    const r = await rankingFor(request.query);
-    if (!r) return reply.code(404).send({ error: 'no_data' });
-    return { month: r.month, topic: r.topic, source: r.source, topics: r.topics, sites: r.list };
-  });
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string } }>('/api/v1/rankings.csv', async (request, reply) => {
-    const r = await rankingFor(request.query);
-    if (!r) return reply.code(404).send({ error: 'no_data' });
-    const cell = (v: unknown) =>
-      v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
-    const head = [
-      '名次',
-      '網站名',
-      '網域',
-      '群組',
-      '分類',
-      '流量(百萬)',
-      '成長',
-      '上月名次',
-      '搜尋S',
-      'AI',
-      '搜尋占比',
-      'AI占比',
-      '台灣占比',
-      '來源',
-    ];
-    const body = r.list.map((s) =>
-      [
-        s.rank,
-        s.name,
-        s.domain,
-        s.group,
-        s.topics.join(', '),
-        s.visits,
-        s.growth,
-        s.prevRank,
-        s.searchVisits,
-        s.aiVisits,
-        s.searchShare,
-        s.aiShare,
-        s.taiwanShare,
-        s.visitsSource,
-      ]
-        .map(cell)
-        .join(','),
-    );
-    reply
-      .type('text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename="traffic-${r.month}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`);
-    return `﻿${[head.join(','), ...body].join('\n')}\n`;
-  });
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>(
+    '/api/v1/rankings',
+    async (request, reply) => {
+      const r = await rankingFor(request.query);
+      if (!r) return reply.code(404).send({ error: 'no_data' });
+      return { month: r.month, topic: r.topic, source: r.source, topics: r.topics, sites: r.list };
+    },
+  );
+  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>(
+    '/api/v1/rankings.csv',
+    async (request, reply) => {
+      const r = await rankingFor(request.query);
+      if (!r) return reply.code(404).send({ error: 'no_data' });
+      const cell = (v: unknown) =>
+        v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+      const head = [
+        '名次',
+        '網站名',
+        '網域',
+        '群組',
+        '分類',
+        '流量(百萬)',
+        '成長',
+        '上月名次',
+        '搜尋S',
+        'AI',
+        '搜尋占比',
+        'AI占比',
+        '台灣占比',
+        '來源',
+      ];
+      const body = r.list.map((s) =>
+        [
+          s.rank,
+          s.name,
+          s.domain,
+          s.group,
+          s.topics.join(', '),
+          s.visits,
+          s.growth,
+          s.prevRank,
+          s.searchVisits,
+          s.aiVisits,
+          s.searchShare,
+          s.aiShare,
+          s.taiwanShare,
+          s.visitsSource,
+        ]
+          .map(cell)
+          .join(','),
+      );
+      reply
+        .type('text/csv; charset=utf-8')
+        .header('content-disposition', `attachment; filename="traffic-${r.month}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`);
+      return `﻿${[head.join(','), ...body].join('\n')}\n`;
+    },
+  );
   app.get<{ Querystring: { month?: string } }>('/api/v1/topics', async (request, reply) => {
     const { month } = await pickMonth(request.query.month);
     if (!month) return reply.code(404).send({ error: 'no_data' });
