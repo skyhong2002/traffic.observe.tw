@@ -5,19 +5,20 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>台灣網站流量總覽｜流量觀察</title>
 <link rel="stylesheet" href="<!--style-->">
+<script src="<!--tables-->" defer></script>
 </head>
 <body class="report-page">
 <!--header-->
 <main id="main" class="wrap report-main" tabindex="-1">
   <div class="report-heading">
-    <div><p class="kicker">TAIWAN WEB TRAFFIC</p><h1>台灣網站流量</h1><p class="dek" id="dek">每月排行、流量趨勢，一目了然。</p></div>
+    <div><h1>台灣網站流量</h1></div>
     <label class="month-control">資料月份 <select id="to" disabled><option>載入中…</option></select></label>
   </div>
   <section class="overview" id="overview" aria-label="本期概況" aria-busy="true">
     <div><span>有資料的網站</span><strong>—</strong></div><div><span>每月造訪估算</span><strong>—</strong></div><div><span>與前期相比</span><strong>—</strong></div>
   </section>
   <section class="directory" aria-labelledby="directory-title">
-    <div class="directory-heading"><div><h2 id="directory-title">網站排行</h2><p class="note">選擇網站，查看完整流量趨勢。</p></div><a id="full-data" class="text-link" href="/table/">完整數據 <span aria-hidden="true">↗</span></a></div>
+    <div class="directory-heading"><div><h2 id="directory-title">網站排行</h2></div><a id="full-data" class="text-link" href="/table/">完整數據 <span aria-hidden="true">↗</span></a></div>
     <div class="filter-toolbar">
       <label class="search-field"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" aria-label="搜尋網站名稱或網域" placeholder="搜尋網站名稱或網域" autocomplete="off" disabled><button id="clear-search" type="button" aria-label="清除搜尋" hidden>✕</button></label>
       <label class="topic-control"><span class="sr-only">網站分類</span><select id="topic" disabled><option>全部分類</option></select></label>
@@ -64,7 +65,7 @@ function deltaHtml(d) {
   if (d == null) return '<span class="delta na">—</span>';
   if (d === 'new') return '<span class="delta na" title="比較月份沒有這個網站的資料">無前期</span>';
   const cls = d > 0.0005 ? 'up' : d < -0.0005 ? 'down' : 'na';
-  const arrow = cls === 'up' ? '▲' : cls === 'down' ? '▼' : '';
+  const arrow = cls === 'up' ? '+' : cls === 'down' ? '−' : '';
   return `<span class="delta ${cls}">${arrow}${Math.abs(d * 100).toFixed(1)}%</span>`;
 }
 function radarText(r) {
@@ -322,13 +323,12 @@ function render() {
 }
 
 const COLS = [
-  { key: 'rank', label: '排名', cls: 'rank', sort: (r) => -r.visits, dir: 1 },
-  { key: 'name', label: '網站', cls: 'l name-cell' },
+  { key: 'rank', label: '#', cls: 'rank', sort: (r) => -r.visits, dir: 1, title: '排名（依造訪量）' },
+  { key: 'name', label: '網站', cls: 'l name-cell', sort: (r) => r.name, dir: 1 },
   { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算，單位為百萬次' },
-  { key: 'change', label: '變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '與所選比較月份相比' },
-  { key: 'spark', label: '近一年趨勢', cls: 'l spark-cell' },
-  { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪（百萬）', detail: true },
-  { key: 'ai', label: 'AI 導流', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪（百萬）', detail: true },
+  { key: 'change', label: '區間變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '與所選比較月份相比' },
+  { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪（百萬）' },
+  { key: 'ai', label: 'AI 導流', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪（百萬）' },
   { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1, detail: true },
   { key: 'radar', label: 'Radar 全球', cls: 'l radar', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期', detail: true },
 ];
@@ -342,6 +342,7 @@ function renderResults(scoped = rowsFor(state.active)) {
   document.getElementById('result-count').textContent = `${state.active || '全部網站'} · ${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '網站'} · 造訪量單位：百萬次`;
   const host = document.getElementById('sections');
   host.replaceChildren(section(state.active, rows));
+  dispatchEvent(new Event('traffic:tables'));
   host.setAttribute('aria-busy', 'false');
   writeHash();
 }
@@ -359,11 +360,11 @@ function section(topic, rows) {
     if (va == null && vb == null) return b.visits - a.visits;
     if (va == null) return 1;
     if (vb == null) return -1;
-    return (va - vb) * sort.dir || b.visits - a.visits;
+    return (typeof va === 'string' ? va.localeCompare(vb, 'zh-TW') : va - vb) * sort.dir || b.visits - a.visits;
   });
   el.querySelector('thead tr').innerHTML = cols.map((c) => {
     const on = c.key === sort.key;
-    return `<th scope="col" class="${c.cls}"${c.sort ? ` aria-sort="${on ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}"` : ''}>${c.sort ? `<button type="button" data-sort="${c.key}"${c.title ? ` title="${c.title}"` : ''}>${c.label}<span class="arrow" aria-hidden="true">${on ? (sort.dir === 1 ? '↑' : '↓') : '↕'}</span></button>` : c.label}</th>`;
+    return `<th scope="col" class="${c.cls}"${c.sort ? ` aria-sort="${on ? (sort.dir === 1 ? 'ascending' : 'descending') : 'none'}"` : ''}>${c.sort ? `<button type="button" data-sort="${c.key}"${c.key === 'rank' ? ' aria-label="排名"' : ''}${c.title ? ` title="${c.title}"` : ''}>${c.label}<span class="arrow${on ? ' active' : ''}" aria-hidden="true">${on ? (sort.dir === 1 ? '▲' : '▼') : '↕'}</span></button>` : c.label}</th>`;
   }).join('');
   el.querySelectorAll('[data-sort]').forEach((button) => { button.addEventListener('click', () => {
     const c = COLS.find((x) => x.key === button.dataset.sort);
@@ -377,6 +378,7 @@ function section(topic, rows) {
   const start = state.page * PAGE_SIZE;
   const tbody = el.querySelector('tbody');
   const cal = calendar(state.data.months[0], state.to).slice(-SPARK_MONTHS);
+  const maxVisits = Math.max(...rows.map((r) => r.visits), 1);
   for (const r of sorted.slice(start, start + PAGE_SIZE)) {
     const tr = document.createElement('tr');
     tr.dataset.site = r.domain;
@@ -384,12 +386,14 @@ function section(topic, rows) {
     else if (r.domain === state.hl) tr.className = 'hl';
     const cells = {
       rank: r.rank ?? '—',
-      name: `<button type="button" class="site-name" data-open="${esc(r.domain)}">${esc(r.name)}</button>${r.sheet ? '<span class="tag" title="此月使用試算表數字">表</span>' : ''}${r.rank == null ? '<span class="tag">非台灣</span>' : ''}<span class="site-domain">${esc(r.domain)}</span>`,
-      visits: visits(r.visits), change: deltaHtml(r.change), spark: '', search: visits(r.search), ai: visits(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
+      name: `<span class="site-identity"><button type="button" class="site-name" data-open="${esc(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</button>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.sheet ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : ''}${r.rank == null ? '<span class="tag table-lead-extra">非台灣</span>' : ''}</span>`,
+      visits: `<span class="volume-cell"><span class="volume-track" aria-hidden="true"><span style="width:${Math.max(0, r.visits / maxVisits * 100).toFixed(2)}%"></span></span><span class="volume-value">${visits(r.visits)}</span></span>`,
+      change: `<span class="trend-cell"><span class="spark-cell" title="近一年造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
+      search: visits(r.search), ai: visits(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
     };
     tr.innerHTML = cols.map((c) => `<td class="${c.cls}">${cells[c.key]}</td>`).join('');
     const pts = cal.map((k) => ({ key: k, value: state.data.sites[r.domain].m[k]?.[V] ?? null }));
-    tr.querySelector('.spark-cell').append(lineChart(pts, { width: 120, height: 30, pad: { t: 4, r: 4, b: 4, l: 4 }, mark: state.from, label: '造訪（百萬）' }));
+    tr.querySelector('.spark-cell').append(lineChart(pts, { width: 64, height: 24, pad: { t: 3, r: 3, b: 3, l: 3 }, mark: state.from, label: '造訪（百萬）' }));
     tbody.append(tr);
   }
   if (!rows.length) tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><strong>${state.query ? '找不到符合的網站' : '這個範圍暫無資料'}</strong><p>${state.query ? '試試其他名稱或網域，或重設篩選條件。' : '請選擇其他月份或來源。'}</p></td></tr>`;
@@ -415,7 +419,7 @@ function section(topic, rows) {
 // ---------- rank trajectory (排名軌跡) ----------
 // Sites of one topic ranked against each other month by month (Taiwan sites only,
 // like the tables). Gray lines are the top 10/20 in the latest month; the
-// highlighted site (click a line or a table row) is blue.
+// highlighted site (click a line or a table row) uses the accent color.
 const topicRankCache = new Map();
 function topicRanks(topic, month) {
   const key = `${state.source}|${topic}|${month}`;
@@ -458,7 +462,7 @@ function drawBump(host, topic) {
   if (hl && !shown.includes(hl)) shown.push(hl);
   const head = `<div class="bar"><h3>排名軌跡</h3><span>${esc(topic)}・${monthShort(months[0])}–${monthShort(last)}</span>
 <span class="seg" role="group" aria-label="顯示幾名"><button type="button" data-top="10" aria-pressed="${N === 10}">前 10</button><button type="button" data-top="20" aria-pressed="${N === 20}">前 20</button></span></div>`;
-  const note = `<p class="note">同一分類的台灣網站依當月流量排名（不含「非台灣」群組${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，藍線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
+  const note = `<p class="note">同一分類的台灣網站依當月流量排名（不含「非台灣」群組${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，橘線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
   if (!shown.length) { host.innerHTML = `${head}<p class="empty">這個分類在期間內沒有資料。</p>`; return; }
   const width = Math.max(300, host.clientWidth || document.getElementById('sections').clientWidth);
   const narrow = width < 520;
@@ -577,7 +581,7 @@ function openPanel(domain) {
   <div><span>比 ${monthShort(state.from)}</span><b>${deltaHtml(change)}</b></div>
   <div><span>Radar 最新</span><b style="font-size:14px">${radarText(radar.at(-1)) || '—'}</b></div>
 </div>
-<h3>每月造訪（百萬）</h3><p class="note">淺藍底為比較區間；虛線跨過沒有資料的月份。</p><div id="cv"></div>
+<h3>每月造訪（百萬）</h3><p class="note">淺橘底為比較區間；虛線跨過沒有資料的月份。</p><div id="cv"></div>
 <details class="disclosure"><summary>搜尋與 AI 導流</summary><h3>自然搜尋占比</h3><p class="note">只有 Similarweb 有導流資料的月份才有點；試算表月份沒有占比。</p><div id="cs"></div>
 <h3>AI 導流占比</h3><p class="note">兩個占比量級差很多，所以分開畫，各用自己的刻度。</p><div id="ca"></div>
 </details><details class="disclosure"><summary>Cloudflare Radar 全球排名</summary><p class="note">DNS 查詢熱門度，前 100 名才有名次；不能換算成造訪量。</p>
@@ -600,6 +604,7 @@ ${radar.length ? `<div class="scroll"><table><thead><tr><th class="l">資料日�
   backdrop.classList.add('open');
   panel.scrollTop = 0;
   panel.querySelector('.close').focus({ preventScroll: true });
+  dispatchEvent(new Event('traffic:tables'));
   writeHash();
 }
 function closePanel(updateHash = true) {

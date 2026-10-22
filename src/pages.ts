@@ -3,7 +3,7 @@ import { splitTopics, UNLABELLED } from './metrics.ts';
 import type { RadarPeriod } from './radar.ts';
 import type { WatchRow } from './requests.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
-import { STYLE_HREF } from './style.ts';
+import { STYLE_HREF, TABLES_HREF } from './style.ts';
 
 // Server-rendered pages in the report's design (style.css): the shared site
 // header, a masthead, sections and tables. No client framework.
@@ -74,7 +74,7 @@ const TIP_SCRIPT = `<script>
 
 export function layout(title: string, head: Masthead, body: string, { nav = null, tips = false }: { nav?: Nav; tips?: boolean } = {}) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${html(title)}｜流量觀察</title><link rel="stylesheet" href="${STYLE_HREF}"></head><body>
+<title>${html(title)}｜流量觀察</title><link rel="stylesheet" href="${STYLE_HREF}"><script src="${TABLES_HREF}" defer></script></head><body>
 ${siteHeader(nav)}
 <div class="masthead"><div class="wrap"><p class="kicker">${html(head.kicker)}</p><h1>${html(head.title)}</h1>${
     head.dek ? `<p class="dek">${head.dek}</p>` : ''
@@ -128,9 +128,11 @@ export function rankingPage(
     .map(
       (
         s,
-      ) => `<tr><td class="rank"${s.rank === null ? ' title="「非台灣」群組不排名次"' : ''}>${s.rank ?? '—'}</td><td class="l"><a class="site-name" href="/site/${html(s.domain)}/">${html(s.name)}</a>${
-        s.visitsSource === 'sheet' ? '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''
-      }<span class="site-domain">${html(s.domain)}</span></td><td class="l"><span class="radar">${html([s.group, ...s.topics].filter(Boolean).join('・'))}</span></td>
+      ) => `<tr><td class="rank"${s.rank === null ? ' title="「非台灣」群組不排名次"' : ''}>${s.rank ?? '—'}</td><td class="l"><span class="site-identity"><a class="site-name" href="/site/${html(s.domain)}/" title="${html(s.name)} · ${html(s.domain)}">${html(s.name)}</a>${
+        s.domain !== s.name ? `<span class="site-domain table-lead-extra">${html(s.domain)}</span>` : ''
+      }${
+        s.visitsSource === 'sheet' ? '<span class="tag table-lead-extra" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''
+      }</span></td><td class="l"><span class="radar">${html([s.group, ...s.topics].filter(Boolean).join('・'))}</span></td>
 <td class="num">${num(s.visits)}</td><td class="num">${signed(s.growth)}</td><td class="num">${s.prevRank ?? ''}</td><td class="num">${num(s.searchVisits)}</td><td class="num">${num(s.aiVisits)}</td>
 <td class="num">${pct(s.searchShare)}</td><td class="num">${pct(s.aiShare, 2)}</td><td class="num">${pct(s.taiwanShare)}</td></tr>`,
     )
@@ -600,9 +602,9 @@ export function watchPage({
   const rowHtml = (
     w: WatchRow,
     removable: boolean,
-  ) => `<tr><td class="l"><a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a>${
-    w.note ? `<span class="site-domain">${html(w.note)}</span>` : ''
-  }</td>
+  ) => `<tr><td class="l"><span class="site-identity"><a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a>${
+    w.note && w.note !== w.domain ? `<span class="site-domain table-lead-extra">${html(w.note)}</span>` : ''
+  }</span></td>
 <td class="num">${w.latestMonth ? `${num(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : ''}</td>
 <td class="num">每 ${w.refreshDays ?? ''} 天</td><td class="l">${state(w)}</td><td class="l"><span class="radar">${html(w.addedBy)}</span><span class="site-domain">${tw(w.requestedAt.toISOString())}</span></td>
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;

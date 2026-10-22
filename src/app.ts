@@ -25,7 +25,7 @@ import { runConfig } from './scheduler.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
-import { STYLE, STYLE_HREF } from './style.ts';
+import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
 
 const CACHE_MS = 60_000;
 /** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
@@ -33,6 +33,7 @@ const HISTORY_MS = 10 * 60_000;
 // The report page (/): static HTML that reads /api/v1/history and draws everything client-side.
 const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
   .replace('<!--style-->', STYLE_HREF)
+  .replace('<!--tables-->', TABLES_HREF)
   .replace('<!--header-->', siteHeader('report'))
   .replace('<!--footer-->', siteFooter());
 const MAX_TRAFFIC_DOMAINS = 2000;
@@ -149,6 +150,9 @@ export function buildApp(
   // The shared stylesheet; pages link it with a content hash (style.ts), so it can be cached for long.
   app.get('/style.css', async (_request, reply) =>
     reply.type('text/css; charset=utf-8').header('cache-control', 'public, max-age=86400').send(STYLE),
+  );
+  app.get('/tables.js', async (_request, reply) =>
+    reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=86400').send(TABLES_SCRIPT),
   );
 
   // Pages.

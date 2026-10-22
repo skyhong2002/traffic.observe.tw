@@ -1,45 +1,24 @@
 /* Shared interface for the report and server-rendered pages. */
 :root {
-  color-scheme: light;
-  --page: #f6f7f8;
-  --surface: #ffffff;
-  --ink: #172b35;
-  --ink-2: #52626c;
-  --muted: #6c7b84;
-  --grid: #e6ebee;
-  --axis: #cbd5da;
-  --ring: #e1e7ea;
-  --series-1: #147c79;
-  --series-1-wash: #def1ec;
-  --up: #148361;
-  --down: #c85d4f;
-  --accent: #147c79;
-  --other: #bac7cc;
-  --hover-row: #f4f9f8;
-  --sel-row: #e9f4f1;
-  --tip-ink: #ffffff;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --page: #111a20;
-    --surface: #18242c;
-    --ink: #edf3f3;
-    --ink-2: #b1c1c8;
-    --muted: #91a3ad;
-    --grid: #2c3b43;
-    --axis: #435660;
-    --ring: #2c3b43;
-    --series-1: #66c4b3;
-    --series-1-wash: #204c47;
-    --up: #71d0ab;
-    --down: #f1988b;
-    --accent: #66c4b3;
-    --other: #536972;
-    --hover-row: #1d3035;
-    --sel-row: #203b3c;
-    --tip-ink: #111a20;
-  }
+  color-scheme: dark;
+  --page: #0a0a0a;
+  --surface: #18181b;
+  --ink: #ededed;
+  --ink-2: #d4d4d8;
+  --muted: #a1a1aa;
+  --grid: #27272a;
+  --axis: #3f3f46;
+  --ring: #27272a;
+  --series-1: #fb923c;
+  --series-1-wash: #47280e;
+  --up: #4ade80;
+  --down: #fb7185;
+  --accent: #fb923c;
+  --other: #52525b;
+  --hover-row: #27272a;
+  --sel-row: #30271f;
+  --tip-ink: #09090b;
+  --table-head: #09090b;
 }
 * {
   box-sizing: border-box;
@@ -118,9 +97,9 @@ textarea {
 }
 .wrap {
   width: 100%;
-  max-width: 1152px;
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 0 36px;
+  padding: 0 24px;
 }
 h1,
 h2,
@@ -136,7 +115,7 @@ h1 {
   font-weight: 700;
 }
 h2 {
-  font-size: 21px;
+  font-size: 20px;
   line-height: 1.4;
 }
 h3 {
@@ -214,11 +193,11 @@ p.body {
 }
 /* Navigation: primary reading destinations, with utilities in a menu. */
 .site {
-  background: var(--surface);
+  background: var(--page);
   border-bottom: 1px solid var(--grid);
 }
 .site-inner {
-  min-height: 74px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   gap: 44px;
@@ -342,8 +321,8 @@ p.body {
 }
 /* Page introduction and a restrained three-number overview. */
 .masthead .wrap {
-  padding-top: 36px;
-  padding-bottom: 24px;
+  padding-top: 24px;
+  padding-bottom: 16px;
 }
 .masthead .controls {
   margin-top: 22px;
@@ -353,10 +332,10 @@ p.body {
   justify-content: space-between;
   gap: 24px;
   align-items: center;
-  padding: 30px 0 24px;
+  padding: 20px 0 16px;
 }
 .report-heading h1 {
-  font-size: 36px;
+  font-size: 28px;
 }
 .month-control {
   display: flex;
@@ -366,22 +345,23 @@ p.body {
   color: var(--muted);
 }
 .month-control select {
-  min-width: 170px;
+  min-width: 155px;
   font-size: 14px;
-  padding: 10px 14px;
+  padding: 7px 12px;
 }
 .overview {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  background: var(--surface);
-  border: 1px solid var(--grid);
-  border-radius: 12px;
+  border-bottom: 1px solid var(--grid);
   margin: 0 0 24px;
-  padding: 18px 0;
+  padding: 0 0 20px;
 }
 .overview > div {
   min-width: 0;
-  padding: 0 26px;
+  padding: 0 24px;
+}
+.overview > div:first-child {
+  padding-left: 0;
 }
 .overview > div + div {
   border-left: 1px solid var(--grid);
@@ -392,11 +372,11 @@ p.body {
 }
 .overview strong {
   display: block;
-  font-size: 31px;
+  font-size: 25px;
   line-height: 1.35;
   font-weight: 650;
   letter-spacing: -0.03em;
-  margin-top: 6px;
+  margin-top: 2px;
   font-variant-numeric: tabular-nums;
 }
 .overview strong .delta {
@@ -410,17 +390,13 @@ p.body {
   color: var(--muted);
 }
 .overview p {
-  margin: 7px 0 0;
+  margin: 4px 0 0;
   font-size: 11px;
   color: var(--muted);
 }
 /* The report has one searchable, paged list. */
 .directory {
-  background: var(--surface);
-  border: 1px solid var(--grid);
-  border-radius: 12px;
-  padding: 24px 26px 0;
-  overflow: clip;
+  min-width: 0;
 }
 .directory-heading {
   display: flex;
@@ -448,6 +424,7 @@ p.body {
   gap: 12px;
 }
 .search-field {
+  background: var(--surface);
   display: flex;
   align-items: center;
   gap: 9px;
@@ -469,7 +446,7 @@ p.body {
 .search-field input {
   min-width: 0;
   width: 100%;
-  height: 44px;
+  height: 38px;
   padding: 8px 0;
   background: transparent;
   border: 0;
@@ -479,6 +456,7 @@ p.body {
   display: none;
 }
 .search-field button {
+  flex: none;
   border: 0;
   padding: 0;
   min-height: 32px;
@@ -494,7 +472,7 @@ p.body {
 }
 .topic-control select {
   width: 100%;
-  height: 46px;
+  height: 40px;
 }
 .filter-details {
   margin: 14px 0 0;
@@ -596,65 +574,123 @@ button.primary {
   padding-inline: 20px;
   font-weight: 600;
 }
+/* Compact shared tables. Keep the columns readable at every screen width. */
+.table-frame {
+  position: relative;
+  isolation: isolate;
+  max-width: 100%;
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.table-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 40px;
+  background: linear-gradient(to right, transparent, #09090b80);
+  pointer-events: none;
+  z-index: 6;
+  opacity: 0;
+}
+.table-frame[data-scroll-x="start"]::after,
+.table-frame[data-scroll-x="middle"]::after {
+  opacity: 1;
+}
 .scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scrollbar-color: var(--axis) var(--surface);
+  scrollbar-width: thin;
+}
+.scroll:focus-visible {
+  outline-offset: -3px;
 }
 table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   width: 100%;
   font-size: 14px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
 }
 th,
 td {
-  padding: 13px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--grid);
   white-space: nowrap;
   text-align: right;
   vertical-align: middle;
+  background: var(--surface);
+}
+tbody tr:last-child td {
+  border-bottom: 0;
 }
 th {
   color: var(--muted);
   font-size: 12px;
-  font-weight: 450;
-  background: var(--page);
+  font-weight: 500;
+  background: var(--table-head);
 }
-th:first-child {
-  border-radius: 6px 0 0 0;
-}
-th:last-child {
-  border-radius: 0 6px 0 0;
+.table-head-follow {
+  position: relative;
+  z-index: 5;
+  transform: translateY(var(--head-offset, 0px));
 }
 th button {
   padding: 0;
-  font-size: inherit;
+  font: inherit;
   color: inherit;
-  min-height: 28px;
+  min-height: 24px;
   background: transparent;
   border: 0;
+  white-space: nowrap;
 }
 th button:hover {
   color: var(--ink);
 }
 th .arrow {
-  margin-left: 5px;
-  color: var(--accent);
-  font-size: 12px;
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: 11px;
 }
-td.num,
-th.num {
-  font-variant-numeric: tabular-nums;
+th .arrow.active {
+  color: var(--accent);
 }
 td.l,
 th.l {
   text-align: left;
 }
 td.rank,
-th.rank {
+th.rank,
+.table-rank {
   text-align: center;
-  width: 60px;
+  padding-inline: 4px;
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
+}
+.table-rank,
+.table-lead {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+.with-rank .table-lead {
+  left: 40px;
+}
+.table-lead-box {
+  display: block;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.scroll[data-scroll-x="middle"] .table-lead,
+.scroll[data-scroll-x="end"] .table-lead {
+  box-shadow: 6px 0 8px -6px #000000cc;
 }
 tbody tr[data-site] {
   cursor: pointer;
@@ -666,32 +702,48 @@ tbody tr.sel td,
 tbody tr.hl td {
   background: var(--sel-row);
 }
+.site-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
 .site-name {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 100%;
+  flex-shrink: 0;
 }
 button.site-name {
   font: inherit;
-  font-weight: 550;
+  font-weight: 500;
   background: transparent;
   border: 0;
   padding: 0;
   min-height: 0;
   text-align: left;
+  white-space: nowrap;
 }
-button.site-name:hover {
+.site-name:hover {
   color: var(--accent);
 }
 .site-domain {
-  display: block;
   font-size: 11px;
   color: var(--muted);
   font-weight: 400;
-  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 3;
 }
 .tag {
   display: inline-block;
+  flex-shrink: 0;
   font-size: 10px;
+  line-height: 16px;
   color: var(--muted);
   background: var(--page);
   border: 1px solid var(--grid);
@@ -700,26 +752,63 @@ button.site-name:hover {
   margin-left: 6px;
   font-weight: 400;
 }
+.site-identity .tag {
+  margin-left: 0;
+}
 .radar {
   color: var(--ink-2);
   font-size: 12px;
 }
+.ranking-table {
+  min-width: 640px;
+}
 .ranking-table .name-cell {
-  width: 40%;
+  width: 32%;
 }
 .ranking-table .traffic-cell {
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
-.ranking-table .spark-cell {
-  width: 140px;
-  padding-left: 24px;
+.volume-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
 }
-.ranking-table td {
-  height: 64px;
+.volume-track {
+  width: 72px;
+  height: 4px;
+  background: var(--grid);
+  border-radius: 2px;
+  overflow: hidden;
 }
-.ranking-table .change-cell {
-  font-size: 13px;
+.volume-track > span {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  background: var(--accent);
+  opacity: 0.65;
+  border-radius: inherit;
+}
+.volume-value {
+  min-width: 64px;
+}
+.trend-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+.trend-cell .delta {
+  min-width: 64px;
+}
+.spark-cell {
+  display: inline-flex;
+  width: 64px;
+  height: 24px;
+  flex: 0 0 64px;
+}
+.spark-cell .line {
+  stroke-width: 1.5;
 }
 .pagination {
   display: flex;
@@ -727,7 +816,7 @@ button.site-name:hover {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  padding: 18px 0;
+  padding: 12px 0;
   color: var(--muted);
   font-size: 12px;
 }
@@ -810,7 +899,7 @@ button.site-name:hover {
 .disclosure .block {
   padding: 14px 0 0;
 }
-.disclosure .scroll {
+.disclosure .table-frame {
   margin-top: 10px;
 }
 .trajectory {
@@ -829,7 +918,7 @@ button.site-name:hover {
 .backdrop {
   position: fixed;
   inset: 0;
-  background: #11212f55;
+  background: #00000099;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s;
@@ -907,7 +996,7 @@ aside.panel.open {
   font-size: 13px;
 }
 .panel table {
-  font-size: 12px;
+  font-size: 14px;
 }
 .panel .panel-link {
   display: block;
@@ -940,11 +1029,7 @@ section.block h2 small {
   color: var(--muted);
   margin-left: 10px;
 }
-section.block > .scroll {
-  background: var(--surface);
-  border: 1px solid var(--grid);
-  border-radius: 10px;
-}
+
 .stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -1147,8 +1232,8 @@ svg .cross {
   stroke-width: 1;
 }
 .spark {
-  width: 120px;
-  height: 30px;
+  width: 64px;
+  height: 24px;
 }
 .tip {
   position: fixed;
@@ -1287,13 +1372,10 @@ svg .cross {
     padding-inline: 20px;
   }
   .overview strong {
-    font-size: 27px;
+    font-size: 24px;
   }
   .overview strong small {
     font-size: 11px;
-  }
-  .ranking-table .spark-cell {
-    display: none;
   }
   .filter-summary {
     display: none;
@@ -1301,13 +1383,13 @@ svg .cross {
 }
 @media (max-width: 640px) {
   .wrap {
-    padding-inline: 18px;
+    padding-inline: 16px;
   }
   .site-inner {
     flex-wrap: wrap;
     min-height: auto;
     gap: 0;
-    padding-top: 15px;
+    padding-top: 10px;
   }
   .brand {
     font-size: 18px;
@@ -1320,7 +1402,7 @@ svg .cross {
     order: 2;
     width: 100%;
     gap: 26px;
-    height: 47px;
+    height: 42px;
     margin-top: 4px;
   }
   .site-nav a {
@@ -1330,14 +1412,14 @@ svg .cross {
     max-width: 100px;
   }
   .report-heading {
-    padding: 28px 0 22px;
+    padding: 20px 0 16px;
     align-items: flex-start;
     flex-direction: column;
-    gap: 18px;
+    gap: 12px;
   }
   .report-heading h1 {
-    font-size: 29px;
-    margin: 8px 0;
+    font-size: 26px;
+    margin: 0 0 4px;
   }
   h1 {
     font-size: 28px;
@@ -1352,8 +1434,8 @@ svg .cross {
     padding-block: 8px;
   }
   .overview {
-    padding: 18px 0;
-    margin-bottom: 16px;
+    padding: 0 0 16px;
+    margin-bottom: 20px;
   }
   .overview > div {
     padding-inline: 12px;
@@ -1362,25 +1444,21 @@ svg .cross {
     font-size: 11px;
   }
   .overview strong {
-    font-size: 23px;
+    font-size: 20px;
     letter-spacing: -0.04em;
   }
   .overview strong small {
     display: block;
     margin: 3px 0 0;
     font-size: 10px;
+    white-space: nowrap;
   }
   .overview p {
     display: none;
   }
-  .directory {
-    padding: 19px 14px 0;
-    margin-inline: -3px;
-    border-radius: 10px;
-  }
   .directory-heading {
     gap: 8px;
-    margin-bottom: 18px;
+    margin-bottom: 12px;
   }
   .directory-heading h2 {
     font-size: 19px;
@@ -1392,14 +1470,19 @@ svg .cross {
     font-size: 12px;
   }
   .filter-toolbar {
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 118px;
     gap: 10px;
   }
+  .filter-toolbar #reset {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
   .search-field {
-    flex-basis: 100%;
+    flex: 1;
   }
   .topic-control {
-    flex: 1;
+    width: 118px;
   }
   .topic-control select {
     height: 40px;
@@ -1430,56 +1513,32 @@ svg .cross {
     padding-inline: 6px;
     font-size: 11px;
   }
-  .ranking-section {
-    margin-inline: -8px;
+  th,
+  td {
+    padding-inline: 8px;
   }
-  .ranking-section:not(.detailed) .ranking-table {
-    table-layout: fixed;
+  th.rank,
+  td.rank {
+    padding-inline: 4px;
   }
-  .ranking-table th,
-  .ranking-table td {
-    padding: 11px 6px;
+  .table-lead-box {
+    width: 152px;
+    max-width: 152px;
+    transition: max-width 0.2s;
   }
-  .ranking-table th {
-    font-size: 11px;
+  .scroll[data-compact-lead="true"][data-scroll-x="middle"] .table-lead-box,
+  .scroll[data-compact-lead="true"][data-scroll-x="end"] .table-lead-box {
+    max-width: 88px;
   }
-  .ranking-table td {
-    font-size: 12px;
-    height: 60px;
-  }
-  .ranking-table th.rank,
-  .ranking-table td.rank {
-    width: 32px;
-    font-size: 11px;
+  .scroll[data-compact-lead="true"][data-scroll-x="middle"] .table-lead-extra,
+  .scroll[data-compact-lead="true"][data-scroll-x="end"] .table-lead-extra {
+    display: none;
   }
   .ranking-table .name-cell {
     width: auto;
-    white-space: normal;
-    overflow-wrap: anywhere;
   }
-  .ranking-table .traffic-cell {
-    width: 70px;
-  }
-  .ranking-table .change-cell {
-    width: 70px;
-    font-size: 11px;
-  }
-  .ranking-table th .arrow {
-    margin-left: 2px;
-  }
-  .site-domain {
-    font-size: 10px;
-  }
-  .ranking-table .tag {
-    margin-left: 3px;
-    font-size: 9px;
-  }
-  .detailed .ranking-table {
-    min-width: 770px;
-    table-layout: auto;
-  }
-  .detailed .ranking-table .name-cell {
-    min-width: 150px;
+  .volume-track {
+    width: 40px;
   }
   .pagination {
     padding: 16px 6px;
@@ -1491,9 +1550,6 @@ svg .cross {
   }
   .pagination button {
     padding-inline: 9px;
-  }
-  .trajectory {
-    margin-inline: 8px;
   }
   .disclosure {
     padding-inline: 16px;
@@ -1558,7 +1614,8 @@ svg .cross {
 @media (prefers-reduced-motion: reduce) {
   aside.panel,
   .backdrop,
-  .tip {
+  .tip,
+  .table-lead-box {
     transition: none;
   }
 }
@@ -1569,35 +1626,11 @@ section.topic {
 section.topic h2 {
   margin: 0 0 10px;
 }
-section.topic > .scroll {
-  background: var(--surface);
-  border: 1px solid var(--grid);
-  border-radius: 10px;
-}
+
 .summary {
   color: var(--ink-2);
   font-size: 14px;
 }
 .report-main:focus {
   outline: none;
-}
-
-@media (max-width: 640px) {
-  .report-heading {
-    padding-top: 22px;
-    gap: 14px;
-  }
-  .report-heading .kicker {
-    display: none;
-  }
-  .overview {
-    padding-block: 14px;
-  }
-  .ranking-table th.rank,
-  .ranking-table td.rank {
-    width: 40px;
-  }
-  .ranking-table th.rank .arrow {
-    display: none;
-  }
 }
