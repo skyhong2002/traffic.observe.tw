@@ -10,6 +10,8 @@ import {
   notFoundPage,
   rankingPage,
   type SitePage,
+  siteFooter,
+  siteHeader,
   sitePage,
   sourceOf,
   statusPage,
@@ -29,7 +31,10 @@ const CACHE_MS = 60_000;
 /** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
 const HISTORY_MS = 10 * 60_000;
 // The report page (/): static HTML that reads /api/v1/history and draws everything client-side.
-const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8').replace('<!--style-->', STYLE_HREF);
+const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
+  .replace('<!--style-->', STYLE_HREF)
+  .replace('<!--header-->', siteHeader('report'))
+  .replace('<!--footer-->', siteFooter());
 const MAX_TRAFFIC_DOMAINS = 2000;
 
 export function buildApp(

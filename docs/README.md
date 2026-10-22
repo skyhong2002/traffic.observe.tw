@@ -63,7 +63,8 @@
 
 ## 頁面與公開 API
 
-- `/` 月排行（分類篩選、CSV 下載）、`/topics/` 分類概況、`/site/<domain>/` 單一網站歷史、`/status/` 抓取狀態。
+- `/` 流量總覽：搜尋網站名稱或網域、分類篩選、每頁 15 筆排行。預設只顯示造訪量、變化與趨勢；「篩選與比較」可設定比較月份、來源與非台灣網站，「更多指標」展開導流、台灣占比與 Radar。選取網站開啟詳情，分類的排名軌跡按需展開。篩選、搜尋與頁碼可透過網址分享。
+- `/table/` 完整數據與 CSV 下載（不需 JavaScript）、`/topics/` 分類概況、`/site/<domain>/` 單一網站歷史、`/status/` 抓取狀態。次要資料與計算說明以可展開區塊呈現。
 - `GET /api/v1/`、`/api/v1/months`、`/api/v1/rankings?month=&topic=`、`/api/v1/rankings.csv`、`/api/v1/topics?month=`、`/api/v1/sites/<domain>`、`/api/v1/status`。
 - 有 Similarweb 數字就用 Similarweb；沒有的月份或網域用試算表數字，並標「表」。分類取試算表裡該網域截至該月最新的一列；不在表上的網域歸「未分類」。
 
@@ -105,3 +106,5 @@
 ## 部署
 
 systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `systemctl --user enable --now`，2026-10-21 已啟用）。公開網址 `traffic.observe.tw` 經 Cloudflare Tunnel（observe-steamos）指到 `http://127.0.0.1:18150`；經 tunnel 進來的請求帶 `cf-connecting-ip`，所以 `/internal/*` 一律 404。
+
+服務直接執行這份 checkout 的 TypeScript。UI 修改先跑 `npm run typecheck`、`npm run lint`、`npm test`（測試僅使用 `TRAFFIC_TEST_DB_URL` 指定的測試庫），並以另一個連接埠檢查畫面。`report.html` 與 `style.css` 在程序啟動時讀取，發布 UI 時執行 `systemctl --user restart traffic-observe-web.service`；不需重啟 worker 或套用資料庫 migration。部署後確認本機與公開站的 `/healthz`、`/api/v1/history` 及各頁面正常，並確認 HTML 引用新的 CSS 內容雜湊。若需回復，還原此次修改的 UI 檔案至部署前版本，再重啟 web 服務。
