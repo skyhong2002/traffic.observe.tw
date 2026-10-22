@@ -120,17 +120,18 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
 export const topicsOf = (site: Pick<SiteMonth, 'topics'>) => (site.topics.length ? site.topics : [UNLABELLED]);
 
 /** Rows of one topic, ranked by visits, with last month's rank in the same topic. */
+/** The sheet's 「非台灣」 group: listed, but left out of the ranks so local sites aren't pushed down. */
+export const NOT_TAIWAN = '非台灣';
+export const ranked = (s: Pick<SiteMonth, 'group'>) => s.group !== NOT_TAIWAN;
+
 export function ranking(view: SiteMonth[], topic: string | null) {
   const inTopic = topic ? view.filter((s) => topicsOf(s).includes(topic)) : view;
-  const prevRank = new Map(
-    inTopic
-      .filter((s) => s.prevVisits !== null)
-      .sort((a, b) => (b.prevVisits ?? 0) - (a.prevVisits ?? 0))
-      .map((s, i) => [s.domain, i + 1]),
-  );
-  return inTopic.map((s, i) => ({
+  const places = (list: SiteMonth[]) => new Map(list.filter(ranked).map((s, i) => [s.domain, i + 1]));
+  const rank = places(inTopic);
+  const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => (b.prevVisits ?? 0) - (a.prevVisits ?? 0)));
+  return inTopic.map((s) => ({
     ...s,
-    rank: i + 1,
+    rank: rank.get(s.domain) ?? null,
     prevRank: prevRank.get(s.domain) ?? null,
     growth: s.prevVisits ? (s.visits ?? 0) / s.prevVisits - 1 : null,
     searchVisits: s.searchShare !== null && s.visits !== null ? s.visits * s.searchShare : null,

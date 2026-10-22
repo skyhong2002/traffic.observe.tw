@@ -194,6 +194,16 @@ describe('ranking and topicSummary', () => {
     expect(list[0].searchVisits).toBe(5);
   });
 
+  it('lists 非台灣 sites without a rank, so local sites keep their places', () => {
+    const foreign = { ...site('f.com', 20, 30, ['電商']), group: '非台灣' };
+    const list = ranking([foreign, ...view], '電商');
+    expect(list.map((s) => [s.domain, s.rank, s.prevRank])).toEqual([
+      ['f.com', null, null],
+      ['a.tw', 1, 2],
+      ['b.tw', 2, 1],
+    ]);
+  });
+
   it('sums each topic, counting multi-topic sites in each, unlabelled ones under 未分類', () => {
     const summary = Object.fromEntries(topicSummary(view).map((t) => [t.topic, t]));
     expect(summary['電商'].visitsGrowth).toBeCloseTo(19 / 20 - 1);

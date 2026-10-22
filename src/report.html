@@ -93,6 +93,10 @@ function calendar(first, last) {
   }
 }
 const topicsOf = (s) => (s.topics?.length ? s.topics : [UNLABELLED]);
+// Ranks count Taiwan sites only: the 「非台灣」 group is listed but unranked, so it
+// doesn't push every local site down (same rule as /table/ and the rank trajectories).
+const isTaiwan = (s) => s.group !== '非台灣';
+const numberRanks = (rows) => { let n = 0; return rows.map((r) => ({ ...r, rank: isTaiwan(r) ? ++n : null })); };
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
 function row(domain, s) {
   const now = s.m[state.to];
@@ -115,11 +119,10 @@ function rowsFor(topic) {
     if (r) out.push(r);
   }
   out.sort((a, b) => b.visits - a.visits);
-  out.forEach((r, i) => { r.rank = i + 1; });
-  return out;
+  return numberRanks(out);
 }
 function rankMap(month) {
-  const list = Object.entries(state.data.sites).filter(([, s]) => inSource(s) && s.m[month]?.[V] != null).sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
+  const list = Object.entries(state.data.sites).filter(([, s]) => inSource(s) && isTaiwan(s) && s.m[month]?.[V] != null).sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
   return new Map(list.map(([d], i) => [d, i + 1]));
 }
 const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
@@ -303,9 +306,10 @@ function render() {
   const grow = [...sizable].sort((a, b) => b.change - a.change)[0];
   const fall = [...sizable].sort((a, b) => a.change - b.change)[0];
   const aiTop = [...all].filter((r) => r.ai != null).sort((a, b) => b.ai - a.ai)[0];
-  const newTop = all.slice(0, TOP).filter((r) => !(ranksFrom.get(r.domain) <= TOP));
+  const first = all.find((r) => r.rank === 1);
+  const newTop = all.filter((r) => r.rank != null && r.rank <= TOP).filter((r) => !(ranksFrom.get(r.domain) <= TOP));
   const cards = [];
-  cards.push(`<div class="card" data-site="${all[0]?.domain}"><div class="label">本期第一</div><div class="who">${esc(all[0]?.name)}</div><div class="fig">${visits(all[0]?.visits)}<small style="font-size:14px;font-weight:400"> 百萬</small></div><div class="sub">${deltaHtml(all[0]?.change)} 與 ${monthShort(state.from)} 相比</div></div>`);
+  cards.push(`<div class="card" data-site="${first?.domain}"><div class="label">本期第一</div><div class="who">${esc(first?.name)}</div><div class="fig">${visits(first?.visits)}<small style="font-size:14px;font-weight:400"> 百萬</small></div><div class="sub">${deltaHtml(first?.change)} 與 ${monthShort(state.from)} 相比</div></div>`);
   if (grow) cards.push(`<div class="card" data-site="${grow.domain}"><div class="label">最大成長（造訪 ≥ 1 百萬）</div><div class="who">${esc(grow.name)}</div><div class="fig">${deltaHtml(grow.change)}</div><div class="sub">${visits(grow.prev)} → ${visits(grow.visits)} 百萬</div></div>`);
   if (fall) cards.push(`<div class="card" data-site="${fall.domain}"><div class="label">最大衰退（造訪 ≥ 1 百萬）</div><div class="who">${esc(fall.name)}</div><div class="fig">${deltaHtml(fall.change)}</div><div class="sub">${visits(fall.prev)} → ${visits(fall.visits)} 百萬</div></div>`);
   if (aiTop) cards.push(`<div class="card" data-site="${aiTop.domain}"><div class="label">AI 導流最多</div><div class="who">${esc(aiTop.name)}</div><div class="fig">${visits(aiTop.ai)}<small style="font-size:14px;font-weight:400"> 百萬</small></div><div class="sub">占該站造訪 ${pct(aiTop.ai / aiTop.visits, 2)}</div></div>`);
@@ -327,14 +331,14 @@ function render() {
   sections.innerHTML = '';
   const list = state.active ? [state.active] : [null, ...topics];
   // ranks are within each section (all is already sorted by visits)
-  const ranked = (t) => (t === null ? all : all.filter((r) => r.topics.includes(t)).map((r, i) => ({ ...r, rank: i + 1 })));
+  const ranked = (t) => (t === null ? all : numberRanks(all.filter((r) => r.topics.includes(t))));
   for (const t of list) sections.append(section(t, ranked(t), state.active ? TOP : t === null ? TOP : TOPIC_TOP));
   drawBumps();
   writeHash();
 }
 
 const COLS = [
-  { key: 'rank', label: '名次', cls: 'rank', sort: (r) => r.rank, dir: 1 },
+  { key: 'rank', label: '名次', cls: 'rank', sort: (r) => -r.visits, dir: 1 }, // visits order, so unranked 非台灣 rows stay in place
   { key: 'name', label: '網站', cls: 'l', sort: null },
   { key: 'visits', label: '本期流量', cls: 'num', sort: (r) => r.visits, dir: -1, title: '百萬次造訪' },
   { key: 'change', label: '區間變化', cls: 'num', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1 },
@@ -367,10 +371,10 @@ ${topic != null && topic === state.active ? `<div class="bump" data-topic="${esc
   const col = COLS.find((c) => c.key === sort.key);
   const sorted = [...rows].sort((a, b) => {
     const va = col.sort(a), vb = col.sort(b);
-    if (va == null && vb == null) return a.rank - b.rank;
+    if (va == null && vb == null) return b.visits - a.visits;
     if (va == null) return 1;
     if (vb == null) return -1;
-    return (va - vb) * sort.dir || a.rank - b.rank;
+    return (va - vb) * sort.dir || b.visits - a.visits;
   });
   el.querySelector('thead tr').innerHTML = COLS.map((c) => {
     const on = c.key === sort.key;
@@ -393,8 +397,8 @@ ${topic != null && topic === state.active ? `<div class="bump" data-topic="${esc
     tr.dataset.site = r.domain;
     if (r.domain === state.selected) tr.className = 'sel';
     else if (r.domain === state.hl) tr.className = 'hl';
-    tr.innerHTML = `<td class="rank">${r.rank}</td>
-<td class="l"><span class="site-name">${esc(r.name)}</span>${r.sheet ? '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''}<span class="site-domain">${esc(r.domain)}</span></td>
+    tr.innerHTML = `<td class="rank">${r.rank ?? '—'}</td>
+<td class="l"><span class="site-name">${esc(r.name)}</span>${r.sheet ? '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''}${r.rank == null ? '<span class="tag" title="「非台灣」群組照列但不排名次">非台灣</span>' : ''}<span class="site-domain">${esc(r.domain)}</span></td>
 <td class="num">${visits(r.visits)}</td><td class="num">${deltaHtml(r.change)}</td><td class="l spark-cell" title="空心點：比較月份；實心點：本期"></td>
 <td class="num">${visits(r.search)}</td><td class="num">${visits(r.ai)}</td><td class="num">${pct(r.taiwan)}</td><td class="l radar">${radarText(r.radar)}</td>`;
     const s = state.data.sites[r.domain];
@@ -416,10 +420,9 @@ ${topic != null && topic === state.active ? `<div class="bump" data-topic="${esc
 }
 
 // ---------- rank trajectory (排名軌跡) ----------
-// Sites of one topic ranked against each other month by month (Taiwan sites only:
-// the 「非台灣」 group would push every local site down). Gray lines are the top
-// 10/20 in the latest month; the highlighted site (click a line or a table row) is blue.
-const isTaiwan = (s) => s.group !== '非台灣';
+// Sites of one topic ranked against each other month by month (Taiwan sites only,
+// like the tables). Gray lines are the top 10/20 in the latest month; the
+// highlighted site (click a line or a table row) is blue.
 const topicRankCache = new Map();
 function topicRanks(topic, month) {
   const key = `${state.source}|${topic}|${month}`;

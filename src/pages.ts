@@ -113,7 +113,9 @@ export function rankingPage(
     .join('');
   const rowsHtml = list
     .map(
-      (s) => `<tr><td class="rank">${s.rank}</td><td class="l"><a class="site-name" href="/site/${html(s.domain)}/">${html(s.name)}</a>${
+      (
+        s,
+      ) => `<tr><td class="rank"${s.rank === null ? ' title="「非台灣」群組不排名次"' : ''}>${s.rank ?? '—'}</td><td class="l"><a class="site-name" href="/site/${html(s.domain)}/">${html(s.name)}</a>${
         s.visitsSource === 'sheet' ? '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>' : ''
       }<span class="site-domain">${html(s.domain)}</span></td><td class="l"><span class="radar">${html([s.group, ...s.topics].filter(Boolean).join('・'))}</span></td>
 <td class="num">${num(s.visits)}</td><td class="num">${signed(s.growth)}</td><td class="num">${s.prevRank ?? ''}</td><td class="num">${num(s.searchVisits)}</td><td class="num">${num(s.aiVisits)}</td>
@@ -129,7 +131,7 @@ export function rankingPage(
     {
       kicker: '流量觀察・表格',
       title: month ? `${monthLong(month)}排行` : '月排行',
-      dek: `依造訪量排序的完整表格，成長與上月名次都跟前一個月比。要比較任意兩個月或看排名軌跡，請用<a href="/${month ? `#to=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}` : ''}">月報</a>。`,
+      dek: `依造訪量排序的完整表格，成長與上月名次都跟前一個月比；名次只算台灣網站，「非台灣」群組照列但不排名。要比較任意兩個月或看排名軌跡，請用<a href="/${month ? `#to=${month}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}` : ''}">月報</a>。`,
       controls: month ? `${monthPicker(months, month, { topic, source })}<a href="${csv}">下載 CSV</a>` : '',
     },
     `<div class="chips-bar"><div class="wrap"><nav class="chips sources" aria-label="來源">${sourceChips}</nav><nav class="chips" aria-label="分類">${chips}</nav></div></div>
