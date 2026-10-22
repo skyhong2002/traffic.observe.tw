@@ -21,7 +21,7 @@ import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
-import { serviceStatus } from './status.ts';
+import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
 import { STYLE, STYLE_HREF } from './style.ts';
 
@@ -190,7 +190,8 @@ export function buildApp(
         ),
       ]);
       const q = request.query;
-      const listOf = typeof q.list === 'string' && others.some((o) => o.requester === q.list) ? q.list : null;
+      const listOf = typeof q.list === 'string' && q.list !== 'sheet' && others.some((o) => o.requester === q.list) ? q.list : null;
+      const queue = new Map((await loadQueue(pool, config)).map((e) => [e.domain, e]));
       const flash =
         q.error === 'invalid'
           ? '沒有可以加入的網域。請輸入像 example.com.tw 的網域或完整網址。'
@@ -207,6 +208,7 @@ export function buildApp(
         others: others.map((o) => ({ ...o, domains: Number(o.domains) })),
         flash,
         list: listOf ? { requester: listOf, rows: await watchList(pool, listOf) } : null,
+        queue,
       });
     },
   );
@@ -252,13 +254,13 @@ export function buildApp(
   // Public, read-only API.
   app.get('/api/v1/', async () => ({
     service: 'traffic.observe.tw',
-    source: 'Similarweb extension estimates (monthly visits per domain, in millions) plus the GeneHong sheet for months Similarweb lacks',
+    source: 'Similarweb extension estimates (monthly visits per domain, in millions) plus a hand-kept sheet for months Similarweb lacks',
     endpoints: {
       'GET /api/v1/months': 'months with data, newest first',
       'GET /api/v1/history':
         'every month at once (oldest first): per domain [visits, search visits, AI visits, Taiwan share, from sheet], labels, sources, Cloudflare Radar periods',
       'GET /api/v1/rankings?month=YYYYMM&topic=&source=':
-        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added and the GeneHong sheet) optional; foreign=1 adds the unranked 非台灣 sites',
+        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added) optional; foreign=1 adds the unranked 非台灣 sites',
       'GET /api/v1/rankings.csv?month=YYYYMM&topic=': 'the same as CSV',
       'GET /api/v1/topics?month=YYYYMM': 'per-topic growth and search/AI shares',
       'GET /api/v1/sites/:domain': 'every month for one domain',

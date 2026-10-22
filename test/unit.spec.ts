@@ -5,6 +5,7 @@ import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab } from '../src/sheet.ts';
 import { publicDomain, searchShare } from '../src/similarweb.ts';
+import { fetchQueue } from '../src/status.ts';
 
 const now = new Date('2026-10-21T10:00:00Z');
 const DAY = 86_400_000;
@@ -53,6 +54,24 @@ describe('dueDomains', () => {
     const base = { lastSuccess: t - 2 * DAY, latestProfile: '202608' };
     expect(dueDomains([candidate('a.tw', { ...base, lastAttempt: t - 2 * DAY })], now)).toEqual([]);
     expect(dueDomains([candidate('a.tw', { ...base, lastAttempt: t - 4 * DAY })], now)).toEqual(['a.tw']);
+  });
+
+  it('puts every due domain in an hourly batch, budget at a time, from the next :35', () => {
+    const t = now.getTime();
+    const config = { ...runConfig({ TRAFFIC_RUN_BUDGET: '2' }) };
+    const queue = fetchQueue(
+      [candidate('a.tw'), candidate('b.tw'), candidate('c.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY })],
+      config,
+      null,
+      now,
+    );
+    expect(queue.map((e) => [e.domain, e.position, e.reason, e.requester, e.expectedAt])).toEqual([
+      ['a.tw', 1, 'new', 'manual', '2026-10-21T10:35:00.000Z'],
+      ['b.tw', 2, 'new', 'manual', '2026-10-21T10:35:00.000Z'],
+      ['c.tw', 3, 'refresh', 'manual', '2026-10-21T11:35:00.000Z'],
+    ]);
+    const cooling = new Date('2026-10-21T10:50:00Z');
+    expect(fetchQueue([candidate('a.tw')], config, cooling, now)[0].expectedAt).toBe('2026-10-21T11:35:00.000Z');
   });
 });
 

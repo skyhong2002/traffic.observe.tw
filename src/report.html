@@ -301,7 +301,7 @@ function render() {
   document.getElementById('sources').innerHTML =
     `<span class="lbl">來源</span><a href="#" data-source=""${state.source ? '' : ' class="on"'}>所有來源</a>` +
     srcAll
-      .map((o) => `<a href="#" data-source="${esc(o.source)}"${state.source === o.source ? ' class="on"' : ''} title="追蹤 ${o.domains} 個網域，本期有數字 ${withData(o.source)} 個${o.source === 'manual' ? '（含 GeneHong 試算表名單）' : ''}">${esc(SOURCE_LABEL[o.source] ?? o.source)}<small>${withData(o.source)}/${o.domains}</small></a>`)
+      .map((o) => `<a href="#" data-source="${esc(o.source)}"${state.source === o.source ? ' class="on"' : ''} title="追蹤 ${o.domains} 個網域，本期有數字 ${withData(o.source)} 個">${esc(SOURCE_LABEL[o.source] ?? o.source)}<small>${withData(o.source)}/${o.domains}</small></a>`)
       .join('') +
     `<span class="lbl">範圍</span><a href="#" data-foreign${state.foreign ? ' class="on"' : ''} aria-pressed="${state.foreign}" title="「非台灣」群組的網站照列但不排名次">含非台灣${state.foreign ? '' : `<small>${hiddenForeign()}</small>`}</a>`;
   const calGap = calendar(state.from, state.to).length - 1;

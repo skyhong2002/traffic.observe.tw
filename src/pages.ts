@@ -2,7 +2,7 @@ import type { ranking, topicSummary } from './metrics.ts';
 import { splitTopics, UNLABELLED } from './metrics.ts';
 import type { RadarPeriod } from './radar.ts';
 import type { WatchRow } from './requests.ts';
-import type { serviceStatus } from './status.ts';
+import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF } from './style.ts';
 
 // Server-rendered pages in the report's design (style.css): the shared site
@@ -296,6 +296,12 @@ export function lineChart(
   return `<div class="chart-wide">${draw(wide, height)}</div><div class="chart-narrow">${draw(340, Math.round(height * 0.85))}</div>`;
 }
 
+const DUE_LABEL: Record<string, string> = {
+  new: '新網域，還沒抓過',
+  refresh: '到了更新週期',
+  'catch-up': '還缺上個月的資料',
+  lookup: '單次查詢',
+};
 const KIND_LABEL: Record<string, string> = { watch: '定期追蹤', traffic: '單次查詢（流量）', similar_sites: '單次查詢（相似網站）' };
 
 export function sitePage(site: SitePage) {
@@ -420,8 +426,32 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
     )
     .join('');
   const sent24 = Object.values(status.last24h).reduce((a, b) => a + b, 0);
+  // The sheet's domains count as 手動 here too, so its rows merge into that one.
+  const watchers = [
+    ...status.watchers
+      .reduce((m, w) => {
+        const key = `${sourceOf(w.requester)}|${w.kind}`;
+        return m.set(key, { ...w, requester: sourceOf(w.requester), domains: (m.get(key)?.domains ?? 0) + w.domains });
+      }, new Map<string, (typeof status.watchers)[number]>())
+      .values(),
+  ];
+  const priority = [...new Set(status.priority.map(sourceOf))];
+  const q = status.queue;
+  const queueRows = q
+    .map(
+      (e) =>
+        `<tr${status.budget && e.position <= status.budget ? ' class="hl"' : ''}><td class="rank">${e.position}</td><td class="l"><a class="site-name" href="/site/${html(e.domain)}/">${html(e.domain)}</a></td><td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td><td class="l">${e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>'}</td><td class="l">${e.expectedAt ? tw(e.expectedAt) : '<span class="muted">不會送出</span>'}</td></tr>`,
+    )
+    .join('');
+  const queueNote = q.length
+    ? `<p class="note">共 ${q.length} 個網域等著抓，依這個順序送出${
+        status.budget
+          ? `，每小時一輪、一輪 ${status.budget} 個：最先的是 <b>${html(q[0].domain)}</b>（${tw(q[0].expectedAt)}），排最後的是 <b>${html(q.at(-1)?.domain)}</b>（約 ${tw(q.at(-1)?.expectedAt ?? null)}）。底色是下一輪會送出的。`
+          : '；每輪上限是 0，目前不會送出。'
+      }預計時間假設中途沒有被 Similarweb 擋、也沒有新加入的網域插隊。<a href="#queue-end">跳到最後</a></p>`
+    : '<p class="note">目前沒有到期的網域。</p>';
   const stats = `<div class="stats"><div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時一輪，間隔 3 秒' : '0：目前不送出任何請求'}</small></div>
-<div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small>等著抓的網域</small></div>
+<div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small><a href="#queue">看排程</a></small></div>
 <div><span>近 24 小時請求</span><b>${sent24}</b><small>${
     Object.entries(status.last24h)
       .map(([k, v]) => `${html(k)} ${v}`)
@@ -432,14 +462,24 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
     {
       kicker: '流量觀察・抓取狀態',
       title: 'Similarweb 抓取狀態',
-      dek: `這台主機唯一對 Similarweb 發請求的排程。優先序：${status.priority.map(requesterLabel).join(' → ')}。`,
+      dek: `這台主機唯一對 Similarweb 發請求的排程。優先序：${priority.map(requesterLabel).join(' → ')}。下方「抓取排程」列出接下來每個網域的順序與預計時間。`,
     },
     `<main class="wrap">${status.coolingDownUntil ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>` : ''}${stats}
+${section(
+  `抓取排程<small>${q.length} 個網域</small>`,
+  `${queueNote}${table(
+    '<th>順序</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>',
+    queueRows,
+    '目前沒有到期的網域。',
+    6,
+  )}<p class="note" id="queue-end">排程到此為止；之後到期的網域會依同樣規則接在後面。</p>`,
+  ' id="queue"',
+)}
 ${section(
   '追蹤者',
   table(
     '<th class="l">來源</th><th class="l">類型</th><th class="num">網域</th>',
-    status.watchers
+    watchers
       .map(
         (w) =>
           `<tr><td class="l">${requesterLabel(w.requester)}</td><td class="l">${KIND_LABEL[w.kind] ?? html(w.kind)}</td><td class="num">${w.domains}</td></tr>`,
@@ -494,8 +534,8 @@ const REQUESTER_LABEL: Record<string, string> = {
   manual: '手動',
   tag: '媒體（tag）',
   blog: '部落格（blog）',
-  // GeneHong's sheet is the hand-curated list: one source with the domains added on /watch/.
-  sheet: '手動（試算表匯入）',
+  // The sheet's list is hand-curated too; it is not shown on its own.
+  sheet: '手動',
 };
 /** The source a requester belongs to on the pages: the sheet and /watch/ are both 「手動」. */
 export const sourceOf = (requester: string) => (requester === 'sheet' ? 'manual' : requester);
@@ -509,6 +549,7 @@ export function watchPage({
   others,
   flash,
   list = null,
+  queue = new Map(),
 }: {
   editor: { email: string } | null;
   loginEnabled: boolean;
@@ -517,7 +558,15 @@ export function watchPage({
   flash: string | null;
   /** Another requester's standing list, shown read-only. */
   list?: { requester: string; rows: WatchRow[] } | null;
+  /** Where each due domain stands in the fetch queue. */
+  queue?: Map<string, QueueEntry>;
 }) {
+  const queued = (w: WatchRow) => {
+    const e = queue.get(w.domain);
+    return e
+      ? `<span class="muted" title="${html(DUE_LABEL[e.reason] ?? e.reason)}">排第 ${e.position} 位${e.expectedAt ? `・預計 ${tw(e.expectedAt)}` : ''}</span>`
+      : null;
+  };
   const state = (w: WatchRow) =>
     w.lastSuccessAt
       ? `<span class="up">${tw(w.lastSuccessAt.toISOString())}</span>`
@@ -527,7 +576,7 @@ export function watchPage({
           ? `<span class="down" title="${html(w.lastError)}">▼ 失敗 ${w.failures} 次</span>`
           : w.lastAttemptAt
             ? '抓取中'
-            : '<span class="muted">排隊中</span>';
+            : (queued(w) ?? '<span class="muted">排隊中</span>');
   const rowHtml = (
     w: WatchRow,
     removable: boolean,
@@ -539,7 +588,6 @@ export function watchPage({
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
   const head =
     '<th class="l">網域</th><th class="num">最新流量（百萬）</th><th class="num">週期</th><th class="l">最近成功</th><th class="l">加入</th><th></th>';
-  const sheet = others.find((o) => o.requester === 'sheet');
   const services = others.filter((o) => o.requester !== 'sheet');
   const form = editor
     ? `<form class="form" method="post" action="/watch/"><label>網域或網址，一行一個（最多 200 個）
@@ -561,14 +609,10 @@ export function watchPage({
     {
       kicker: '流量觀察・追蹤網域',
       title: '追蹤網域',
-      dek: '這裡加入的網域會排進 Similarweb 抓取（每小時一輪，最優先），之後依設定的週期更新；Cloudflare Radar 每天抓一次。Similarweb 只提供最新一個月的搜尋與 AI 占比，所以越早加入，留下的月份越多。',
+      dek: '這裡加入的網域會排進 Similarweb 抓取（每小時一輪，最優先），之後依設定的週期更新；Cloudflare Radar 每天抓一次。Similarweb 只提供最新一個月的搜尋與 AI 占比，所以越早加入，留下的月份越多。接下來會抓哪些網域、順序和預計時間，見<a href="/status/#queue">抓取狀態的排程</a>。',
     },
     `<main class="wrap">${flash ? `<p class="flash">${html(flash)}</p>` : ''}${form}
-<section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${
-      sheet
-        ? `<p class="note">GeneHong 整理的名單也算手動追蹤：另有 <a href="/watch/?list=sheet#list">${sheet.domains} 個網域由試算表匯入</a>，每 30 天更新，排在媒體與部落格之後抓取。</p>`
-        : ''
-    }${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', 6)}</section>
+<section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', 6)}</section>
 ${section(
   '其他來源',
   `<p class="body">${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,

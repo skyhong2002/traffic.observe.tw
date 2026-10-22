@@ -1,5 +1,38 @@
 import { type Pool, rows } from './db.ts';
-import { coolingDown, dueDomains, loadCandidates, type RunConfig } from './scheduler.ts';
+import { type Candidate, coolingDown, dueQueue, loadCandidates, type RunConfig } from './scheduler.ts';
+
+const HOUR = 3_600_000;
+/** The worker's next run at :runMinute that is not before `from`. */
+function nextRunAt(from: Date, minute: number) {
+  const at = new Date(from);
+  at.setUTCSeconds(0, 0);
+  at.setUTCMinutes(minute);
+  if (at < from) at.setUTCHours(at.getUTCHours() + 1);
+  return at;
+}
+
+/**
+ * Everything due, in the order it will be sent, with the run expected to send it:
+ * batches of `budget`, one per hour from the next run (after a cooldown, if one is on).
+ */
+export function fetchQueue(candidates: Candidate[], config: RunConfig, cooling: Date | null, now = new Date()) {
+  const first = nextRunAt(cooling && cooling > now ? cooling : now, config.runMinute);
+  return dueQueue(candidates, now).map((c, i) => ({
+    domain: c.domain,
+    position: i + 1,
+    requester: config.priority[c.tier] ?? null,
+    reason: c.reason,
+    lastSuccessAt: c.lastSuccess ? new Date(c.lastSuccess).toISOString() : null,
+    expectedAt: config.budget ? new Date(first.getTime() + Math.floor(i / config.budget) * HOUR).toISOString() : null,
+  }));
+}
+export type QueueEntry = ReturnType<typeof fetchQueue>[number];
+
+/** The queue alone, for pages that only mark where a domain stands. */
+export async function loadQueue(pool: Pool, config: RunConfig, now = new Date()) {
+  const [candidates, cooling] = await Promise.all([loadCandidates(pool, config), coolingDown(pool, config, now)]);
+  return fetchQueue(candidates, config, cooling, now);
+}
 
 /** Worker health for /status/ and /api/v1/status. */
 export async function serviceStatus(pool: Pool, config: RunConfig, now = new Date()) {
@@ -25,12 +58,14 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     loadCandidates(pool, config),
     coolingDown(pool, config, now),
   ]);
+  const queue = fetchQueue(candidates, config, cooling, now);
   return {
     budget: config.budget,
     priority: config.priority,
     coolingDownUntil: cooling?.toISOString() ?? null,
     watched: candidates.length,
-    due: dueDomains(candidates, now).length,
+    due: queue.length,
+    queue,
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, domains: Number(w.n) })),
     last24h: Object.fromEntries(sends.map((s) => [s.outcome, Number(s.n)])),
     runs: runs.map((r) => ({

@@ -29,6 +29,8 @@ export function runConfig(env: Record<string, string | undefined> = process.env)
     priority: (env.TRAFFIC_PRIORITY || 'manual,tag,blog,sheet').split(',').map((s) => s.trim()),
     /** One-off lookups a requester may submit per Taipei day. */
     submitPerDay: num('TRAFFIC_SUBMIT_PER_DAY', 200),
+    /** The worker runs once an hour at this minute (:35 is where tag's job ran). */
+    runMinute: num('TRAFFIC_RUN_MINUTE', 35) % 60,
   };
 }
 export type RunConfig = ReturnType<typeof runConfig>;
@@ -60,20 +62,25 @@ export const previousMonth = (now: Date) => {
  * every three days. Domains in backoff (next_attempt_at) wait. Order: requester
  * priority, never fetched first, then the oldest success.
  */
-export function dueDomains(candidates: Candidate[], now = new Date()) {
+export function dueQueue(candidates: Candidate[], now = new Date()) {
   const t = now.getTime();
   const last = previousMonth(now);
+  const reason = (c: Candidate): DueReason | null => {
+    if (c.nextAttempt > t) return null;
+    if (c.pendingSince !== null) return 'lookup';
+    if (c.refreshDays === null) return null;
+    if (t - c.lastSuccess >= c.refreshDays * DAY) return c.lastSuccess ? 'refresh' : 'new';
+    return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
+  };
   return candidates
-    .filter((c) => {
-      if (c.nextAttempt > t) return false;
-      if (c.pendingSince !== null) return true;
-      if (c.refreshDays === null) return false;
-      if (t - c.lastSuccess >= c.refreshDays * DAY) return true;
-      return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP;
-    })
-    .sort((a, b) => a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess)
-    .map((c) => c.domain);
+    .map((c) => ({ ...c, reason: reason(c) }))
+    .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
+    .sort((a, b) => a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess);
 }
+/** Why a domain is due: never fetched, past its refresh interval, last month's profile still missing, or a one-off lookup. */
+export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
+
+export const dueDomains = (candidates: Candidate[], now = new Date()) => dueQueue(candidates, now).map((c) => c.domain);
 
 const time = (d: Date | null) => d?.getTime() ?? 0;
 

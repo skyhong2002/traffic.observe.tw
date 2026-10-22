@@ -8,7 +8,7 @@ import { runConfig, runOnce } from './scheduler.ts';
 // environment takes effect after a restart without a code change.
 
 const pool = createPool();
-const minute = Number(process.env.TRAFFIC_RUN_MINUTE ?? 35);
+const minute = runConfig().runMinute;
 const radarHour = Number(process.env.TRAFFIC_RADAR_HOUR ?? 3);
 const taipeiHour = (now: Date) => (now.getUTCHours() + 8) % 24;
 let timer: NodeJS.Timeout | undefined;
