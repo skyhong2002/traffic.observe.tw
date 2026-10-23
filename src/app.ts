@@ -22,6 +22,7 @@ import {
 import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
+import { registerSeo } from './seo.ts';
 import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
@@ -154,6 +155,8 @@ export function buildApp(
   app.get('/tables.js', async (_request, reply) =>
     reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=86400').send(TABLES_SCRIPT),
   );
+  // robots.txt, the sitemap, canonical links, and noindex on everything that is not a public entry page.
+  registerSeo(app);
 
   // Pages.
   // The report: any two months compared, sources and topics filtered, rank trajectories per topic.

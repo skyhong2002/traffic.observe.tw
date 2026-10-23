@@ -70,6 +70,17 @@
 
 全站固定使用黑色主題，共用表格沿用 [tag.observe.tw/media/traffic](https://tag.observe.tw/media/traffic) 的緊湊樣式。名稱與網域同列顯示，相同時省略網域；橫向捲動時固定識別欄，垂直捲動頁面時表頭保持可見。
 
+## 搜尋引擎（`src/seo.ts`）
+
+公開與私人的界線不因 SEO 改變：公開頁面與 API 照舊不需登入，`/watch/` 的寫入、`/sites/`、編輯頁仍需登入，`/internal/*` 仍只接受本機加 token。
+
+- 可索引：`/`、`/table/`、`/topics/`（附 description 與不含查詢字串的 canonical），以及有資料的 `/site/<domain>/`（canonical 為正規化後的網域）。
+- 其他回應一律帶 `X-Robots-Tag: noindex`，HTML 另加 `<meta name="robots" content="noindex">`：`/status/`（抓取紀錄）、`/watch/`、`/login/`、`/sites/`、編輯頁、`/api/*`、錯誤與所有未知路由。未知路由維持 Fastify 原本的 404，不導向首頁。
+- `/robots.txt` 只擋 `/internal/` 與 `/auth/`。`/api/` 不擋，因為 `/` 在瀏覽器端讀 `/api/v1/history`，擋掉會讓搜尋引擎算繪出空白頁；API 改以 noindex 標頭排除。
+- `/sitemap.xml` 只列 `/`、`/table/`、`/topics/` 三頁；網站頁靠內部連結被發現，不列入。網址前綴取 `TRAFFIC_PUBLIC_ORIGIN`。
+- `http://traffic.observe.tw/` 目前直接回 200、未轉 https，這屬於 Cloudflare 的區域設定，本服務只以 https canonical 指向正式網址。
+- `/watch/` 匿名可讀，表格會顯示加入者（`added_by`，編輯的 email）與備註。2026-10-23 檢查時手動清單為空，沒有露出 email；是否改成登入後才顯示加入者，需要另外決定。
+
 ## 登入與手動追蹤（`/watch/`）
 
 用 Google 登入（`src/login.ts`，從 tag 的 `app/src/auth/google-login.ts` 簡化而來），OAuth client 與 tag 共用。只有 `TRAFFIC_ADMIN_EMAILS` 名單上的帳號會拿到 session（30 天，cookie `traffic_session`，資料庫只存 SHA-256）。名單每次請求都會重新比對，從名單移除後立刻失效。其他人看公開頁面不需要登入。
