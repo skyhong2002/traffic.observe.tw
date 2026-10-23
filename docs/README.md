@@ -78,10 +78,12 @@
 - 其他回應一律帶 `X-Robots-Tag: noindex`，HTML 另加 `<meta name="robots" content="noindex">`：`/status/`（抓取紀錄）、`/watch/`、`/login/`、`/sites/`、編輯頁、`/api/*`、錯誤與所有未知路由。未知路由維持 Fastify 原本的 404，不導向首頁。
 - `/robots.txt` 只擋 `/internal/` 與 `/auth/`。`/api/` 不擋，因為 `/` 在瀏覽器端讀 `/api/v1/history`，擋掉會讓搜尋引擎算繪出空白頁；API 改以 noindex 標頭排除。
 - `/sitemap.xml` 只列 `/`、`/table/`、`/topics/` 三頁；網站頁靠內部連結被發現，不列入。網址前綴取 `TRAFFIC_PUBLIC_ORIGIN`。
-- `http://traffic.observe.tw/` 目前直接回 200、未轉 https，這屬於 Cloudflare 的區域設定，本服務只以 https canonical 指向正式網址。
+- `http://` 由 Cloudflare 規則 308 轉到 https 的同一路徑與查詢字串，本服務不處理（規則由 Codex 部署，不在本 repo）。
 - `/watch/` 匿名可讀，表格會顯示加入者（`added_by`，編輯的 email）與備註。2026-10-23 檢查時手動清單為空，沒有露出 email；是否改成登入後才顯示加入者，需要另外決定。
 
 2026-10-23 17:51（台北時間）以 `545f2c8` 重啟 web 服務上線（工作樹同時包含當時已上線、尚未提交的網站名稱與標籤管理改動）。公開站匿名實測：`/`、`/table/`、`/topics/`、`/site/udn.com/` 200 且 canonical 正確，帶查詢字串時 canonical 不含查詢字串；`/status/`、`/watch/`、`/login/`、`/api/v1/`、`/api/v1/history` 200 加 noindex；`/sites/`、編輯頁 303 到登入；`/nope-x1`、`/table`、`/index.html`、不存在的網站與 `/internal/*` 皆 404 加 noindex；`/robots.txt`、`/sitemap.xml` 200。可提交 Google 的 Sitemap：`https://traffic.observe.tw/sitemap.xml`，共 3 個網址。提交不代表已索引。回復方式：移除 `src/app.ts` 的 `registerSeo(app)` 與其 import，再重啟 web 服務。
+
+2026-10-23 Google 與 Cloudflare 端（Codex 處理）：Search Console 新增 `https://traffic.observe.tw/` 資源並自動驗證，`sitemap.xml` 狀態 Success、讀到 3 個網址；18:12 實測 `GET http://traffic.observe.tw/table/?gsc_check=20261023` 回 308，轉到 https 的同一路徑與查詢字串。Sitemap 成功只代表 Google 讀得到，不代表頁面已被索引。
 
 ## 登入與手動追蹤（`/watch/`）
 
