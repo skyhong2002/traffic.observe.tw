@@ -81,6 +81,8 @@
 - `http://traffic.observe.tw/` 目前直接回 200、未轉 https，這屬於 Cloudflare 的區域設定，本服務只以 https canonical 指向正式網址。
 - `/watch/` 匿名可讀，表格會顯示加入者（`added_by`，編輯的 email）與備註。2026-10-23 檢查時手動清單為空，沒有露出 email；是否改成登入後才顯示加入者，需要另外決定。
 
+2026-10-23 17:51（台北時間）以 `545f2c8` 重啟 web 服務上線（工作樹同時包含當時已上線、尚未提交的網站名稱與標籤管理改動）。公開站匿名實測：`/`、`/table/`、`/topics/`、`/site/udn.com/` 200 且 canonical 正確，帶查詢字串時 canonical 不含查詢字串；`/status/`、`/watch/`、`/login/`、`/api/v1/`、`/api/v1/history` 200 加 noindex；`/sites/`、編輯頁 303 到登入；`/nope-x1`、`/table`、`/index.html`、不存在的網站與 `/internal/*` 皆 404 加 noindex；`/robots.txt`、`/sitemap.xml` 200。可提交 Google 的 Sitemap：`https://traffic.observe.tw/sitemap.xml`，共 3 個網址。提交不代表已索引。回復方式：移除 `src/app.ts` 的 `registerSeo(app)` 與其 import，再重啟 web 服務。
+
 ## 登入與手動追蹤（`/watch/`）
 
 用 Google 登入（`src/login.ts`，從 tag 的 `app/src/auth/google-login.ts` 簡化而來），OAuth client 與 tag 共用。只有 `TRAFFIC_ADMIN_EMAILS` 名單上的帳號會拿到 session（30 天，cookie `traffic_session`，資料庫只存 SHA-256）。名單每次請求都會重新比對，從名單移除後立刻失效。其他人看公開頁面不需要登入。
