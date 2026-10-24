@@ -2,7 +2,7 @@ import { loadCrowd, shownTags } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { loadManualMonths } from './manual.ts';
 import { loadMetadata } from './metadata.ts';
-import { aiShare, estimated, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { aiShare, estimated, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { latestTopics } from './tags.ts';
 
 // The sheet's monthly view, computed from stored data: visits, growth, last
@@ -27,6 +27,11 @@ export interface SiteMonth {
   taiwanShare: number | null;
   prevSearchShare: number | null;
   prevAiShare: number | null;
+  /** Every Similarweb channel's share this month; null without a Similarweb estimate (no sheet fallback). */
+  channels: Partial<Record<TrafficChannel, number>> | null;
+  /** The comparison month's 台灣 share and channels, set by the rankings when a month is compared. */
+  prevTaiwanShare?: number | null;
+  prevChannels?: Partial<Record<TrafficChannel, number>> | null;
 }
 
 export const shiftMonth = (month: string, by: number) => {
@@ -107,6 +112,7 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     return {
       visits: sw ?? (hand ? hand.visits / 1e6 : null) ?? sh?.visits ?? null,
       source: sw !== undefined ? ('similarweb' as const) : hand ? ('manual' as const) : sh?.visits != null ? ('sheet' as const) : null,
+      channels: p ? p.channels : null,
       search: p ? searchShare(p) : fallback.search,
       ai: p ? aiShare(p) : fallback.ai,
       taiwan: p ? taiwanShare(p) : fallback.taiwan,
@@ -134,15 +140,16 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
       taiwanShare: now.taiwan,
       prevSearchShare: before.search,
       prevAiShare: before.ai,
+      channels: now.channels,
     });
   }
   return out.sort((a, b) => (b.visits ?? 0) - (a.visits ?? 0));
 }
 
 /** Rows of one topic, ranked by visits, with last month's rank in the same topic. */
-export function ranking(view: SiteMonth[], topic: string | null) {
+export function ranking<T extends SiteMonth>(view: T[], topic: string | null) {
   const inTopic = topic ? view.filter((s) => s.topics.includes(topic)) : view;
-  const places = (list: SiteMonth[]) => new Map(list.map((s, i) => [s.domain, i + 1]));
+  const places = (list: T[]) => new Map(list.map((s, i) => [s.domain, i + 1]));
   const rank = places(inTopic);
   const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => (b.prevVisits ?? 0) - (a.prevVisits ?? 0)));
   return inTopic.map((s) => ({

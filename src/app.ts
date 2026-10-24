@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
-import { loadProfiles, sourceTrends } from './channels.ts';
 import {
   cleanTag,
   loadCrowd,
@@ -36,7 +35,6 @@ import {
   siteHeader,
   sitePage,
   sourceOf,
-  sourcesPage,
   statusPage,
   topicsPage,
   watchPage,
@@ -46,7 +44,7 @@ import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { registerSeo } from './seo.ts';
-import { aiShare, estimated, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { aiShare, estimated, publicDomain, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
 import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
@@ -66,6 +64,19 @@ const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
   .replace('<!--header-->', siteHeader('report'))
   .replace('<!--footer-->', siteFooter());
 const MAX_TRAFFIC_DOMAINS = 2000;
+/** Every Similarweb channel in the CSV, Similarweb's own figures (搜尋占比 and AI占比 may come from the sheet). */
+const CSV_CHANNELS: Array<[TrafficChannel, string]> = [
+  ['Direct', '直接造訪'],
+  ['SearchOrganic', '自然搜尋'],
+  ['SearchPaid', '搜尋廣告'],
+  ['SocialOrganic', '社群'],
+  ['SocialPaid', '社群廣告'],
+  ['Referrals', '其他網站連入'],
+  ['Mail', '電子郵件'],
+  ['DisplayAds', '展示型廣告'],
+  ['GenAi', 'AI工具'],
+  ['Affiliate', '聯盟行銷'],
+];
 const PUBLIC_ORIGIN = new URL(process.env.TRAFFIC_PUBLIC_ORIGIN || 'https://traffic.observe.tw').origin;
 /** Tags the ranking pages leave out until a visitor brings them back. */
 const DEFAULT_EXCLUDE = ['非台灣'];
@@ -167,11 +178,27 @@ export function buildApp(
     const topic = topics.some((t) => t.topic === query.topic) ? (query.topic as string) : null;
     const exclude = [...new Set(String(query.exclude ?? '').split(','))].filter((t) => t !== topic && topics.some((x) => x.topic === t));
     const kept = exclude.length ? list.filter((s) => !s.topics.some((t) => exclude.includes(t))) : list;
-    const placed = ranking(kept, topic);
-    return { months, month, topics, topic, exclude, source, sources, list: placed };
+    // The comparison month (the nearest earlier month by default): growth, the earlier rank and every share's change are against it.
+    const older = months.filter((m) => m < month);
+    const from = typeof query.from === 'string' && older.includes(query.from) ? query.from : (older[0] ?? null);
+    const before = new Map((from ? await view(from) : []).map((s) => [s.domain, s]));
+    const compared = kept.map((s) => {
+      const b = before.get(s.domain);
+      return {
+        ...s,
+        prevVisits: b?.visits ?? null,
+        prevSearchShare: b?.searchShare ?? null,
+        prevAiShare: b?.aiShare ?? null,
+        prevTaiwanShare: b?.taiwanShare ?? null,
+        prevChannels: b?.channels ?? null,
+      };
+    });
+    const placed = ranking(compared, topic);
+    const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
+    return { months, month, from, show, topics, topic, exclude, source, sources, list: placed };
   };
 
-  type RankingQuery = { month?: string; topic?: string; exclude?: string; source?: string };
+  type RankingQuery = { month?: string; from?: string; show?: string; topic?: string; exclude?: string; source?: string };
   let historyCache: { at: number; data: Promise<History> } | null = null;
   const history = () => {
     if (historyCache && Date.now() - historyCache.at < HISTORY_MS) return historyCache.data;
@@ -420,34 +447,15 @@ export function buildApp(
     const r = await rankingFor({ ...request.query, exclude: request.query.exclude ?? DEFAULT_EXCLUDE.join(',') });
     reply.type('text/html; charset=utf-8');
     return r
-      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude)
+      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude, { from: r.from, show: r.show })
       : rankingPage('', [], [], null, []);
-  });
-  /** Source trends for every site, or for the sites carrying `topic`; tags are offered by how many profiled sites carry them. */
-  const sourcesFor = async (raw: unknown) => {
-    const [profiles, sites] = await Promise.all([loadProfiles(pool), managedSites(pool)]);
-    const profiled = new Set(profiles.map((p) => p.domain));
-    const count = new Map<string, number>();
-    for (const s of sites) if (profiled.has(s.domain)) for (const t of s.topics) count.set(t, (count.get(t) ?? 0) + 1);
-    const topics = [...count].map(([topic, n]) => ({ topic, sites: n })).sort((a, b) => b.sites - a.sites);
-    const topic = typeof raw === 'string' && count.has(raw) ? raw : null;
-    const members = topic ? new Set(sites.filter((s) => s.topics.includes(topic)).map((s) => s.domain)) : null;
-    const trends = sourceTrends(members ? profiles.filter((p) => members.has(p.domain)) : profiles);
-    return { trends, topics, topic, names: new Map(sites.map((s) => [s.domain, s.name])) };
-  };
-  app.get<{ Querystring: { topic?: string } }>('/sources/', async (request, reply) => {
-    reply.type('text/html; charset=utf-8');
-    const r = await sourcesFor(request.query.topic);
-    return sourcesPage(r.trends, r.names, r.topics, r.topic);
-  });
-  app.get<{ Querystring: { topic?: string } }>('/api/v1/sources', async (request) => {
-    const r = await sourcesFor(request.query.topic);
-    return { topic: r.topic, ...r.trends, movers: r.trends.movers.map((m) => ({ ...m, name: r.names.get(m.domain) ?? m.domain })) };
   });
   app.get<{ Querystring: { topic?: string } }>('/tag/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
     return topicsPage(await allTopics(), request.query.topic);
   });
+  // /sources/ charted channels across sites for an hour on 2026-10-24; that comparison is the full table's now.
+  app.get('/sources/', async (_request, reply) => reply.redirect('/table/', 301));
   // The tags page used to live at /topics/; old links and bookmarks keep working.
   app.get('/topics/', async (request, reply) => reply.redirect(`/tag/${request.url.slice('/topics/'.length)}`, 301));
   app.get<{ Params: { domain: string }; Querystring: { tags?: string } }>('/site/:domain/', async (request, reply) => {
@@ -585,7 +593,7 @@ export function buildApp(
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings', async (request, reply) => {
     const r = await rankingFor(request.query);
     if (!r) return reply.code(404).send({ error: 'no_data' });
-    return { month: r.month, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
+    return { month: r.month, from: r.from, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings.csv', async (request, reply) => {
     const r = await rankingFor(request.query);
@@ -607,6 +615,9 @@ export function buildApp(
       'AI占比',
       '台灣占比',
       '來源',
+      ...CSV_CHANNELS.map(([, label]) => `${label}占比`),
+      '比較月份',
+      ...CSV_CHANNELS.map(([, label]) => `${label}占比差距`),
     ];
     const body = r.list.map((s) =>
       [
@@ -624,6 +635,9 @@ export function buildApp(
         s.aiShare,
         s.taiwanShare,
         s.visitsSource,
+        ...CSV_CHANNELS.map(([key]) => (s.channels ? (s.channels[key] ?? 0) : null)),
+        r.from,
+        ...CSV_CHANNELS.map(([key]) => (s.channels && s.prevChannels ? (s.channels[key] ?? 0) - (s.prevChannels[key] ?? 0) : null)),
       ]
         .map(cell)
         .join(','),

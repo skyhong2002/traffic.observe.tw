@@ -1,6 +1,5 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
-import { sourceTrends } from '../src/channels.ts';
 import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
@@ -255,6 +254,7 @@ describe('ranking and topicSummary', () => {
     taiwanShare: null,
     prevSearchShare: search,
     prevAiShare: ai,
+    channels: null,
   });
   const view = [site('a.tw', 10, 8, ['台灣', '電商']), site('b.tw', 9, 12, ['台灣', '電商', '科技']), site('c.tw', 1, null, [])];
 
@@ -405,40 +405,7 @@ describe('Similarweb composition', () => {
   });
 });
 
-describe('traffic source trends', () => {
-  const row = (domain: string, month: string, visits: number, channels: object) => ({
-    domain,
-    month,
-    visits,
-    profile: {
-      month,
-      countries: [],
-      channels,
-      bounceRate: null,
-      pagesPerVisit: null,
-      timeOnSite: null,
-      globalRank: null,
-      countryRank: null,
-      categoryRank: null,
-    },
-  });
-  it('weights shares by visits and finds each site’s biggest move between the last two months', () => {
-    const t = sourceTrends([
-      row('big.tw', '202609', 9, { Direct: 0.5, GenAi: 0 }),
-      row('small.tw', '202609', 1, { Direct: 0.1, GenAi: 0.1 }),
-      row('big.tw', '202610', 9, { Direct: 0.3, GenAi: 0.05 }),
-      row('small.tw', '202610', 1, { Direct: 0.1, GenAi: 0.5 }),
-      row('tiny.tw', '202609', 0.01, { Direct: 0.9 }),
-      row('tiny.tw', '202610', 0.01, { Direct: 0.1 }),
-    ]);
-    expect(t.months.map((m) => m.month)).toEqual(['202609', '202610']);
-    expect(t.months[0].shares.Direct).toBeCloseTo((9 * 0.5 + 1 * 0.1 + 0.01 * 0.9) / 10.01);
-    expect([t.previous, t.latest]).toEqual(['202609', '202610']);
-    expect(t.movers.map((m) => [m.domain, m.channel, Number(m.change.toFixed(2))])).toEqual([
-      ['small.tw', 'GenAi', 0.4],
-      ['big.tw', 'Direct', -0.2],
-    ]);
-  });
+describe('channel tiles', () => {
   it('draws one tile per channel, largest share first, with the change in percentage points', () => {
     const html = channelTiles([
       { month: '202609', shares: { Direct: 0.5, GenAi: 0.01 } },
@@ -449,6 +416,5 @@ describe('traffic source trends', () => {
     expect(html).toContain('▼10.0 個百分點');
     expect(html).toContain('持平');
     expect(html).toContain('▲2.0 個百分點');
-    expect(sourceTrends([]).movers).toEqual([]);
   });
 });

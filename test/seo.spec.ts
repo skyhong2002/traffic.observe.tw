@@ -26,7 +26,6 @@ describe('robots.txt and sitemap', () => {
       'https://traffic.observe.tw/',
       'https://traffic.observe.tw/table/',
       'https://traffic.observe.tw/tag/',
-      'https://traffic.observe.tw/sources/',
     ]);
   });
 });

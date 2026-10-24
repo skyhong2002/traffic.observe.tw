@@ -45,9 +45,9 @@ const SITE_ROW: Field[] = [
   { name: 'sites[].group', type: 'string | null', desc: '試算表 A 欄（原表標籤 A）' },
   { name: 'sites[].topics', type: 'string[]', desc: '目前的標籤' },
   { name: 'sites[].visits', type: 'number', desc: '當月造訪量，百萬次' },
-  { name: 'sites[].prevVisits', type: 'number | null', desc: '前一個月造訪量，百萬次' },
-  { name: 'sites[].growth', type: 'number | null', desc: '與前一個月相比的成長率（0.1＝10%）' },
-  { name: 'sites[].prevRank', type: 'integer | null', desc: '前一個月在同一篩選下的名次' },
+  { name: 'sites[].prevVisits', type: 'number | null', desc: '比較月份的造訪量，百萬次' },
+  { name: 'sites[].growth', type: 'number | null', desc: '與比較月份相比的成長率（0.1＝10%）' },
+  { name: 'sites[].prevRank', type: 'integer | null', desc: '比較月份在同一篩選下的名次' },
   {
     name: 'sites[].visitsSource',
     type: '"similarweb" | "manual" | "sheet"',
@@ -58,8 +58,15 @@ const SITE_ROW: Field[] = [
   { name: 'sites[].taiwanShare', type: 'number | null', desc: '台灣訪客占比（0–1）' },
   { name: 'sites[].searchVisits', type: 'number | null', desc: '搜尋S：造訪量 × 自然搜尋占比，百萬次' },
   { name: 'sites[].aiVisits', type: 'number | null', desc: 'AI：造訪量 × GenAI 占比，百萬次' },
-  { name: 'sites[].prevSearchShare', type: 'number | null', desc: '前一個月的自然搜尋占比' },
-  { name: 'sites[].prevAiShare', type: 'number | null', desc: '前一個月的 GenAI 占比' },
+  { name: 'sites[].prevSearchShare', type: 'number | null', desc: '比較月份的自然搜尋占比' },
+  { name: 'sites[].prevAiShare', type: 'number | null', desc: '比較月份的 GenAI 占比' },
+  { name: 'sites[].prevTaiwanShare', type: 'number | null', desc: '比較月份的台灣訪客占比' },
+  {
+    name: 'sites[].channels',
+    type: 'object | null',
+    desc: '當月 Similarweb 各導流來源占比：Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate（0–1）；沒有 Similarweb 估算時為 null',
+  },
+  { name: 'sites[].prevChannels', type: 'object | null', desc: '比較月份的各導流來源占比' },
 ];
 const RANKING_PARAMS: Param[] = [
   MONTH,
@@ -71,6 +78,13 @@ const RANKING_PARAMS: Param[] = [
     desc: '排除有這些標籤的網站，以逗號分隔（例如 非台灣,內容農場）；API 不套網頁的預設排除',
   },
   { name: 'source', in: 'query', type: '"tag" | "blog" | "manual"', desc: '只列出某個追蹤來源的網域；manual 包含試算表與手動加入' },
+  {
+    name: 'from',
+    in: 'query',
+    type: 'string (YYYYMM)',
+    desc: '比較月份：成長、前期名次與各占比的前期值都和它比較',
+    default: '前一個有資料的月份',
+  },
 ];
 
 export const ENDPOINTS: Endpoint[] = [
@@ -192,32 +206,6 @@ export const ENDPOINTS: Endpoint[] = [
         type: 'object | null',
         desc: 'Similarweb 抓取狀態：lastSuccessAt、lastAttemptAt、nextAttemptAt、failures、lastError',
       },
-    ],
-  },
-  {
-    id: 'sources',
-    group: '標籤',
-    path: '/api/v1/sources',
-    summary: '導流來源的每月走勢與變動最大的網站',
-    detail:
-      '每個月依造訪量加權的十種導流來源占比（只算有 Similarweb 估算的網站），以及最近兩個月之間占比變化最大的網站（每站取變化最大的一個來源，兩個月造訪量都要在 10 萬以上）。Similarweb 每月只給最新一個月，月份會逐月累積。',
-    params: [{ name: 'topic', in: 'query', type: 'string', desc: '只算有這個標籤的網站；不存在的標籤視同全部網站' }],
-    example: `/api/v1/sources?topic=${encodeURIComponent('新聞')}`,
-    type: 'application/json',
-    fields: [
-      { name: 'topic', type: 'string | null' },
-      { name: 'months', type: 'object[]', desc: '舊到新' },
-      { name: 'months[].month', type: 'string (YYYYMM)' },
-      { name: 'months[].sites', type: 'integer', desc: '當月有估算的網站數' },
-      { name: 'months[].visits', type: 'number', desc: '這些網站的造訪量合計，百萬次' },
-      {
-        name: 'months[].shares',
-        type: 'object',
-        desc: 'Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate 的加權占比（0–1）',
-      },
-      { name: 'latest', type: 'string | null', desc: '最新月份' },
-      { name: 'previous', type: 'string | null', desc: '用來比較的前一個月份；只有一個月時為 null' },
-      { name: 'movers', type: 'object[]', desc: '變化最大的網站：domain、name、channel、from、to、change（占比差）、visits' },
     ],
   },
   {

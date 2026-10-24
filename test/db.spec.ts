@@ -505,6 +505,23 @@ describe.skipIf(!url)('with a database', () => {
       7,
     ]);
     await run(pool, request);
+    // An earlier month's channels: the table compares every share with the comparison month.
+    await pool.query(
+      "INSERT INTO traffic_profiles (domain, month, profile, first_seen_at, fetched_at) VALUES ('a.com.tw', '202608', ?, NOW(), NOW())",
+      [
+        JSON.stringify({
+          month: '202608',
+          countries: [],
+          channels: { SearchOrganic: 0.2, Mail: 0.05, GenAi: 0.01 },
+          bounceRate: null,
+          pagesPerVisit: null,
+          timeOnSite: null,
+          globalRank: null,
+          countryRank: null,
+          categoryRank: null,
+        }),
+      ],
+    );
     const ranking = (await server.inject('/api/v1/rankings?month=202609')).json();
     expect(ranking.sites[0]).toMatchObject({ domain: 'a.com.tw', visits: 1.2, rank: 1, searchVisits: 1.2 * 0.3 });
     for (const path of ['/', '/table/', '/table/?source=tag', '/tag/', '/site/a.com.tw/', '/status/'])
@@ -517,6 +534,20 @@ describe.skipIf(!url)('with a database', () => {
     expect(history.sites['a.com.tw']).toMatchObject({ src: ['tag'], m: { '202609': [1.2, 1.2 * 0.3, 1.2 * 0.01, 0.9, 0] } });
     expect(history.radar).toEqual({});
     expect((await server.inject('/api/v1/rankings.csv?month=202609')).body).toContain('a.com.tw');
+
+    const compared = (await server.inject('/api/v1/rankings?month=202609')).json();
+    expect(compared.from).toBe('202608');
+    expect(compared.sites[0]).toMatchObject({ channels: { SearchOrganic: 0.3 }, prevChannels: { SearchOrganic: 0.2, Mail: 0.05 } });
+    const shares = (await server.inject('/table/?month=202609')).body;
+    expect(shares).toContain('>郵件</th>');
+    expect(shares).toContain('30.0%');
+    const changes = (await server.inject('/table/?month=202609&from=202608&show=change')).body;
+    expect(changes).toContain('郵件 ±');
+    expect(changes).toContain('>▲10.0</span>');
+    expect(changes).toContain('>▼5.0</span>');
+    const csv = (await server.inject('/api/v1/rankings.csv?month=202609')).body.split('\n');
+    expect(csv[0]).toContain('電子郵件占比差距');
+    expect(csv[1]).toContain('202608');
     await server.close();
   });
 
