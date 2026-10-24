@@ -1,10 +1,14 @@
+import { loadCrowd, shownTags } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
-import { aiShare, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { loadManualMonths } from './manual.ts';
+import { loadMetadata } from './metadata.ts';
+import { aiShare, estimated, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { latestTopics } from './tags.ts';
 
 // The sheet's monthly view, computed from stored data: visits, growth, last
 // month's rank, search visits (搜尋S = visits × search share) and AI visits
-// (visits × GenAi share). Similarweb's own figures win; the sheet's fill the
-// months and domains Similarweb has not given us. Rows the sheet adjusted by
+// (visits × GenAi share). Similarweb's own figures win; months it has no
+// estimate for take what an editor entered from its platform, then the sheet's. Rows the sheet adjusted by
 // hand (「/5」) are never used as visits. Labels (group, topics, name) come
 // from the sheet's latest row for the domain up to that month.
 
@@ -16,7 +20,8 @@ export interface SiteMonth {
   /** Millions. */
   visits: number | null;
   prevVisits: number | null;
-  visitsSource: 'similarweb' | 'sheet' | null;
+  /** Where the visits come from: Similarweb's free endpoint, entered by hand from its platform, or the sheet. */
+  visitsSource: 'similarweb' | 'manual' | 'sheet' | null;
   searchShare: number | null;
   aiShare: number | null;
   taiwanShare: number | null;
@@ -24,16 +29,11 @@ export interface SiteMonth {
   prevAiShare: number | null;
 }
 
-export const UNLABELLED = '未分類';
 export const shiftMonth = (month: string, by: number) => {
   const d = new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(4)) - 1 + by, 1));
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 };
-export const splitTopics = (topics: string | null) =>
-  (topics ?? '')
-    .split(/[,，、]/)
-    .map((t) => t.trim())
-    .filter(Boolean);
+export { latestTopics, splitTopics } from './tags.ts';
 
 interface SheetRow {
   month: string;
@@ -50,7 +50,7 @@ interface SheetRow {
 
 export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]> {
   const prev = shiftMonth(month, -1);
-  const [months, profiles, sheet] = await Promise.all([
+  const [months, profiles, sheet, metadata, manualRows, crowd] = await Promise.all([
     rows<{ domain: string; month: string; visits: number }>(
       pool,
       'SELECT domain, month, visits FROM traffic_months WHERE month IN (?, ?)',
@@ -67,30 +67,49 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
        FROM sheet_rows WHERE domain IS NOT NULL AND month <= ? ORDER BY month, row_no`,
       [month],
     ),
+    loadMetadata(pool),
+    loadManualMonths(pool, { months: [month, prev] }),
+    loadCrowd(pool),
   ]);
-  const visits = new Map(months.map((r) => [`${r.domain} ${r.month}`, Number(r.visits) / 1e6]));
+  const manual = new Map(manualRows.map((r) => [`${r.domain} ${r.month}`, r]));
+  // A month Similarweb has no estimate for falls back to the sheet, like a month it was never asked about.
+  const visits = new Map(months.filter((r) => estimated(Number(r.visits))).map((r) => [`${r.domain} ${r.month}`, Number(r.visits) / 1e6]));
   const profile = new Map(
     profiles.map((r) => [`${r.domain} ${r.month}`, (typeof r.profile === 'string' ? JSON.parse(r.profile) : r.profile) as TrafficProfile]),
   );
-  // Latest label per domain, and the sheet's own row per domain and month (first row wins: the sheet lists a site once per topic).
+  // Latest label per domain, and the sheet's own row per domain and month (first row with visits wins: the sheet lists a site once per topic).
   const label = new Map<string, SheetRow>();
+  const labels = new Map<string, SheetRow[]>();
   const sheetRow = new Map<string, SheetRow>();
   for (const r of sheet) {
+    if (label.get(r.domain)?.month !== r.month) labels.set(r.domain, []);
+    labels.get(r.domain)?.push(r);
     label.set(r.domain, r);
     const key = `${r.domain} ${r.month}`;
-    if (!sheetRow.has(key) && !r.adjusted) sheetRow.set(key, r);
+    if ((!sheetRow.has(key) || sheetRow.get(key)?.visits == null) && !r.adjusted) sheetRow.set(key, r);
   }
-  const domains = new Set([...label.keys(), ...months.filter((r) => r.month === month).map((r) => r.domain)]);
+  const domains = new Set([
+    ...label.keys(),
+    ...months.filter((r) => r.month === month).map((r) => r.domain),
+    ...manualRows.filter((r) => r.month === month).map((r) => r.domain),
+  ]);
   const pick = (domain: string, m: string) => {
     const sw = visits.get(`${domain} ${m}`);
     const sh = sheetRow.get(`${domain} ${m}`);
-    const p = profile.get(`${domain} ${m}`);
+    const p = sw === undefined ? undefined : profile.get(`${domain} ${m}`);
+    // Without a Similarweb estimate, a month entered from its platform comes before the sheet.
+    const hand = sw === undefined ? manual.get(`${domain} ${m}`) : undefined;
+    const fallback = {
+      search: hand ? hand.searchShare : (sh?.search_share ?? null),
+      ai: hand ? hand.aiShare : (sh?.ai_share ?? null),
+      taiwan: hand ? hand.taiwanShare : (sh?.taiwan_share ?? null),
+    };
     return {
-      visits: sw ?? sh?.visits ?? null,
-      source: sw !== undefined ? ('similarweb' as const) : sh?.visits != null ? ('sheet' as const) : null,
-      search: p ? searchShare(p) : (sh?.search_share ?? null),
-      ai: p ? aiShare(p) : (sh?.ai_share ?? null),
-      taiwan: p ? taiwanShare(p) : (sh?.taiwan_share ?? null),
+      visits: sw ?? (hand ? hand.visits / 1e6 : null) ?? sh?.visits ?? null,
+      source: sw !== undefined ? ('similarweb' as const) : hand ? ('manual' as const) : sh?.visits != null ? ('sheet' as const) : null,
+      search: p ? searchShare(p) : fallback.search,
+      ai: p ? aiShare(p) : fallback.ai,
+      taiwan: p ? taiwanShare(p) : fallback.taiwan,
     };
   };
   const out: SiteMonth[] = [];
@@ -101,9 +120,12 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     const l = label.get(domain);
     out.push({
       domain,
-      name: l?.name ?? domain,
+      name: metadata.get(domain)?.name ?? l?.name ?? domain,
       group: l?.group_label ?? null,
-      topics: splitTopics(l?.topics ?? null),
+      topics: shownTags(
+        metadata.get(domain)?.topics ?? latestTopics((labels.get(domain) ?? []).map((r) => ({ ...r, group: r.group_label }))),
+        crowd.get(domain),
+      ),
       visits: now.visits,
       prevVisits: before.visits,
       visitsSource: now.source,
@@ -117,16 +139,10 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
   return out.sort((a, b) => (b.visits ?? 0) - (a.visits ?? 0));
 }
 
-export const topicsOf = (site: Pick<SiteMonth, 'topics'>) => (site.topics.length ? site.topics : [UNLABELLED]);
-
 /** Rows of one topic, ranked by visits, with last month's rank in the same topic. */
-/** The sheet's 「非台灣」 group: listed, but left out of the ranks so local sites aren't pushed down. */
-export const NOT_TAIWAN = '非台灣';
-export const ranked = (s: Pick<SiteMonth, 'group'>) => s.group !== NOT_TAIWAN;
-
 export function ranking(view: SiteMonth[], topic: string | null) {
-  const inTopic = topic ? view.filter((s) => topicsOf(s).includes(topic)) : view;
-  const places = (list: SiteMonth[]) => new Map(list.filter(ranked).map((s, i) => [s.domain, i + 1]));
+  const inTopic = topic ? view.filter((s) => s.topics.includes(topic)) : view;
+  const places = (list: SiteMonth[]) => new Map(list.map((s, i) => [s.domain, i + 1]));
   const rank = places(inTopic);
   const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => (b.prevVisits ?? 0) - (a.prevVisits ?? 0)));
   return inTopic.map((s) => ({
@@ -144,7 +160,7 @@ const ratio = (a: number, b: number) => (b > 0 ? a / b : null);
 /** The「網站概況」table: per topic, growth and shares summed over its sites. */
 export function topicSummary(view: SiteMonth[]) {
   const topics = new Map<string, SiteMonth[]>();
-  for (const s of view) for (const t of topicsOf(s)) topics.set(t, [...(topics.get(t) ?? []), s]);
+  for (const s of view) for (const t of s.topics) topics.set(t, [...(topics.get(t) ?? []), s]);
   return [...topics]
     .map(([topic, sites]) => {
       const both = sites.filter((s) => s.prevVisits);
@@ -189,7 +205,8 @@ export function topicSummary(view: SiteMonth[]) {
 export async function availableMonths(pool: Pool) {
   const list = await rows<{ month: string }>(
     pool,
-    `SELECT month FROM traffic_months UNION SELECT month FROM sheet_rows WHERE visits IS NOT NULL ORDER BY month DESC`,
+    `SELECT month FROM traffic_months UNION SELECT month FROM sheet_rows WHERE visits IS NOT NULL
+     UNION SELECT month FROM manual_months ORDER BY month DESC`,
   );
   return list.map((r) => r.month);
 }

@@ -1,15 +1,24 @@
 import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
+import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
+import { cleanTag, loadCrowd, resolveTags, setAiTags, TagError, tagAction, voterOf, votesOf } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { buildHistory, type History } from './history.ts';
+import { iconStore } from './icons.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
+import { loadManualMonths, manualCandidates, parseShare, parseVisits, recentMonths, setManualMonth } from './manual.ts';
+import { EditError, editSites, loadMetadata, type ManagedSite, managedSites } from './metadata.ts';
+import { editSitePage, type ManualForm, manageSitesPage, manualPage, tagsByUse } from './metadata-pages.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
 import {
+  JS_FLAG,
   loginPage,
+  METHOD_LINK,
   notFoundPage,
   rankingPage,
   type SitePage,
+  sectionTabs,
   siteFooter,
   siteHeader,
   sitePage,
@@ -23,10 +32,12 @@ import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { registerSeo } from './seo.ts';
-import { aiShare, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { aiShare, estimated, publicDomain, searchShare, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
 import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
+import { latestTopics } from './tags.ts';
+import { aggregateTopics } from './topics.ts';
 
 const CACHE_MS = 60_000;
 /** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
@@ -35,9 +46,15 @@ const HISTORY_MS = 10 * 60_000;
 const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
   .replace('<!--style-->', STYLE_HREF)
   .replace('<!--tables-->', TABLES_HREF)
+  .replace('<!--js-->', JS_FLAG)
+  .replace('<!--tabs-->', sectionTabs('report'))
+  .replace('<!--method-->', METHOD_LINK)
   .replace('<!--header-->', siteHeader('report'))
   .replace('<!--footer-->', siteFooter());
 const MAX_TRAFFIC_DOMAINS = 2000;
+const PUBLIC_ORIGIN = new URL(process.env.TRAFFIC_PUBLIC_ORIGIN || 'https://traffic.observe.tw').origin;
+/** Tags the ranking pages leave out until a visitor brings them back. */
+const DEFAULT_EXCLUDE = ['非台灣'];
 
 export function buildApp(
   pool: Pool,
@@ -47,11 +64,13 @@ export function buildApp(
     login = loginConfig(),
     exchange,
     logger = true,
+    icons = iconStore(),
   }: {
     tokens?: Map<string, Buffer>;
     config?: ReturnType<typeof runConfig>;
     login?: ReturnType<typeof loginConfig>;
     exchange?: CodeExchange;
+    icons?: ReturnType<typeof iconStore>;
     logger?: boolean;
   } = {},
 ) {
@@ -69,9 +88,9 @@ export function buildApp(
   // Every page's header shows the sign-in state; pages themselves stay unaware of it.
   app.addHook('onSend', async (request, reply, payload) => {
     if (typeof payload !== 'string' || !payload.includes('<!--who-->')) return payload;
-    const editor = await editors.currentEditor(request);
-    if (editor) reply.header('cache-control', 'private, no-store');
-    return payload.replace('<!--who-->', whoSlot(editor, editors.enabled, request.url));
+    const user = await editors.currentUser(request);
+    if (user) reply.header('cache-control', 'private, no-store');
+    return payload.replace('<!--who-->', whoSlot(user, editors.enabled, request.url));
   });
 
   // monthView reads a few thousand rows; pages and the API share one short-lived copy per month.
@@ -115,8 +134,9 @@ export function buildApp(
     watchedCache = { at: Date.now(), lists };
     return lists;
   };
-  // 「非台灣」 sites are hidden unless foreign=1; they never take a rank either way.
-  const rankingFor = async (query: { month?: string; topic?: string; source?: string; foreign?: string }) => {
+  // All sites participate; topic filters treat every label identically.
+  /** One month ranked: only `topic` when given, never the tags in `exclude` (comma-separated), only `source`'s list. */
+  const rankingFor = async (query: RankingQuery) => {
     const { months, month } = await pickMonth(query.month);
     if (!month) return null;
     const lists = await watched();
@@ -128,14 +148,16 @@ export function buildApp(
     const all = await view(month);
     const only = source ? lists.get(source) : null;
     const list = only ? all.filter((s) => only.has(s.domain)) : all;
+    // Tag chips count before exclusion, so an excluded tag stays on the page to bring back.
     const topics = topicList(list);
     const topic = topics.some((t) => t.topic === query.topic) ? (query.topic as string) : null;
-    const foreign = query.foreign === '1';
-    const placed = ranking(list, topic);
-    const shown = foreign ? placed : placed.filter((s) => s.rank !== null);
-    return { months, month, topics, topic, source, sources, foreign, hidden: placed.length - shown.length, list: shown };
+    const exclude = [...new Set(String(query.exclude ?? '').split(','))].filter((t) => t !== topic && topics.some((x) => x.topic === t));
+    const kept = exclude.length ? list.filter((s) => !s.topics.some((t) => exclude.includes(t))) : list;
+    const placed = ranking(kept, topic);
+    return { months, month, topics, topic, exclude, source, sources, list: placed };
   };
 
+  type RankingQuery = { month?: string; topic?: string; exclude?: string; source?: string };
   let historyCache: { at: number; data: Promise<History> } | null = null;
   const history = () => {
     if (historyCache && Date.now() - historyCache.at < HISTORY_MS) return historyCache.data;
@@ -146,8 +168,222 @@ export function buildApp(
     historyCache = { at: Date.now(), data };
     return data;
   };
+  const allTopics = async () => {
+    const [traffic, sites] = await Promise.all([history(), managedSites(pool)]);
+    return aggregateTopics(traffic, sites);
+  };
+
+  /** The tags of known domains: what crowd.ts needs besides the votes. */
+  const tagContext = async () => {
+    const sites = await managedSites(pool);
+    return { sites: new Map(sites.map((s) => [s.domain, s])), known: new Set(sites.flatMap((s) => [...s.baseTopics, ...s.topics])) };
+  };
+  /** Every tag of these domains, shown or not, keyed by domain. */
+  const tagsOf = async (domains: string[]) => {
+    const [{ sites }, crowd] = await Promise.all([tagContext(), loadCrowd(pool, domains)]);
+    return Object.fromEntries(
+      domains
+        .filter((d) => sites.has(d))
+        .map((d) => {
+          const site = sites.get(d) as ManagedSite;
+          return [d, resolveTags(site.baseTopics, crowd.get(d), site.custom ? 'editor' : 'sheet')];
+        }),
+    );
+  };
+  /** One vote, added tag or override; null for a domain this site does not know, { error } for a refused change. */
+  const changeTag = async (
+    domain: string,
+    voter: string,
+    via: string,
+    kind: 'vote' | 'propose' | 'admin',
+    tag: unknown,
+    value: unknown,
+  ) => {
+    const { sites, known } = await tagContext();
+    const site = sites.get(domain);
+    if (!site) return null;
+    try {
+      const done = await tagAction(pool, {
+        domain,
+        base: site.baseTopics,
+        known,
+        kind,
+        tag,
+        value,
+        voter,
+        via,
+        admin: editors.isEditor(voter),
+      });
+      views.clear();
+      historyCache = null;
+      return { tag: done };
+    } catch (error) {
+      if (!(error instanceof TagError)) throw error;
+      return { error: error.code, status: error.status, message: error.message };
+    }
+  };
+
+  const requireEditor = async (request: FastifyRequest, reply: FastifyReply, next: string) => {
+    reply.header('cache-control', 'private, no-store');
+    if (request.method === 'POST' && !editors.sameOrigin(request)) {
+      reply.code(403).send({ error: 'same-origin requests only' });
+      return null;
+    }
+    const editor = await editors.currentEditor(request);
+    if (!editor) {
+      // Signed in without editing rights: say so rather than send them round the sign-in again.
+      if (await editors.currentUser(request)) reply.code(403).type('text/html').send(loginPage('not_editor', true));
+      else if (editors.enabled) reply.redirect(`/auth/google?next=${encodeURIComponent(next)}`, 303);
+      else reply.code(403).type('text/html').send(loginPage(undefined, false));
+    }
+    return editor;
+  };
+  const siteFor = async (domain: string) => {
+    const sites = await managedSites(pool);
+    return { sites, site: sites.find((s) => s.domain === publicDomain(domain)) };
+  };
+  /** The name and tags page; tags are offered most used first. */
+  const editPage = async (domain: string, error = '', draft?: Parameters<typeof editSitePage>[3], message = '') => {
+    const { sites, site } = await siteFor(domain);
+    return site ? editSitePage(site, tagsByUse(sites), error, draft, message) : null;
+  };
+  /** The page for months copied from Similarweb's platform, with what the free endpoint last answered. */
+  const manualFor = async (domain: string, form: Pick<ManualForm, 'message' | 'error' | 'draft'> = {}) => {
+    const { site } = await siteFor(domain);
+    if (!site) return null;
+    const [months, traffic] = await Promise.all([loadManualMonths(pool, { domain: site.domain }), loadTraffic(pool, [site.domain])]);
+    const free = (traffic.get(site.domain)?.monthly ?? []).slice(-3).map((m) => ({ month: m.month, estimated: estimated(m.visits) }));
+    return manualPage(site, { months, choices: recentMonths(), free, ...form });
+  };
+  const DONE: Record<string, string> = { saved: '已儲存。', deleted: '已刪除這個月份的補登數字。' };
+  app.get<{ Params: { domain: string }; Querystring: { saved?: string } }>('/site/:domain/edit/', async (request, reply) => {
+    if (!(await requireEditor(request, reply, request.url))) return reply;
+    const page = await editPage(request.params.domain, '', undefined, request.query.saved ? DONE.saved : '');
+    if (!page) return reply.code(404).send({ error: 'not found' });
+    return reply.type('text/html').send(page);
+  });
+  app.get<{ Params: { domain: string }; Querystring: { done?: string } }>('/site/:domain/manual/', async (request, reply) => {
+    if (!(await requireEditor(request, reply, request.url))) return reply;
+    const page = await manualFor(request.params.domain, { message: DONE[request.query.done ?? ''] });
+    if (!page) return reply.code(404).send({ error: 'not found' });
+    return reply.type('text/html').send(page);
+  });
+  app.post<{
+    Params: { domain: string };
+    Body: { month?: string; visits?: string; search?: string; ai?: string; taiwan?: string; action?: string };
+  }>('/site/:domain/manual/', async (request, reply) => {
+    const editor = await requireEditor(request, reply, `/site/${request.params.domain}/manual/`);
+    if (!editor) return reply;
+    const site = (await managedSites(pool)).find((s) => s.domain === publicDomain(request.params.domain));
+    if (!site) return reply.code(404).send({ error: 'not found' });
+    const body = request.body ?? {};
+    const month = String(body.month ?? '');
+    try {
+      const remove = body.action === 'delete';
+      if (!remove && !recentMonths().includes(month)) throw new EditError('只能補登最近三個月。');
+      await setManualMonth(
+        pool,
+        editor.email,
+        site.domain,
+        month,
+        remove
+          ? null
+          : {
+              domain: site.domain,
+              month,
+              visits: parseVisits(body.visits),
+              searchShare: parseShare(body.search, '自然搜尋占比'),
+              aiShare: parseShare(body.ai, 'Gen AI 占比'),
+              taiwanShare: parseShare(body.taiwan, '台灣占比'),
+            },
+      );
+      request.log.info({ by: editor.email, domain: site.domain, month, remove }, 'manual month saved');
+      views.clear();
+      historyCache = null;
+      return reply.redirect(`/site/${site.domain}/manual/?done=${remove ? 'deleted' : 'saved'}`, 303);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      const page = await manualFor(site.domain, { error: error.message, draft: body });
+      return reply.code(error.status).type('text/html').send(page);
+    }
+  });
+  app.post<{ Params: { domain: string }; Body: { name?: string; topics?: string; revision?: string } }>(
+    '/site/:domain/edit/',
+    async (request, reply) => {
+      const editor = await requireEditor(request, reply, request.url);
+      if (!editor) return reply;
+      const site = (await managedSites(pool)).find((s) => s.domain === publicDomain(request.params.domain));
+      if (!site) return reply.code(404).send({ error: 'not found' });
+      const body = request.body;
+      try {
+        if (typeof body?.name !== 'string' || typeof body.topics !== 'string' || !/^\d+$/.test(String(body.revision)))
+          throw new EditError('請填寫網站名稱與標籤。');
+        await editSites(pool, editor.email, {
+          single: { domain: site.domain, name: body.name, topics: body.topics, revision: Number(body.revision) },
+        });
+        views.clear();
+        historyCache = null;
+        return reply.redirect(`/site/${site.domain}/edit/?saved=1`, 303);
+      } catch (error) {
+        if (!(error instanceof EditError)) throw error;
+        return reply
+          .code(error.status)
+          .type('text/html')
+          .send(await editPage(site.domain, error.message, body));
+      }
+    },
+  );
+  app.get<{ Querystring: { updated?: string } }>('/sites/', async (request, reply) => {
+    if (!(await requireEditor(request, reply, '/sites/'))) return reply;
+    return reply
+      .type('text/html')
+      .send(
+        manageSitesPage(await managedSites(pool), request.query.updated ? `已更新 ${Number(request.query.updated) || 0} 個網站。` : ''),
+      );
+  });
+  app.post<{ Body: { domains?: string; add?: string; remove?: string } }>('/sites/', async (request, reply) => {
+    const editor = await requireEditor(request, reply, '/sites/');
+    if (!editor) return reply;
+    try {
+      if (typeof request.body?.domains !== 'string') throw new EditError('請選擇網站。');
+      const domains = request.body.domains.split(/[\s,]+/).filter(Boolean);
+      const count = await editSites(pool, editor.email, { domains, add: request.body.add ?? '', remove: request.body.remove ?? '' });
+      views.clear();
+      historyCache = null;
+      return reply.redirect(`/sites/?updated=${count}`, 303);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return reply
+        .code(error.status)
+        .type('text/html')
+        .send(manageSitesPage(await managedSites(pool), error.message, request.body));
+    }
+  });
 
   app.get('/healthz', async () => ({ ok: true }));
+  // The public API and icons are read-only, so any site may call them from a browser.
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.url.startsWith('/api/v1/') || request.url.startsWith('/icon/')) reply.header('access-control-allow-origin', '*');
+    return payload;
+  });
+  // Site icons, only for domains this site knows, so the route is not a proxy for arbitrary hosts.
+  let known: { at: number; domains: Promise<Set<string>> } | null = null;
+  const knownDomains = () => {
+    if (!known || Date.now() - known.at > CACHE_MS * 10) {
+      const domains = managedSites(pool).then((sites) => new Set(sites.map((s) => s.domain)));
+      domains.catch(() => {
+        known = null;
+      });
+      known = { at: Date.now(), domains };
+    }
+    return known.domains;
+  };
+  app.get<{ Params: { domain: string } }>('/icon/:domain', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    const found = domain && (await knownDomains()).has(domain) ? await icons(domain) : null;
+    if (!found) return reply.code(404).header('cache-control', 'public, max-age=86400').send();
+    return reply.type(found.type).header('cache-control', 'public, max-age=604800').send(found.body);
+  });
   // The shared stylesheet; pages link it with a content hash (style.ts), so it can be cached for long.
   app.get('/style.css', async (_request, reply) =>
     reply.type('text/css; charset=utf-8').header('cache-control', 'public, max-age=86400').send(STYLE),
@@ -165,25 +401,54 @@ export function buildApp(
     return REPORT;
   });
   // The same month as a plain server-rendered table (works without JavaScript).
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>('/table/', async (request, reply) => {
-    const r = await rankingFor(request.query);
+  app.get<{ Querystring: RankingQuery }>('/table/', async (request, reply) => {
+    // The page leaves out 非台灣 sites unless the address says otherwise (exclude= keeps them); the API does not.
+    const r = await rankingFor({ ...request.query, exclude: request.query.exclude ?? DEFAULT_EXCLUDE.join(',') });
     reply.type('text/html; charset=utf-8');
     return r
-      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.foreign, r.hidden)
+      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude)
       : rankingPage('', [], [], null, []);
   });
-  app.get<{ Querystring: { month?: string } }>('/topics/', async (request, reply) => {
-    const { months, month } = await pickMonth(request.query.month);
+  app.get<{ Querystring: { topic?: string } }>('/tag/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
-    return topicsPage(month ?? '', months, month ? topicSummary(await view(month)) : []);
+    return topicsPage(await allTopics(), request.query.topic);
   });
-  app.get<{ Params: { domain: string } }>('/site/:domain/', async (request, reply) => {
+  // The tags page used to live at /topics/; old links and bookmarks keep working.
+  app.get('/topics/', async (request, reply) => reply.redirect(`/tag/${request.url.slice('/topics/'.length)}`, 301));
+  app.get<{ Params: { domain: string }; Querystring: { tags?: string } }>('/site/:domain/', async (request, reply) => {
     const domain = publicDomain(request.params.domain);
     const site = domain ? await siteData(pool, domain) : null;
     reply.type('text/html; charset=utf-8');
     if (!site) return reply.code(404).send(notFoundPage(request.params.domain));
-    return sitePage(site);
+    const user = await editors.currentUser(request);
+    const editor = user && editors.isEditor(user.email);
+    return sitePage(site, !!editor, {
+      loginEnabled: editors.enabled,
+      signedIn: !!user,
+      admin: !!editor,
+      votes: user ? ((await votesOf(pool, user.email, [site.domain]))[site.domain] ?? {}) : {},
+      message: typeof request.query.tags === 'string' ? request.query.tags : undefined,
+    });
   });
+  // Votes, added tags and admin overrides from the site page's tag block; back to the block afterwards.
+  app.post<{ Params: { domain: string }; Body: { kind?: string; tag?: string; value?: string } }>(
+    '/site/:domain/tags/',
+    async (request, reply) => {
+      reply.header('cache-control', 'no-store');
+      if (!editors.sameOrigin(request)) return reply.code(403).send({ error: 'same-origin requests only' });
+      const domain = publicDomain(request.params.domain);
+      const user = await editors.currentUser(request);
+      if (!user) return reply.redirect(`/auth/google?next=${encodeURIComponent(`/site/${domain ?? ''}/#tags`)}`, 303);
+      const body = request.body ?? {};
+      const kind = body.kind === 'vote' || body.kind === 'propose' || body.kind === 'admin' ? body.kind : null;
+      const r =
+        domain && kind
+          ? await changeTag(domain, user.email, 'web', kind, body.tag, kind === 'vote' ? Number(body.value) : body.value)
+          : null;
+      if (!r) return reply.code(404).send({ error: 'not found' });
+      return reply.redirect(`/site/${domain}/?tags=${'error' in r ? r.error : 'done'}#tags`, 303);
+    },
+  );
   app.get<{ Querystring: { error?: string } }>('/login/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
     return loginPage(request.query.error, editors.enabled);
@@ -231,7 +496,10 @@ export function buildApp(
       return null;
     }
     const editor = await editors.currentEditor(request);
-    if (!editor) reply.redirect('/auth/google?next=/watch/', 303);
+    if (!editor) {
+      if (await editors.currentUser(request)) reply.code(403).type('text/html').send(loginPage('not_editor', true));
+      else reply.redirect('/auth/google?next=/watch/', 303);
+    }
     return editor;
   };
   app.post<{ Body: { domains?: string; refreshDays?: string; note?: string } }>('/watch/', async (request, reply) => {
@@ -260,97 +528,101 @@ export function buildApp(
   });
   app.get('/status/', async (_request, reply) => {
     reply.type('text/html; charset=utf-8');
-    return statusPage(await serviceStatus(pool, config));
+    const [status, manual] = await Promise.all([serviceStatus(pool, config), manualCandidates(pool)]);
+    return statusPage(status, manual);
   });
 
   // Public, read-only API.
-  app.get('/api/v1/', async () => ({
-    service: 'traffic.observe.tw',
-    source: 'Similarweb extension estimates (monthly visits per domain, in millions) plus a hand-kept sheet for months Similarweb lacks',
-    endpoints: {
-      'GET /api/v1/months': 'months with data, newest first',
-      'GET /api/v1/history':
-        'every month at once (oldest first): per domain [visits, search visits, AI visits, Taiwan share, from sheet], labels, sources, Cloudflare Radar periods',
-      'GET /api/v1/rankings?month=YYYYMM&topic=&source=':
-        'one month, ranked by visits; topic and source (tag, blog, manual = hand-added) optional; foreign=1 adds the unranked 非台灣 sites',
-      'GET /api/v1/rankings.csv?month=YYYYMM&topic=': 'the same as CSV',
-      'GET /api/v1/topics?month=YYYYMM': 'per-topic growth and search/AI shares',
-      'GET /api/v1/sites/:domain': 'every month for one domain',
-      'GET /api/v1/status': 'worker state',
-    },
-  }));
+  // The API, described once in api-docs.ts: the page, the JSON index and the OpenAPI document.
+  app.get('/api/', async (_request, reply) => {
+    reply.type('text/html; charset=utf-8');
+    return apiDocsPage(PUBLIC_ORIGIN);
+  });
+  app.get('/api/v1/', async () => apiIndex(PUBLIC_ORIGIN));
+  app.get('/api/v1/openapi.json', async () => openApi(PUBLIC_ORIGIN));
   app.get('/api/v1/months', async () => ({ months: await availableMonths(pool) }));
   app.get('/api/v1/history', async (_request, reply) => {
     reply.header('cache-control', 'public, max-age=300');
     return history();
   });
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>(
-    '/api/v1/rankings',
-    async (request, reply) => {
-      const r = await rankingFor(request.query);
-      if (!r) return reply.code(404).send({ error: 'no_data' });
-      return { month: r.month, topic: r.topic, source: r.source, topics: r.topics, sites: r.list };
-    },
-  );
-  app.get<{ Querystring: { month?: string; topic?: string; source?: string; foreign?: string } }>(
-    '/api/v1/rankings.csv',
-    async (request, reply) => {
-      const r = await rankingFor(request.query);
-      if (!r) return reply.code(404).send({ error: 'no_data' });
-      const cell = (v: unknown) =>
-        v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
-      const head = [
-        '名次',
-        '網站名',
-        '網域',
-        '群組',
-        '分類',
-        '流量(百萬)',
-        '成長',
-        '上月名次',
-        '搜尋S',
-        'AI',
-        '搜尋占比',
-        'AI占比',
-        '台灣占比',
-        '來源',
-      ];
-      const body = r.list.map((s) =>
-        [
-          s.rank,
-          s.name,
-          s.domain,
-          s.group,
-          s.topics.join(', '),
-          s.visits,
-          s.growth,
-          s.prevRank,
-          s.searchVisits,
-          s.aiVisits,
-          s.searchShare,
-          s.aiShare,
-          s.taiwanShare,
-          s.visitsSource,
-        ]
-          .map(cell)
-          .join(','),
-      );
-      reply
-        .type('text/csv; charset=utf-8')
-        .header('content-disposition', `attachment; filename="traffic-${r.month}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`);
-      return `﻿${[head.join(','), ...body].join('\n')}\n`;
-    },
-  );
+  app.get<{ Querystring: RankingQuery }>('/api/v1/rankings', async (request, reply) => {
+    const r = await rankingFor(request.query);
+    if (!r) return reply.code(404).send({ error: 'no_data' });
+    return { month: r.month, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
+  });
+  app.get<{ Querystring: RankingQuery }>('/api/v1/rankings.csv', async (request, reply) => {
+    const r = await rankingFor(request.query);
+    if (!r) return reply.code(404).send({ error: 'no_data' });
+    const cell = (v: unknown) =>
+      v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+    const head = [
+      '名次',
+      '網站名',
+      '網域',
+      '原表標籤 A',
+      '標籤',
+      '流量(百萬)',
+      '成長',
+      '上月名次',
+      '搜尋S',
+      'AI',
+      '搜尋占比',
+      'AI占比',
+      '台灣占比',
+      '來源',
+    ];
+    const body = r.list.map((s) =>
+      [
+        s.rank,
+        s.name,
+        s.domain,
+        s.group,
+        s.topics.join(', '),
+        s.visits,
+        s.growth,
+        s.prevRank,
+        s.searchVisits,
+        s.aiVisits,
+        s.searchShare,
+        s.aiShare,
+        s.taiwanShare,
+        s.visitsSource,
+      ]
+        .map(cell)
+        .join(','),
+    );
+    reply
+      .type('text/csv; charset=utf-8')
+      .header('content-disposition', `attachment; filename="traffic-${r.month}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`);
+    return `﻿${[head.join(','), ...body].join('\n')}\n`;
+  });
   app.get<{ Querystring: { month?: string } }>('/api/v1/topics', async (request, reply) => {
     const { month } = await pickMonth(request.query.month);
     if (!month) return reply.code(404).send({ error: 'no_data' });
     return { month, topics: topicSummary(await view(month)) };
+  });
+  app.get<{ Querystring: { topic?: string } }>('/api/v1/topics/all', async (request, reply) => {
+    const data = await allTopics();
+    const topic = typeof request.query.topic === 'string' ? request.query.topic : null;
+    if (topic !== null && !data.topics.some((t) => t.topic === topic)) return reply.code(404).send({ error: 'unknown_topic' });
+    return {
+      scope: 'all',
+      months: data.months,
+      topics: data.topics,
+      ...(topic !== null ? { topic, sites: data.sites.filter((s) => s.topics.includes(topic)) } : {}),
+    };
   });
   app.get<{ Params: { domain: string } }>('/api/v1/sites/:domain', async (request, reply) => {
     const domain = publicDomain(request.params.domain);
     const site = domain ? await siteData(pool, domain) : null;
     if (!site) return reply.code(404).send({ error: 'not_found' });
     return site;
+  });
+  app.get<{ Params: { domain: string } }>('/api/v1/tags/:domain', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    const tags = domain ? (await tagsOf([domain]))[domain] : undefined;
+    if (!domain || !tags) return reply.code(404).send({ error: 'not_found' });
+    return { domain, tags };
   });
   app.get('/api/v1/status', async () => serviceStatus(pool, config));
 
@@ -422,6 +694,69 @@ export function buildApp(
       domains: Object.fromEntries(periods),
     };
   });
+  // Tags for the other services (blog, tag), which show them and pass on their signed-in readers' votes.
+  // The reader is the verified Google email the service signed in; admin rights follow TRAFFIC_ADMIN_EMAILS.
+  // { domains: [...], voter? } → every tag of each known domain, plus that reader's votes and admin flag.
+  app.post<{ Body: { domains?: unknown; voter?: unknown } }>('/internal/v1/tags', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const raw = request.body?.domains;
+    if (!Array.isArray(raw) || raw.length > MAX_TRAFFIC_DOMAINS) return reply.code(400).send({ error: 'invalid_domains' });
+    const domains = [...new Set(raw.map(publicDomain).filter((d): d is string => !!d))];
+    const voter = request.body?.voter === undefined ? null : voterOf(request.body.voter);
+    if (request.body?.voter !== undefined && !voter) return reply.code(400).send({ error: 'invalid_voter' });
+    const tags = await tagsOf(domains);
+    return {
+      domains: tags,
+      ...(voter ? { voter: { email: voter, admin: editors.isEditor(voter), votes: await votesOf(pool, voter, Object.keys(tags)) } } : {}),
+    };
+  });
+  // { voter, domain, tag, vote: 1 | -1 | 0 } · { voter, domain, tag } · { voter, domain, tag, action: set | hide | release }
+  for (const kind of ['vote', 'propose', 'admin'] as const)
+    app.post<{ Body: { voter?: unknown; domain?: unknown; tag?: unknown; vote?: unknown; action?: unknown } }>(
+      `/internal/v1/tags/${kind}`,
+      async (request, reply) => {
+        const requester = authenticate(request, reply, tokens);
+        if (!requester) return reply;
+        const body = request.body ?? {};
+        const voter = voterOf(body.voter);
+        const domain = publicDomain(body.domain);
+        if (!voter) return reply.code(400).send({ error: 'invalid_voter' });
+        if (!domain) return reply.code(400).send({ error: 'invalid_domain' });
+        const r = await changeTag(domain, voter, requester, kind, body.tag, kind === 'vote' ? body.vote : body.action);
+        if (!r) return reply.code(404).send({ error: 'unknown_domain', domain });
+        if ('error' in r) return reply.code(r.status ?? 400).send({ error: r.error, message: r.message });
+        request.log.info({ requester, voter, domain, kind, tag: r.tag }, 'tag changed');
+        return { ok: true, domain, tag: r.tag, tags: (await tagsOf([domain]))[domain] };
+      },
+    );
+  // { sites: [{ domain, tags: [...], reason? }] } → this service's AI suggestions for those domains, replaced.
+  app.put<{ Body: { sites?: unknown } }>('/internal/v1/tags/ai', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const raw = request.body?.sites;
+    if (!Array.isArray(raw) || raw.length > 500) return reply.code(400).send({ error: 'invalid_sites' });
+    const { sites, known } = await tagContext();
+    const list: Array<{ domain: string; tags: string[]; reason: string | null }> = [];
+    const skipped: unknown[] = [];
+    for (const item of raw as Array<{ domain?: unknown; tags?: unknown; reason?: unknown }>) {
+      const domain = publicDomain(item?.domain);
+      const tags = Array.isArray(item?.tags) && item.tags.length <= 20 ? item.tags.map((t) => cleanTag(t, known)) : null;
+      if (!domain || !sites.has(domain) || !tags || tags.some((t) => !t) || list.some((x) => x.domain === domain)) {
+        skipped.push(item?.domain ?? null);
+        continue;
+      }
+      const reason = typeof item.reason === 'string' ? item.reason.slice(0, 2000) : null;
+      list.push({ domain, tags: [...new Set(tags as string[])], reason });
+    }
+    const changed = await setAiTags(pool, requester, list);
+    if (changed) {
+      views.clear();
+      historyCache = null;
+    }
+    request.log.info({ requester, sites: list.length, changed, skipped: skipped.length }, 'ai tags replaced');
+    return { ok: true, sites: list.length, changed, skipped };
+  });
   // { domains: [...] } → every stored month and profile, plus fetch state, for services that mirror the data.
   app.post<{ Body: { domains?: unknown } }>('/internal/v1/traffic', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
@@ -468,7 +803,7 @@ export function buildApp(
 }
 
 export async function siteData(pool: Pool, domain: string): Promise<SitePage | null> {
-  const [traffic, labels, watchers, [state], radar] = await Promise.all([
+  const [traffic, labels, watchers, [state], radar, metadata, manual, crowd] = await Promise.all([
     loadTraffic(pool, [domain]),
     rows<{
       month: string;
@@ -498,17 +833,29 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       last_error: string | null;
     }>(pool, 'SELECT last_success_at, last_attempt_at, next_attempt_at, failures, last_error FROM fetch_state WHERE domain = ?', [domain]),
     loadRadar(pool, [domain]),
+    loadMetadata(pool),
+    loadManualMonths(pool, { domain }),
+    loadCrowd(pool, [domain]),
   ]);
   const t = traffic.get(domain);
-  if (!t && !labels.length && !watchers.length && !radar.size) return null;
+  if (!t && !labels.length && !watchers.length && !radar.size && !metadata.has(domain) && !manual.length && !crowd.size) return null;
+  const custom = metadata.get(domain)?.topics;
+  const tags = resolveTags(
+    custom ?? latestTopics(labels.map((l) => ({ ...l, group: l.group_label }))),
+    crowd.get(domain),
+    custom ? 'editor' : 'sheet',
+  );
+  const byHand = new Map(manual.map((m) => [m.month, m]));
   const sheetByMonth = new Map<string, (typeof labels)[number]>();
   for (const l of labels) if (!sheetByMonth.has(l.month) || sheetByMonth.get(l.month)?.adjusted) sheetByMonth.set(l.month, l);
-  const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys()])].sort();
+  const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys(), ...byHand.keys()])].sort();
   const profiles = (t?.profiles ?? {}) as Record<string, TrafficProfile>;
   return {
     domain,
-    name: labels.at(-1)?.name ?? domain,
-    labels: [...sheetByMonth.values()].map((l) => ({
+    name: metadata.get(domain)?.name ?? labels.at(-1)?.name ?? domain,
+    topics: tags.filter((x) => x.visible).map((x) => x.tag),
+    tags,
+    labels: labels.map((l) => ({
       month: l.month,
       group: l.group_label,
       topics: l.topics,
@@ -519,14 +866,19 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
     months: months.map((month) => {
       const sw = t?.monthly.find((m) => m.month === month);
       const sh = sheetByMonth.get(month);
-      const p = profiles[month];
+      const noEstimate = !!sw && !estimated(sw.visits);
+      const p = noEstimate ? undefined : profiles[month];
+      // As in the rankings: Similarweb, then a month entered from its platform, then the sheet.
+      const hand = sw && !noEstimate ? undefined : byHand.get(month);
       return {
         month,
-        similarweb: sw ? sw.visits / 1e6 : null,
+        similarweb: sw && !noEstimate ? sw.visits / 1e6 : null,
+        noEstimate,
+        manual: byHand.has(month) ? (byHand.get(month)?.visits ?? 0) / 1e6 : null,
         sheet: sh && !sh.adjusted ? sh.visits : null,
-        searchShare: p ? searchShare(p) : (sh?.search_share ?? null),
-        aiShare: p ? aiShare(p) : (sh?.ai_share ?? null),
-        taiwanShare: p ? taiwanShare(p) : (sh?.taiwan_share ?? null),
+        searchShare: p ? searchShare(p) : hand ? hand.searchShare : (sh?.search_share ?? null),
+        aiShare: p ? aiShare(p) : hand ? hand.aiShare : (sh?.ai_share ?? null),
+        taiwanShare: p ? taiwanShare(p) : hand ? hand.taiwanShare : (sh?.taiwan_share ?? null),
       };
     }),
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),

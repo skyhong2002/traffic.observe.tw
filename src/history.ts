@@ -5,8 +5,8 @@ import { loadRadar } from './radar.ts';
 
 // Every month's view in one payload for the report page (/), which compares
 // any two months and draws rank trajectories client-side. Per site and month:
-// [visits (millions), search visits, AI visits, Taiwan share, 1 if the visits
-// came from the sheet]. `src` lists the requesters with a standing watch on
+// [visits (millions), search visits, AI visits, Taiwan share, origin of the
+// visits: 0 Similarweb, 1 the sheet, 2 entered by hand from Similarweb's platform]. `src` lists the requesters with a standing watch on
 // the domain (raw: tag, blog, sheet, manual). `sources` counts distinct domains
 // per source as the pages show it: tag, blog and 手動 (the sheet + /watch/).
 
@@ -24,7 +24,7 @@ export interface History {
       group: string | null;
       topics: string[];
       src: string[];
-      m: Record<string, [number | null, number | null, number | null, number | null, 0 | 1]>;
+      m: Record<string, [number | null, number | null, number | null, number | null, 0 | 1 | 2]>;
     }
   >;
   /** Cloudflare Radar periods, oldest first: rank (top 100 place), bucket (top N) or gt (not in the top N). */
@@ -61,7 +61,7 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
         s.searchShare !== null ? s.visits * s.searchShare : null,
         s.aiShare !== null ? s.visits * s.aiShare : null,
         s.taiwanShare,
-        s.visitsSource === 'sheet' ? 1 : 0,
+        s.visitsSource === 'sheet' ? 1 : s.visitsSource === 'manual' ? 2 : 0,
       ];
       sites[s.domain] = entry;
     }
@@ -70,7 +70,7 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
   return {
     generatedAt: now.toISOString(),
     months,
-    fields: ['visits(M)', 'search(M)', 'ai(M)', 'taiwanShare', 'fromSheet'],
+    fields: ['visits(M)', 'search(M)', 'ai(M)', 'taiwanShare', 'origin(0 similarweb, 1 sheet, 2 platform by hand)'],
     topics: [...new Set(Object.values(sites).flatMap((s) => s.topics))],
     sources: [...groups]
       .map(([source, domains]) => ({ source, domains: domains.size }))

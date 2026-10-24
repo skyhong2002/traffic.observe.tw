@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { chunk, type Pool } from './db.ts';
+import { SHEET_DOMAINS } from './sheet-domains.ts';
 import { trafficDomain } from './similarweb.ts';
 
 // Reads GeneHong's「Similar Web 新聞」sheet (one tab per YYYYMM) as it is: the
@@ -41,6 +42,8 @@ const text = (cell: Cell): string | null => {
   if (typeof v === 'object') {
     const o = v as { text?: unknown; richText?: Array<{ text: string }>; result?: unknown };
     if (typeof o.text === 'string') return o.text.trim() || null;
+    // A hyperlink whose label is rich text (「cosmopolitan/10」 with the divisor in red).
+    if (typeof o.text === 'object' && o.text !== null) return text({ value: o.text } as Cell);
     if (Array.isArray(o.richText))
       return (
         o.richText
@@ -66,6 +69,11 @@ const share = (cell: Cell | null) => {
   return n !== null && n >= 0 && n <= 1 ? n : null;
 };
 const DIVISOR = /\s*\/\s*\d+(?:\.\d+)?\s*$/;
+/** A domain written into the name: 「元大理財 yuantafunds.com」, 「好想去喔 (lookit.tw)」, 「電視超人isuper.tv」. */
+const nameDomain = (name: string) => {
+  const found = name.match(/(?<![a-z0-9.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![a-z0-9-])/i);
+  return found ? trafficDomain(found[0]) : null;
+};
 
 /** The rows of one month tab. */
 export function readMonthTab(ws: ExcelJS.Worksheet, month: string): SheetRow[] {
@@ -96,18 +104,19 @@ export function readMonthTab(ws: ExcelJS.Worksheet, month: string): SheetRow[] {
     const domain =
       (urlCell && (trafficDomain(urlCell.hyperlink ?? '') || trafficDomain(text(urlCell) ?? ''))) ||
       (nameCell.hyperlink ? trafficDomain(nameCell.hyperlink) : null) ||
-      (/^[a-z0-9.-]+\.[a-z]{2,}(?:\s|$)/i.test(rawName) ? trafficDomain(rawName.split(/\s/)[0]) : null);
+      nameDomain(rawName);
     const visitsCell = visitsCol ? row.getCell(visitsCol) : null;
     const visits = visitsCell ? number(visitsCell) : null;
-    if (visits === null && !domain) return;
+    const first = text(row.getCell(1));
+    const second = nameCol > 2 ? text(row.getCell(2)) : null;
+    // Rows without a figure still carry the site's labels; keep them for the name → domain matching below.
+    if (visits === null && !domain && !first && !second) return;
     const f = visitsCell ? formula(visitsCell) : null;
     const raw: Record<string, string | number> = {};
     row.eachCell((cell, col) => {
       const value = number(cell) ?? text(cell);
       if (value !== null) raw[`${ws.getColumn(col).letter}${headers.has(col) ? ` ${headers.get(col)}` : ''}`] = value;
     });
-    const first = text(row.getCell(1));
-    const second = nameCol > 2 ? text(row.getCell(2)) : null;
     out.push({
       month,
       rowNo,
@@ -131,6 +140,7 @@ export async function readWorkbook(buffer: ArrayBuffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
   const rows = wb.worksheets.filter((ws) => /^20\d{4}$/.test(ws.name)).flatMap((ws) => readMonthTab(ws, ws.name));
+  for (const r of rows) r.domain ??= SHEET_DOMAINS[r.name] ?? null;
   // Older tabs mostly give names only: borrow the domain the latest row of the same name had.
   const byName = new Map<string, string>();
   for (const r of [...rows].sort((a, b) => a.month.localeCompare(b.month))) if (r.domain) byName.set(r.name, r.domain);

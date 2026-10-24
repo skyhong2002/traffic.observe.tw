@@ -25,7 +25,7 @@ describe('robots.txt and sitemap', () => {
     expect([...res.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])).toEqual([
       'https://traffic.observe.tw/',
       'https://traffic.observe.tw/table/',
-      'https://traffic.observe.tw/topics/',
+      'https://traffic.observe.tw/tag/',
     ]);
   });
 });
@@ -62,6 +62,32 @@ describe('head tags and noindex', () => {
       expect(res.headers['x-robots-tag'], url).toBe('noindex');
       expect(res.body, url).not.toContain('report-page');
     }
+  });
+
+  it('moves the old tags address to /tag/ with its query string', async () => {
+    for (const [from, to] of [
+      ['/topics/', '/tag/'],
+      ['/topics/?topic=%E6%96%B0%E8%81%9E', '/tag/?topic=%E6%96%B0%E8%81%9E'],
+    ]) {
+      const res = await app().inject(from);
+      expect(res.statusCode, from).toBe(301);
+      expect(res.headers.location, from).toBe(to);
+    }
+  });
+
+  it('documents every endpoint the same way in the page, the index and the OpenAPI document', async () => {
+    const { ENDPOINTS } = await import('../src/api-docs.ts');
+    const page = (await app().inject('/api/')).body;
+    const index = (await app().inject('/api/v1/')).json();
+    const spec = (await app().inject('/api/v1/openapi.json')).json();
+    expect(spec.openapi).toBe('3.1.0');
+    expect(Object.keys(spec.paths).sort()).toEqual(ENDPOINTS.map((e) => e.path).sort());
+    expect(Object.keys(index.endpoints)).toHaveLength(ENDPOINTS.length);
+    expect(index).toMatchObject({ service: 'traffic.observe.tw', docs: 'https://traffic.observe.tw/api/' });
+    for (const e of ENDPOINTS) expect(page, e.path).toContain(`id="api-${e.id}"`);
+    // Read-only and public, so browsers on other sites may call it.
+    expect((await app().inject('/api/v1/')).headers['access-control-allow-origin']).toBe('*');
+    expect((await app().inject('/api/')).headers['access-control-allow-origin']).toBeUndefined();
   });
 
   it('keeps /internal/ a plain 404', async () => {

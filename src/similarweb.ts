@@ -226,6 +226,14 @@ export function fetchSummary(data: any, domain: string): FetchSummary {
   return { category: typeof data?.Category === 'string' ? data.Category.slice(0, 64) : null, similarSites };
 }
 
+/**
+ * Similarweb answers 0 for a month it has no estimate for: small sites in some
+ * months, or a subdomain it does not measure on its own (tw.news.yahoo.com).
+ * Such a month is stored as received but shown as missing, never as 0 visits,
+ * and its profile shares are not used either.
+ */
+export const estimated = (visits: number) => visits > 0;
+
 /** The shares the GeneHong sheet multiplies visits by for 搜尋S and AI. Its 搜尋 is
  *  organic search only (tools/backtest-sheet.ts: 33 of 35 rows in 202609 match
  *  organic, 12 organic + paid). */

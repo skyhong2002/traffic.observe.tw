@@ -1,9 +1,14 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
+import { recentMonths } from '../src/manual.ts';
+import { editSites, managedSites } from '../src/metadata.ts';
+import { monthView, ranking, topicSummary } from '../src/metrics.ts';
 import { radarLabel } from '../src/pages.ts';
 import { runRadar } from '../src/radar.ts';
 import { runConfig, runOnce } from '../src/scheduler.ts';
+import { saveSheet } from '../src/sheet.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
 const url = process.env.TRAFFIC_TEST_DB_URL;
@@ -201,6 +206,294 @@ describe.skipIf(!url)('with a database', () => {
     await server.close();
   });
 
+  it('keeps both classification columns and every repeated row as distinct tags', async () => {
+    const base = {
+      domain: 'a.com.tw',
+      name: 'A',
+      url: null,
+      visits: 12,
+      adjusted: false,
+      searchShare: null,
+      aiShare: null,
+      taiwanShare: null,
+      raw: {},
+    };
+    await saveSheet(pool, [
+      { ...base, month: '202608', rowNo: 2, group: '舊群組', topics: '舊分類' },
+      { ...base, month: '202609', rowNo: 2, group: '品牌', topics: '電商, 科技' },
+      { ...base, month: '202609', rowNo: 3, group: '內容', topics: '科技，生活內容' },
+    ]);
+    const view = await monthView(pool, '202609');
+    expect(view).toHaveLength(1);
+    expect(view[0].topics).toEqual(['品牌', '電商', '科技', '內容', '生活內容']);
+    expect(ranking(view, '品牌')).toHaveLength(1);
+    expect(topicSummary(view).find((t) => t.topic === '科技')).toMatchObject({ sites: 1, visits: 12 });
+    expect((await monthView(pool, '202608'))[0].topics).toEqual(['舊群組', '舊分類']);
+    const server = app();
+    const history = (await server.inject('/api/v1/history')).json();
+    expect(history.sites['a.com.tw'].topics).toEqual(view[0].topics);
+    const page = (await server.inject('/site/a.com.tw/')).body;
+    for (const tag of view[0].topics) expect(page).toContain(`topic=${encodeURIComponent(tag)}`);
+    expect((await server.inject('/api/v1/rankings.csv?month=202609')).body).toContain('品牌, 電商, 科技, 內容, 生活內容');
+    await server.close();
+  });
+
+  it('edits names and tags with authorization, conflict checks, atomic batches and reimport protection', async () => {
+    const origin = 'https://traffic.example';
+    const server = buildApp(pool, {
+      login: { clientId: 'cid', clientSecret: 'secret', origin, admins: new Set(['editor@example.com']) },
+      logger: false,
+    });
+    const cookie = 'traffic_session=test-editor';
+    await pool.query(
+      'INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))',
+      [createHash('sha256').update('test-editor').digest('hex'), 'editor@example.com'],
+    );
+    const base = {
+      month: '202609',
+      group: '通路',
+      topics: '電商',
+      name: '原名',
+      url: null,
+      visits: 12,
+      adjusted: false,
+      searchShare: null,
+      aiShare: null,
+      taiwanShare: null,
+      raw: {},
+    };
+    const sheet = [
+      { ...base, domain: 'a.com.tw', rowNo: 2 },
+      { ...base, domain: 'b.com.tw', rowNo: 3 },
+    ];
+    await saveSheet(pool, sheet);
+    const form = (url: string, payload: Record<string, string>, headers = { cookie, origin }) =>
+      server.inject({
+        method: 'POST',
+        url,
+        headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+        payload: new URLSearchParams(payload).toString(),
+      });
+    expect((await server.inject('/site/a.com.tw/edit/')).statusCode).toBe(303);
+    expect((await server.inject('/sites/')).statusCode).toBe(303);
+    expect((await server.inject({ url: '/site/a.com.tw/edit/', headers: { cookie } })).body).toContain('name="topics"');
+    const values = { name: '清楚的名稱', topics: '台灣, 新聞, 社群, 新聞', revision: '0' };
+    expect((await form('/site/a.com.tw/edit/', values, { cookie: '', origin })).statusCode).toBe(303);
+    expect((await form('/site/a.com.tw/edit/', values, { cookie, origin: 'https://evil.example' })).statusCode).toBe(403);
+    expect(await rows(pool, 'SELECT * FROM site_metadata')).toHaveLength(0);
+    // Warm both public caches, then verify they are invalidated by the write.
+    await server.inject('/api/v1/history');
+    await server.inject('/api/v1/rankings?month=202609');
+    await server.inject('/api/v1/topics/all');
+    expect((await form('/site/a.com.tw/edit/', values)).statusCode).toBe(303);
+    const history = (await server.inject('/api/v1/history')).json();
+    expect(history.sites['a.com.tw']).toMatchObject({ name: '清楚的名稱', topics: ['台灣', '新聞', '社群'] });
+    const ranking = (await server.inject('/api/v1/rankings?month=202609')).json();
+    expect(ranking.sites.find((s: { domain: string }) => s.domain === 'a.com.tw')).toMatchObject({ rank: 1, name: '清楚的名稱' });
+    expect(ranking.sites.find((s: { domain: string }) => s.domain === 'b.com.tw')).toMatchObject({ rank: 2 });
+    // Leaving a tag out removes its sites and ranks the rest among themselves.
+    const without = (await server.inject(`/api/v1/rankings?month=202609&exclude=${encodeURIComponent('新聞')}`)).json();
+    expect(without.exclude).toEqual(['新聞']);
+    expect(without.sites.map((s: { domain: string; rank: number }) => [s.domain, s.rank])).toEqual([['b.com.tw', 1]]);
+    expect((await server.inject(`/table/?month=202609&exclude=${encodeURIComponent('新聞')}`)).body).toContain('排除 新聞');
+    expect((await server.inject('/site/a.com.tw/')).body).toContain('清楚的名稱');
+    expect((await server.inject('/api/v1/sites/a.com.tw')).json()).toMatchObject({ name: '清楚的名稱', topics: ['台灣', '新聞', '社群'] });
+    expect((await server.inject('/api/v1/topics/all?topic=新聞')).json().sites.map((s: { domain: string }) => s.domain)).toEqual([
+      'a.com.tw',
+    ]);
+    expect((await form('/site/a.com.tw/edit/', values)).statusCode).toBe(409);
+    await saveSheet(
+      pool,
+      sheet.map((s) => ({ ...s, name: '重新匯入', topics: '科技' })),
+    );
+    expect((await monthView(pool, '202609')).find((s) => s.domain === 'a.com.tw')).toMatchObject({
+      name: '清楚的名稱',
+      topics: ['台灣', '新聞', '社群'],
+    });
+    // Invalid add/remove overlap rejects the entire batch. Geographic tags have no special constraints.
+    expect((await form('/sites/', { domains: 'b.com.tw\na.com.tw', add: '科技', remove: '科技' })).statusCode).toBe(400);
+    expect((await monthView(pool, '202609')).find((s) => s.domain === 'b.com.tw')?.topics).toEqual(['通路', '科技']);
+    expect((await form('/sites/', { domains: 'a.com.tw\nb.com.tw', add: '非台灣, 部落格', remove: '' })).statusCode).toBe(303);
+    expect((await server.inject('/api/v1/topics/all?topic=部落格')).json().sites).toHaveLength(2);
+    expect((await monthView(pool, '202609')).find((s) => s.domain === 'a.com.tw')).toMatchObject({
+      name: '清楚的名稱',
+      topics: ['台灣', '新聞', '社群', '非台灣', '部落格'],
+    });
+    expect((await server.inject('/api/v1/rankings?month=202609')).json().sites).toHaveLength(2);
+    expect((await server.inject('/api/v1/rankings?month=202609&topic=%E9%9D%9E%E5%8F%B0%E7%81%A3')).json().sites).toHaveLength(2);
+    expect((await form('/sites/', { domains: 'missing.tw', add: '新聞', remove: '' })).statusCode).toBe(400);
+    expect(await rows(pool, 'SELECT * FROM site_metadata_log')).toHaveLength(3);
+    // Independent batches must merge against the latest committed tags.
+    await Promise.all([
+      editSites(pool, 'editor@example.com', { domains: ['a.com.tw'], add: '標籤一', remove: '' }),
+      editSites(pool, 'editor@example.com', { domains: ['a.com.tw'], add: '標籤二', remove: '' }),
+    ]);
+    expect((await monthView(pool, '202609')).find((s) => s.domain === 'a.com.tw')?.topics).toEqual(
+      expect.arrayContaining(['標籤一', '標籤二']),
+    );
+    // Both sites now carry 非台灣: the pages leave them out until told otherwise; the API leaves nothing out unless asked.
+    const fresh = app();
+    expect((await fresh.inject('/table/?month=202609')).body).toContain('排除 非台灣');
+    expect((await fresh.inject('/table/?month=202609&exclude=')).body).not.toContain('排除 非台灣');
+    expect((await fresh.inject('/api/v1/rankings?month=202609')).json().exclude).toEqual([]);
+    await fresh.close();
+    await server.close();
+  });
+
+  it('aggregates topics across months with complete current membership and no duplicate traffic', async () => {
+    const base = {
+      month: '202608',
+      rowNo: 2,
+      domain: 'a.com.tw',
+      name: 'A',
+      group: null,
+      topics: '舊標籤',
+      url: null,
+      visits: 10,
+      adjusted: false,
+      searchShare: 0.5,
+      aiShare: 0.01,
+      taiwanShare: null,
+      raw: {},
+    };
+    await saveSheet(pool, [
+      base,
+      { ...base, rowNo: 3 },
+      { ...base, rowNo: 4, domain: 'b.com.tw', name: 'B', topics: '科技', visits: 20, searchShare: 0.2, aiShare: null },
+      { ...base, month: '202609', topics: '科技', visits: 999, searchShare: null, aiShare: 0.03 },
+      { ...base, month: '202610', name: '最新名稱', topics: '科技', visits: null },
+      { ...base, month: '202610', rowNo: 3, domain: 'waiting.tw', name: '還沒有流量', topics: '新標籤', visits: null },
+      { ...base, month: '202611', domain: 'adjusted.tw', name: '調整數字', topics: '新標籤', visits: 500, adjusted: true },
+    ]);
+    await pool.query('INSERT INTO traffic_months (domain, month, visits, first_seen_at, fetched_at) VALUES (?, ?, ?, NOW(), NOW())', [
+      'a.com.tw',
+      '202609',
+      30_000_000,
+    ]);
+    const server = app();
+    const all = (await server.inject('/api/v1/topics/all')).json();
+    expect(all).toMatchObject({ scope: 'all', months: ['202608', '202609'] });
+    expect(all.topics.find((t: { topic: string }) => t.topic === '科技')).toMatchObject({
+      sites: 2,
+      sitesWithData: 2,
+      visits: 60,
+      searchShare: 0.3,
+    });
+    expect(all.topics.find((t: { topic: string }) => t.topic === '科技').aiShare).toBeCloseTo(0.025, 12);
+    expect(all.topics.find((t: { topic: string }) => t.topic === '新標籤')).toMatchObject({ sites: 2, sitesWithData: 0, visits: null });
+    expect(all.topics.map((t: { topic: string }) => t.topic)).not.toContain('舊標籤');
+    expect((await server.inject('/api/v1/topics/all?month=202608')).json()).toEqual(all);
+    const members = (await server.inject('/api/v1/topics/all?topic=科技')).json().sites;
+    expect(members.map((s: { domain: string }) => s.domain)).toEqual(['a.com.tw', 'b.com.tw']);
+    expect(members[0]).toMatchObject({ name: '最新名稱', visits: 40, months: 2 });
+    for (const path of ['/tag/', '/tag/?month=202608']) {
+      const page = (await server.inject(path)).body;
+      expect(page).toContain('60.00');
+      expect(page).toContain(`/tag/?topic=${encodeURIComponent('新標籤')}`);
+      expect(page).not.toMatch(/name="month"|流量成長|AI 成長|搜尋成長/);
+    }
+    const memberPage = (await server.inject('/tag/?topic=新標籤')).body;
+    expect(memberPage).toContain('/site/waiting.tw/');
+    expect(memberPage).toContain('/site/adjusted.tw/');
+    expect((await server.inject('/api/v1/topics/all?topic=不存在')).statusCode).toBe(404);
+    // The documented monthly API remains available to existing consumers.
+    const monthly = (await server.inject('/api/v1/topics?month=202608')).json();
+    expect(monthly.month).toBe('202608');
+    expect(monthly.topics.find((t: { topic: string }) => t.topic === '舊標籤')).toMatchObject({ sites: 1, visits: 10 });
+    await editSites(pool, 'editor@example.com', { single: { domain: 'a.com.tw', name: '最新名稱', topics: '', revision: 0 } });
+    expect((await server.inject('/api/v1/topics/all?topic=科技')).json().sites.map((s: { domain: string }) => s.domain)).toEqual([
+      'b.com.tw',
+    ]);
+    await server.close();
+  });
+
+  it('treats a Similarweb 0 as no estimate: the sheet fills in, otherwise the month is missing', async () => {
+    const row = { rowNo: 2, group: null, topics: '新聞', url: null, adjusted: false, aiShare: null, taiwanShare: null, raw: {} };
+    await saveSheet(pool, [{ ...row, month: '202609', domain: 'news.example.tw', name: '新聞站', visits: 60.1, searchShare: 0.3 }]);
+    const month = async (domain: string, m: string, visits: number) =>
+      pool.query('INSERT INTO traffic_months (domain, month, visits, first_seen_at, fetched_at) VALUES (?, ?, ?, NOW(), NOW())', [
+        domain,
+        m,
+        visits,
+      ]);
+    await month('news.example.tw', '202609', 0);
+    await month('blog.example.tw', '202608', 437);
+    await month('blog.example.tw', '202609', 0);
+    const view = await monthView(pool, '202609');
+    expect(view.find((s) => s.domain === 'news.example.tw')).toMatchObject({ visits: 60.1, visitsSource: 'sheet', searchShare: 0.3 });
+    expect(view.find((s) => s.domain === 'blog.example.tw')).toBeUndefined();
+    const server = app();
+    const page = (await server.inject('/site/news.example.tw/')).body;
+    expect(page).toContain('無估算');
+    expect(page).toContain('60.10<span class="unit">m</span>');
+    await server.close();
+  });
+
+  it('lets editors enter a month from the Similarweb platform where the free data has no estimate', async () => {
+    const origin = 'https://traffic.example';
+    const server = buildApp(pool, {
+      login: { clientId: 'cid', clientSecret: 'secret', origin, admins: new Set(['editor@example.com']) },
+      logger: false,
+    });
+    const cookie = 'traffic_session=test-editor';
+    await pool.query(
+      'INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))',
+      [createHash('sha256').update('test-editor').digest('hex'), 'editor@example.com'],
+    );
+    const [month] = recentMonths();
+    const row = { rowNo: 2, group: null, topics: '新聞', url: null, adjusted: false, aiShare: 0.01, taiwanShare: null, raw: {} };
+    await saveSheet(pool, [{ ...row, month, domain: 'news.example.tw', name: '新聞站', visits: 50, searchShare: 0.2 }]);
+    await pool.query('INSERT INTO traffic_months (domain, month, visits, first_seen_at, fetched_at) VALUES (?, ?, 0, NOW(), NOW())', [
+      'news.example.tw',
+      month,
+    ]);
+    const post = (payload: Record<string, string>, headers: Record<string, string> = { cookie, origin }) =>
+      server.inject({
+        method: 'POST',
+        url: '/site/news.example.tw/manual/',
+        headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
+        payload: new URLSearchParams(payload).toString(),
+      });
+    const entry = { month, visits: '60.10M', search: '36.45', ai: '0.37%', taiwan: '' };
+    // The status page lists the domain until it is filled in, and links to the form.
+    expect((await server.inject('/status/')).body).toContain('/site/news.example.tw/manual/');
+    expect((await server.inject('/site/news.example.tw/manual/')).statusCode).toBe(303);
+    // The page says what the free data last answered and links to the platform.
+    const blank = (await server.inject({ url: '/site/news.example.tw/manual/', headers: { cookie } })).body;
+    expect(blank).toContain('無估算');
+    expect(blank).toContain('pro.similarweb.com');
+    expect((await post(entry, { cookie: '', origin })).statusCode).toBe(303);
+    expect((await post(entry, { cookie, origin: 'https://evil.example' })).statusCode).toBe(403);
+    expect((await post({ ...entry, visits: '60.1' })).body).toContain('單位');
+    expect((await post({ ...entry, month: '201901' })).statusCode).toBe(400);
+    expect(await rows(pool, 'SELECT * FROM manual_months')).toHaveLength(0);
+    const saved = await post(entry);
+    expect(saved.statusCode).toBe(303);
+    expect(saved.headers.location).toBe('/site/news.example.tw/manual/?done=saved');
+    // Entered numbers come before the sheet; shares left blank stay empty rather than falling back.
+    expect((await monthView(pool, month)).find((s) => s.domain === 'news.example.tw')).toMatchObject({
+      visits: 60.1,
+      visitsSource: 'manual',
+      searchShare: expect.closeTo(0.3645, 10),
+      taiwanShare: null,
+    });
+    expect((await server.inject('/api/v1/history')).json().sites['news.example.tw'].m[month][4]).toBe(2);
+    expect((await server.inject('/site/news.example.tw/')).body).toContain('Pro 補登');
+    // The saved month comes back filled in, ready to correct.
+    expect((await server.inject({ url: '/site/news.example.tw/manual/', headers: { cookie } })).body).toContain('value="60.10m"');
+    expect((await post({ month, action: 'delete' })).statusCode).toBe(303);
+    expect((await monthView(pool, month)).find((s) => s.domain === 'news.example.tw')).toMatchObject({ visits: 50, visitsSource: 'sheet' });
+    const log = await rows<{ email: string; before_value: unknown; after_value: unknown }>(
+      pool,
+      'SELECT email, before_value, after_value FROM manual_months_log ORDER BY id',
+    );
+    expect(log.map((l) => [l.email, !!l.before_value, !!l.after_value])).toEqual([
+      ['editor@example.com', false, true],
+      ['editor@example.com', true, false],
+    ]);
+    await server.close();
+  });
+
   it('serves pages and the public API', async () => {
     const server = app();
     const { request } = fakeFetch();
@@ -214,7 +507,7 @@ describe.skipIf(!url)('with a database', () => {
     await run(pool, request);
     const ranking = (await server.inject('/api/v1/rankings?month=202609')).json();
     expect(ranking.sites[0]).toMatchObject({ domain: 'a.com.tw', visits: 1.2, rank: 1, searchVisits: 1.2 * 0.3 });
-    for (const path of ['/', '/table/', '/table/?source=tag', '/topics/', '/site/a.com.tw/', '/status/'])
+    for (const path of ['/', '/table/', '/table/?source=tag', '/tag/', '/site/a.com.tw/', '/status/'])
       expect((await server.inject(path)).statusCode).toBe(200);
     // The report page is static and reads everything from /api/v1/history.
     expect((await server.inject('/')).body).toContain('/api/v1/history');
@@ -268,9 +561,12 @@ describe.skipIf(!url)('with a database', () => {
         payload: new URLSearchParams(body).toString(),
       });
 
-    // Not on the list: no session.
+    // Not on the list: signed in (to vote on tags), but the editors' pages refuse.
     email = 'someone@gmail.com';
-    expect(await signIn()).toEqual({ location: '/login/?error=not_editor', cookie: undefined });
+    const reader = await signIn();
+    expect(reader.location).toBe('/watch/');
+    expect((await form(reader.cookie, '/watch/', { domains: 'x.com.tw' })).statusCode).toBe(403);
+    expect((await server.inject({ url: '/sites/', headers: { cookie: reader.cookie } })).statusCode).toBe(403);
     email = 'sky9109@gmail.com';
     const { location, cookie } = await signIn();
     expect(location).toBe('/watch/');
@@ -311,9 +607,9 @@ describe.skipIf(!url)('with a database', () => {
       'del:manual',
     ]);
 
-    // Removed from TRAFFIC_ADMIN_EMAILS: the session stops working at once.
+    // Removed from TRAFFIC_ADMIN_EMAILS: editing stops at once.
     login.admins.delete('sky9109@gmail.com');
-    expect((await form(cookie, '/watch/', { domains: 'z.com.tw' })).headers.location).toBe('/auth/google?next=/watch/');
+    expect((await form(cookie, '/watch/', { domains: 'z.com.tw' })).statusCode).toBe(403);
 
     // Services can add and remove single domains too.
     const tag = { authorization: `Bearer ${TAG}` };
@@ -338,6 +634,132 @@ describe.skipIf(!url)('with a database', () => {
       domain: 'b.com.tw',
     });
     await server.close();
+  });
+
+  it('resolves tags from editors, AI, readers and admins, from the site page and from services', async () => {
+    const now = new Date();
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+      [
+        ['blog', 'food.blog', 'watch', now, 7],
+        ['tag', 'news.com.tw', 'watch', now, 7],
+      ],
+    ]);
+    await editSites(pool, 'ed@x.tw', { single: { domain: 'news.com.tw', name: '新聞台', topics: '新聞, 台灣', revision: 0 } });
+    const origin = 'https://traffic.example';
+    let nonce = '';
+    const email = 'reader@gmail.com';
+    const server = buildApp(pool, {
+      tokens: new Map([['blog', Buffer.from(TOKEN)]]),
+      login: { clientId: 'cid', clientSecret: 'secret', origin, admins: new Set(['admin@gmail.com']) },
+      logger: false,
+      exchange: async () => ({ iss: 'accounts.google.com', aud: 'cid', exp: Date.now() / 1000 + 60, nonce, email, email_verified: true }),
+    });
+    const blog = { authorization: `Bearer ${TOKEN}` };
+    const call = (url: string, payload: object, method: 'POST' | 'PUT' = 'POST') => server.inject({ method, url, headers: blog, payload });
+    const tagsOf = async (domain: string) => (await server.inject(`/api/v1/tags/${domain}`)).json().tags as Array<Record<string, unknown>>;
+    const shown = async (domain: string) => (await managedSites(pool)).find((s) => s.domain === domain)?.topics;
+
+    // A service's AI suggestions; unknown domains are skipped.
+    const ai = await call(
+      '/internal/v1/tags/ai',
+      {
+        sites: [
+          { domain: 'https://www.food.blog/', tags: ['美食', '旅遊'], reason: 'r' },
+          { domain: 'nope.blog', tags: ['x'] },
+        ],
+      },
+      'PUT',
+    );
+    expect(ai.json()).toEqual({ ok: true, sites: 1, changed: 2, skipped: ['nope.blog'] });
+    expect(await shown('food.blog')).toEqual(['美食', '旅遊']);
+
+    // A reader adds a tag (shown at once), another disagrees (hidden again).
+    const added = await call('/internal/v1/tags/propose', { voter: 'A@Gmail.com', domain: 'food.blog', tag: ' #咖啡 ' });
+    expect(added.json()).toMatchObject({ ok: true, tag: '咖啡' });
+    expect((await tagsOf('food.blog')).find((t) => t.tag === '咖啡')).toEqual({
+      tag: '咖啡',
+      source: 'community',
+      visible: true,
+      agrees: 1,
+      disagrees: 0,
+      adminOverride: null,
+    });
+    await call('/internal/v1/tags/vote', { voter: 'b@gmail.com', domain: 'food.blog', tag: '咖啡', vote: -1 });
+    expect(await shown('food.blog')).toEqual(['美食', '旅遊']);
+    // An AI tag needs two more disagreements than agreements to hide.
+    await call('/internal/v1/tags/vote', { voter: 'a@gmail.com', domain: 'food.blog', tag: '旅遊', vote: -1 });
+    expect(await shown('food.blog')).toContain('旅遊');
+    await call('/internal/v1/tags/vote', { voter: 'b@gmail.com', domain: 'food.blog', tag: '旅遊', vote: -1 });
+    expect(await shown('food.blog')).toEqual(['美食']);
+    expect((await call('/internal/v1/tags/vote', { voter: 'a@gmail.com', domain: 'food.blog', tag: '登山', vote: 1 })).statusCode).toBe(
+      404,
+    );
+    expect((await call('/internal/v1/tags/vote', { voter: 'not-an-email', domain: 'food.blog', tag: '美食', vote: 1 })).statusCode).toBe(
+      400,
+    );
+    expect((await call('/internal/v1/tags/propose', { voter: 'a@gmail.com', domain: 'nope.blog', tag: 'x' })).statusCode).toBe(404);
+    expect((await call('/internal/v1/tags/propose', { voter: 'a@gmail.com', domain: 'food.blog', tag: 'a,b' })).json().error).toBe(
+      'invalid_tag',
+    );
+
+    // Only admins override; set wins over the votes, release hands the tag back.
+    expect(
+      (await call('/internal/v1/tags/admin', { voter: 'a@gmail.com', domain: 'food.blog', tag: '咖啡', action: 'set' })).statusCode,
+    ).toBe(403);
+    await call('/internal/v1/tags/admin', { voter: 'admin@gmail.com', domain: 'food.blog', tag: '咖啡', action: 'set' });
+    expect(await shown('food.blog')).toEqual(['咖啡', '美食']);
+    // The editors' list ignores votes; an admin can still hide one of its tags.
+    for (const voter of ['a@gmail.com', 'b@gmail.com', 'c@gmail.com'])
+      await call('/internal/v1/tags/vote', { voter, domain: 'news.com.tw', tag: '新聞', vote: -1 });
+    await call('/internal/v1/tags/admin', { voter: 'admin@gmail.com', domain: 'news.com.tw', tag: '台灣', action: 'hide' });
+    expect(await shown('news.com.tw')).toEqual(['新聞']);
+    await call('/internal/v1/tags/admin', { voter: 'admin@gmail.com', domain: 'news.com.tw', tag: '台灣', action: 'release' });
+    expect(await shown('news.com.tw')).toEqual(['新聞', '台灣']);
+    // Batch edits change the editors' list, not the readers' tags.
+    await editSites(pool, 'ed@x.tw', { domains: ['food.blog'], add: '生活', remove: '' });
+    expect((await managedSites(pool)).find((s) => s.domain === 'food.blog')).toMatchObject({
+      baseTopics: ['生活'],
+      topics: ['生活', '咖啡', '美食'],
+    });
+
+    // A service reads every tag and its reader's votes, never other readers' emails.
+    const read = await call('/internal/v1/tags', { domains: ['food.blog', 'nope.blog'], voter: 'a@gmail.com' });
+    expect(Object.keys(read.json().domains)).toEqual(['food.blog']);
+    expect(read.json().voter).toEqual({ email: 'a@gmail.com', admin: false, votes: { 'food.blog': { 咖啡: 1, 旅遊: -1 } } });
+    expect((await server.inject('/api/v1/tags/food.blog')).body).not.toContain('@');
+    expect((await server.inject('/api/v1/tags/nope.blog')).statusCode).toBe(404);
+
+    // On the site page: anyone signed in votes and adds; the form goes back to the tag block.
+    const start = await server.inject('/auth/google?next=/site/food.blog/');
+    const auth = new URL(start.headers.location as string);
+    nonce = auth.searchParams.get('nonce') as string;
+    const back = await server.inject({
+      url: `/auth/google/callback?state=${auth.searchParams.get('state')}&code=c`,
+      headers: { cookie: String(start.headers['set-cookie']).split(';')[0] },
+    });
+    const cookie = ([] as string[])
+      .concat(back.headers['set-cookie'] as string[])
+      .find((c) => /^traffic_session=[^;]/.test(c))
+      ?.split(';')[0] as string;
+    const send = (body: Record<string, string>, from = origin) =>
+      server.inject({
+        method: 'POST',
+        url: '/site/food.blog/tags/',
+        headers: { cookie, origin: from, 'content-type': 'application/x-www-form-urlencoded' },
+        payload: new URLSearchParams(body).toString(),
+      });
+    expect((await server.inject('/site/food.blog/')).body).toContain('用 Google 帳號登入</a>後可以同意');
+    expect((await send({ kind: 'vote', tag: '美食', value: '1' }, 'https://evil.example')).statusCode).toBe(403);
+    expect((await send({ kind: 'vote', tag: '美食', value: '1' })).headers.location).toBe('/site/food.blog/?tags=done#tags');
+    expect((await send({ kind: 'admin', tag: '美食', value: 'hide' })).headers.location).toBe('/site/food.blog/?tags=not_admin#tags');
+    const page = (await server.inject({ url: '/site/food.blog/?tags=done', headers: { cookie } })).body;
+    expect(page).toContain('已同意（收回）');
+    expect(page).toContain('已更新標籤。');
+    expect(page).not.toContain('解除覆寫');
+    expect(await rows(pool, "SELECT voter, vote, via FROM tag_votes WHERE domain = 'food.blog' AND tag = '美食'")).toEqual([
+      { voter: 'reader@gmail.com', vote: 1, via: 'web' },
+    ]);
+    expect((await rows<{ n: number }>(pool, 'SELECT COUNT(*) AS n FROM tag_log'))[0].n).toBeGreaterThan(10);
   });
 
   it('fetches Cloudflare Radar for every watched domain once a day and serves the periods', async () => {

@@ -1,9 +1,11 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
+import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
+import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
-import { readMonthTab } from '../src/sheet.ts';
+import { readMonthTab, readWorkbook } from '../src/sheet.ts';
 import { publicDomain, searchShare } from '../src/similarweb.ts';
 import { fetchQueue } from '../src/status.ts';
 
@@ -184,6 +186,57 @@ describe('readMonthTab', () => {
     ws.addRow(['多元', '新聞', 1, 'Yahoo 新聞', 48.98, 51.49]);
     expect(readMonthTab(ws, '202512')[0]).toMatchObject({ name: 'Yahoo 新聞', visits: 48.98, domain: null });
   });
+
+  it('keeps labelled rows without figures, rich-text links and domains written into names', () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('202609');
+    ws.addRow([null, null, '名次', '網站名', '網址', '流量']);
+    ws.addRow([
+      '非台灣',
+      '女性',
+      7,
+      { text: { richText: [{ text: 'cosmopolitan/' }, { text: '10' }] }, hyperlink: 'http://cosmopolitan.com/' },
+    ]);
+    ws.addRow(['公家', null, null, '台北市']);
+    ws.addRow(['品牌', '財經 (其他)', null, '元大理財 yuantafunds.com']);
+    ws.addRow([null, null, null, '只有名字']);
+    expect(readMonthTab(ws, '202609').map((r) => [r.name, r.domain, r.group, r.topics, r.adjusted])).toEqual([
+      ['cosmopolitan', 'cosmopolitan.com', '非台灣', '女性', true],
+      ['台北市', null, '公家', null, false],
+      ['元大理財 yuantafunds.com', 'yuantafunds.com', '品牌', '財經 (其他)', false],
+    ]);
+  });
+});
+
+describe('readWorkbook', () => {
+  it('gives name-only rows the hand-matched domain, then the domain another month had', async () => {
+    const wb = new ExcelJS.Workbook();
+    for (const [month, rows] of [
+      [
+        '202608',
+        [
+          [null, null, '名次', '網站名', '網址', '流量'],
+          ['媒體', '測試', null, '某網站', 'some.tw', 1],
+        ],
+      ],
+      [
+        '202609',
+        [
+          [null, null, '名次', '網站名', '網址', '流量'],
+          ['公家', null, null, '台北市'],
+          ['媒體', '新聞', null, '某網站'],
+        ],
+      ],
+    ] as const) {
+      const ws = wb.addWorksheet(month);
+      for (const r of rows) ws.addRow([...r]);
+    }
+    const rows = await readWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    expect(rows.filter((r) => r.month === '202609').map((r) => [r.name, r.domain])).toEqual([
+      ['台北市', 'gov.taipei'],
+      ['某網站', 'some.tw'],
+    ]);
+  });
 });
 
 describe('ranking and topicSummary', () => {
@@ -201,7 +254,7 @@ describe('ranking and topicSummary', () => {
     prevSearchShare: search,
     prevAiShare: ai,
   });
-  const view = [site('a.tw', 10, 8, ['電商']), site('b.tw', 9, 12, ['電商', '科技']), site('c.tw', 1, null, [])];
+  const view = [site('a.tw', 10, 8, ['台灣', '電商']), site('b.tw', 9, 12, ['台灣', '電商', '科技']), site('c.tw', 1, null, [])];
 
   it('ranks within a topic and reports last month’s rank there', () => {
     const list = ranking(view, '電商');
@@ -213,20 +266,111 @@ describe('ranking and topicSummary', () => {
     expect(list[0].searchVisits).toBe(5);
   });
 
-  it('lists 非台灣 sites without a rank, so local sites keep their places', () => {
-    const foreign = { ...site('f.com', 20, 30, ['電商']), group: '非台灣' };
+  it('ranks all sites and treats geographic labels like every other tag', () => {
+    const foreign = { ...site('f.com', 20, 30, ['非台灣', '電商']), group: '非台灣' };
     const list = ranking([foreign, ...view], '電商');
     expect(list.map((s) => [s.domain, s.rank, s.prevRank])).toEqual([
-      ['f.com', null, null],
-      ['a.tw', 1, 2],
-      ['b.tw', 2, 1],
+      ['f.com', 1, 1],
+      ['a.tw', 2, 3],
+      ['b.tw', 3, 2],
     ]);
+    expect(ranking([foreign, ...view], '非台灣').map((s) => s.domain)).toEqual(['f.com']);
+    expect(ranking([foreign, ...view], '台灣').map((s) => s.domain)).toEqual(['a.tw', 'b.tw']);
   });
 
-  it('sums each topic, counting multi-topic sites in each, unlabelled ones under 未分類', () => {
+  it('ranks sites without geographic labels', () => {
+    const unknown = { ...site('unknown.tw', 100, 90, ['新聞']), taiwanShare: 0.99 };
+    expect(ranking([unknown], null)[0]).toMatchObject({ rank: 1, prevRank: 1 });
+  });
+
+  it('sums each topic, counting multi-topic sites in each, leaving out unlabelled ones', () => {
     const summary = Object.fromEntries(topicSummary(view).map((t) => [t.topic, t]));
     expect(summary['電商'].visitsGrowth).toBeCloseTo(19 / 20 - 1);
     expect(summary['科技'].sites).toBe(1);
-    expect(summary['未分類'].visitsGrowth).toBeNull();
+    expect(Object.keys(summary).sort()).toEqual(['台灣', '科技', '電商'].sort());
+  });
+});
+
+describe('months copied from the Similarweb platform', () => {
+  it('reads visits as the platform writes them, or as a plain count', () => {
+    expect(parseVisits('60.10M')).toBe(60_100_000);
+    expect(parseVisits(' 950k ')).toBe(950_000);
+    expect(parseVisits('1.2B')).toBe(1_200_000_000);
+    expect(parseVisits('60,100,000')).toBe(60_100_000);
+    for (const bad of ['', '60.1', 'abc', '-5M', '0M']) expect(() => parseVisits(bad), bad).toThrow();
+  });
+  it('reads shares as percentages and leaves blanks empty', () => {
+    expect(parseShare('36.45%', '搜尋')).toBeCloseTo(0.3645, 10);
+    expect(parseShare('0.37', 'AI')).toBeCloseTo(0.0037, 10);
+    expect(parseShare('', 'AI')).toBeNull();
+    expect(() => parseShare('120', 'AI')).toThrow();
+  });
+  it('offers the three months before the current one in Taipei', () => {
+    expect(recentMonths(new Date('2026-10-24T03:00:00Z'))).toEqual(['202609', '202608', '202607']);
+    // 2027-01-01 01:00 in Taipei is still 2026-12-31 in UTC.
+    expect(recentMonths(new Date('2026-12-31T17:00:00Z'))).toEqual(['202612', '202611', '202610']);
+  });
+});
+
+describe('visit counts', () => {
+  it('shows four significant digits with k under a million, m under ten billion, then b', async () => {
+    const { volText } = await import('../src/pages.ts');
+    const cases: Array<[number, string]> = [
+      [437e-6, '437'],
+      [12_340e-6, '12.34k'],
+      [950_249e-6, '950.2k'],
+      [999_960e-6, '1000k'],
+      [1.2, '1.200m'],
+      [60.1, '60.10m'],
+      [757.316, '757.3m'],
+      [4030.84, '4031m'],
+      [12_345.6, '12.35b'],
+      [0, '0'],
+    ];
+    for (const [millions, shown] of cases) expect(volText(millions), String(millions)).toBe(shown);
+    expect(volText(null)).toBe('');
+  });
+});
+
+describe('filter chips', () => {
+  it('marks a chosen chip and a left-out chip, each with where the next click leads', async () => {
+    const { chipRow } = await import('../src/pages.ts');
+    const row = chipRow('網站標籤', { href: '/all', text: '全部標籤', on: false }, [
+      { href: '/exclude-a', text: 'A', count: 3, on: true, hint: '再按一次改為排除' },
+      { href: '/clear-b', text: 'B', count: 2, on: false, excluded: true, hint: '已排除，再按一次取消' },
+    ]);
+    expect(row).toContain('<a class="chip-filter" href="/exclude-a" aria-current="true" title="再按一次改為排除">A');
+    expect(row).toContain('<a class="chip-filter excluded" href="/clear-b" title="已排除，再按一次取消">−B');
+  });
+});
+
+describe('crowd tags', () => {
+  const crowd = (tag: string, more: object) => ({ tag, ai: false, community: false, admin: null, agrees: 0, disagrees: 0, ...more });
+  it('keeps the base list, hides AI at two net disagreements and reader tags when disagreements catch up', () => {
+    const tags = resolveTags(
+      ['新聞', '台灣'],
+      [
+        crowd('新聞', { disagrees: 5 }),
+        crowd('美食', { ai: true, disagrees: 1 }),
+        crowd('旅遊', { ai: true, disagrees: 2 }),
+        crowd('咖啡', { community: true, agrees: 2, disagrees: 1 }),
+        crowd('登山', { community: true, agrees: 1, disagrees: 1 }),
+        crowd('只有票', { agrees: 3 }),
+        crowd('台灣', { admin: 'hide' }),
+      ],
+    );
+    expect(tags.filter((t) => t.visible).map((t) => [t.tag, t.source])).toEqual([
+      ['新聞', 'editor'],
+      ['咖啡', 'community'],
+      ['美食', 'ai'],
+    ]);
+    expect(tags.filter((t) => !t.visible).map((t) => t.tag)).toEqual(['台灣', '登山', '旅遊']);
+  });
+  it('cleans what readers type and takes an existing spelling', () => {
+    expect(cleanTag(' ＃ ai  工具 ', ['AI 工具'])).toBe('AI 工具');
+    expect(cleanTag('#咖啡')).toBe('咖啡');
+    for (const bad of ['', '!!!', 'a、b', 'x/y', 'a'.repeat(33), 3]) expect(cleanTag(bad)).toBeNull();
+    expect(voterOf(' A@Gmail.com ')).toBe('a@gmail.com');
+    expect(voterOf('nobody')).toBeNull();
   });
 });

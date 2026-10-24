@@ -2,10 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { type Pool, rows } from './db.ts';
 
-// Google sign-in, ported from tag (app/src/auth/google-login.ts) and cut down:
-// only the editors in TRAFFIC_ADMIN_EMAILS get a session, since signing in is
-// only for adding domains by hand (/watch/). Everyone else reads the public
-// pages without signing in. Sessions are stored as SHA-256 hashes.
+// Google sign-in, ported from tag (app/src/auth/google-login.ts) and cut down.
+// Any verified Google account gets a session, to vote on and add site tags
+// (crowd.ts); only the editors in TRAFFIC_ADMIN_EMAILS manage domains, names,
+// the tag lists and tag overrides. Reading the public pages needs no sign-in.
+// Sessions are stored as SHA-256 hashes.
 
 export type LoginConfig = { clientId: string; clientSecret: string; origin: string; admins: Set<string> };
 export type Editor = { email: string; name: string | null };
@@ -92,20 +93,27 @@ export function registerLogin(app: FastifyInstance, pool: Pool, config: LoginCon
   const cookie = (name: string, value: string, maxAge: number) =>
     `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
 
-  /** The signed-in editor; the list is re-read on every request, so removing an email locks them out at once. */
-  async function currentEditor(request: FastifyRequest): Promise<Editor | null> {
+  /** Whoever is signed in, editor or not. */
+  async function currentUser(request: FastifyRequest): Promise<Editor | null> {
     const value = readCookie(request, SESSION_COOKIE);
     if (!config || !value || value.length > 64) return null;
     const [row] = await rows<Editor>(pool, 'SELECT email, name FROM sessions WHERE token_hash = ? AND expires_at > ?', [
       hashToken(value),
       new Date(now()),
     ]);
-    return row && config.admins.has(row.email) ? row : null;
+    return row ?? null;
+  }
+  /** The list is re-read on every request, so removing an email takes editing away at once. */
+  const isEditor = (email: string) => Boolean(config?.admins.has(email.toLowerCase()));
+  /** The signed-in editor. */
+  async function currentEditor(request: FastifyRequest): Promise<Editor | null> {
+    const user = await currentUser(request);
+    return user && isEditor(user.email) ? user : null;
   }
   /** Form posts must come from this site (the cookie is SameSite=Lax, this is the second guard). */
   const sameOrigin = (request: FastifyRequest) => Boolean(config && request.headers.origin === config.origin);
 
-  if (!config) return { enabled: false, currentEditor, sameOrigin };
+  if (!config) return { enabled: false, currentUser, currentEditor, isEditor, sameOrigin };
   const exchange = options.exchange ?? googleExchange(config);
   const callback = `${config.origin}/auth/google/callback`;
   const fail = (reply: FastifyReply, reason: string) => reply.redirect(`/login/?error=${reason}`, 303);
@@ -152,10 +160,6 @@ export function registerLogin(app: FastifyInstance, pool: Pool, config: LoginCon
       return fail(reply, 'failed');
     }
     if (!editor) return fail(reply, 'invalid');
-    if (!config.admins.has(editor.email)) {
-      request.log.info({ email: editor.email }, 'sign-in refused: not an editor');
-      return fail(reply, 'not_editor');
-    }
     const at = new Date(now());
     const session = token();
     // Sign-ins are rare, so expired sessions are swept here rather than by a job.
@@ -180,5 +184,5 @@ export function registerLogin(app: FastifyInstance, pool: Pool, config: LoginCon
     return reply.header('set-cookie', cookie(SESSION_COOKIE, '', 0)).redirect('/', 303);
   });
 
-  return { enabled: true, currentEditor, sameOrigin };
+  return { enabled: true, currentUser, currentEditor, isEditor, sameOrigin };
 }

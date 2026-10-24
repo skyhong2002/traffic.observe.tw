@@ -3,62 +3,62 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>台灣網站流量總覽｜流量觀察</title>
+<title>網站流量總覽｜流量觀察</title>
 <link rel="stylesheet" href="<!--style-->">
+<!--js-->
 <script src="<!--tables-->" defer></script>
 </head>
 <body class="report-page">
 <!--header-->
 <main id="main" class="wrap report-main" tabindex="-1">
-  <div class="report-heading">
-    <div><h1>台灣網站流量</h1></div>
-    <label class="month-control">資料月份 <select id="to" disabled><option>載入中…</option></select></label>
+  <!--tabs-->
+  <div class="page-head">
+    <div><h1>網站流量排行</h1><p class="dek">每月 Similarweb 造訪估算，依流量排名，可與任一月份比較<span class="sep" aria-hidden="true">·</span><!--method--></p></div>
+    <div class="page-actions"><a id="csv" href="/api/v1/rankings.csv">下載 CSV</a></div>
   </div>
-  <section class="overview" id="overview" aria-label="本期概況" aria-busy="true">
-    <div><span>有資料的網站</span><strong>—</strong></div><div><span>每月造訪估算</span><strong>—</strong></div><div><span>與前期相比</span><strong>—</strong></div>
+  <section class="stats" id="overview" aria-label="本期概況" aria-busy="true">
+    <div><span>有資料的網站</span><b>—</b></div><div><span>每月造訪估算</span><b>—</b></div><div><span>與前期相比</span><b>—</b></div>
   </section>
-  <section class="directory" aria-labelledby="directory-title">
-    <div class="directory-heading"><div><h2 id="directory-title">網站排行</h2></div><a id="full-data" class="text-link" href="/table/">完整數據 <span aria-hidden="true">↗</span></a></div>
-    <div class="filter-toolbar">
-      <label class="search-field"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" aria-label="搜尋網站名稱或網域" placeholder="搜尋網站名稱或網域" autocomplete="off" disabled><button id="clear-search" type="button" aria-label="清除搜尋" hidden>✕</button></label>
-      <label class="topic-control"><span class="sr-only">網站分類</span><select id="topic" disabled><option>全部分類</option></select></label>
-      <button id="reset" type="button" class="quiet" hidden>重設篩選</button>
-    </div>
-    <details class="filter-details" id="filters">
-      <summary>篩選與比較 <span class="filter-summary" id="filter-summary"></span></summary>
-      <div class="filter-content"><div class="controls">
-        <label>比較月份 <select id="from" disabled></select></label><span class="presets" id="presets"></span>
-        <label>追蹤來源 <select id="source" disabled><option value="">所有來源</option></select></label>
-        <label class="check"><input id="foreign" type="checkbox" disabled>包含非台灣網站</label>
-      </div><p class="range-note" id="rangeNote"></p></div>
-    </details>
-    <div class="results-bar"><p id="result-count" role="status" aria-live="polite">正在載入流量資料…</p><button type="button" id="detail-toggle" class="quiet" aria-pressed="false" disabled>更多指標</button></div>
+  <div class="toolbar">
+    <label class="search-field"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" aria-label="搜尋網站名稱或網域" placeholder="搜尋網站名稱或網域" autocomplete="off" disabled><button id="clear-search" type="button" aria-label="清除搜尋" hidden>✕</button></label>
+    <label class="select-field"><span>月份</span><select id="to" disabled><option>載入中…</option></select></label>
+    <label class="select-field"><span>比較</span><select id="from" disabled></select></label>
+    <button id="reset" type="button" class="quiet" hidden>重設篩選</button>
+  </div>
+  <div class="chip-rows" id="chips"></div>
+  <section class="block directory" aria-label="網站排行">
+    <p class="results-line" id="result-count" role="status" aria-live="polite">正在載入流量資料…</p>
     <div id="sections" aria-busy="true"><div class="loading-state"><span class="loading-dot"></span>正在整理網站排行…</div></div>
     <noscript><p class="empty">請開啟 JavaScript 使用搜尋，或直接查看<a href="/table/">完整數據</a>。</p></noscript>
   </section>
   <p class="data-stamp" id="generated"></p>
 </main>
 <!--footer-->
-<div class="backdrop" id="backdrop"></div>
-<aside class="panel" id="panel" aria-hidden="true" aria-modal="true" role="dialog" aria-label="網站詳情" inert></aside>
 <div class="tip" id="tip" role="tooltip"></div>
 
 <script>
 'use strict';
-const UNLABELLED = '未分類';
-const PAGE_SIZE = 15;
+const PAGE_SIZE = 50;
 const SPARK_MONTHS = 12;
 const BUMP_MONTHS = 12;
 // GeneHong's sheet is the hand-curated list, so its domains and the ones added on /watch/ are one source: 手動.
 const SOURCE_LABEL = { tag: '媒體', blog: '部落格', manual: '手動追蹤' };
 const SOURCE_OF = { sheet: 'manual' };
-const state = { data: null, from: null, to: null, sort: {}, page: 0, query: '', detailed: false, selected: null, active: null, source: null, hl: null, bumpTop: 10, foreign: false };
+const state = { data: null, from: null, to: null, sort: {}, limit: PAGE_SIZE, endless: false, query: '', active: null, exclude: [], source: null, hl: null, bumpTop: 10 };
 
 // ---------- formatting ----------
 const monthLabel = (m) => `${m.slice(0, 4)} 年 ${Number(m.slice(4))} 月`;
 const monthShort = (m) => `${m.slice(2, 4)}/${m.slice(4)}`;
-const nf = (n, d = 2) => (n == null ? '—' : n.toLocaleString('zh-TW', { minimumFractionDigits: d, maximumFractionDigits: d }));
-const visits = (n) => (n == null ? '—' : n >= 100 ? nf(n, 1) : n >= 10 ? nf(n, 2) : nf(n, 3));
+// Visits (stored in millions) at four significant digits, as on the server pages:
+// a whole number under a thousand, then k, m below ten billion and b (437, 12.34k, 757.3m, 4031m, 12.34b).
+function visitParts(millions) {
+  const n = millions * 1e6;
+  const [v, unit] = n >= 1e10 ? [n / 1e9, 'b'] : n >= 1e6 ? [millions, 'm'] : n >= 1e3 ? [n / 1e3, 'k'] : [n, ''];
+  if (!unit) return [String(Math.round(v)), ''];
+  const r = Number(v.toPrecision(4));
+  return [r.toFixed(r >= 1000 ? 0 : 3 - Math.floor(Math.log10(r))), unit];
+}
+const visits = (n) => (n == null ? '—' : visitParts(n).join(''));
 const pct = (n, d = 1) => (n == null ? '—' : `${(n * 100).toFixed(d)}%`);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function deltaHtml(d) {
@@ -77,7 +77,9 @@ function radarText(r) {
 }
 
 // ---------- data helpers ----------
-const V = 0, S = 1, A = 2, T = 3, SHEET = 4;
+// Per month: visits, search, AI, Taiwan share, and where the visits came from.
+const V = 0, S = 1, A = 2, T = 3, ORIGIN = 4;
+const ORIGIN_NOTE = { 1: '試算表', 2: 'Similarweb 平台補登' };
 function calendar(first, last) {
   const out = [];
   let y = Number(first.slice(0, 4)), m = Number(first.slice(4));
@@ -88,11 +90,19 @@ function calendar(first, last) {
     if (++m > 12) { m = 1; y++; }
   }
 }
-const topicsOf = (s) => (s.topics?.length ? s.topics : [UNLABELLED]);
-// Ranks count Taiwan sites only: the 「非台灣」 group is listed but unranked, so it
-// doesn't push every local site down (same rule as /table/ and the rank trajectories).
-const isTaiwan = (s) => s.group !== '非台灣';
-const numberRanks = (rows) => { let n = 0; return rows.map((r) => ({ ...r, rank: isTaiwan(r) ? ++n : null })); };
+const tagHref = (topic) => {
+  const q = new URLSearchParams({ topic, to: state.to, from: state.from });
+  q.set('exclude', state.exclude.filter((t) => t !== topic).join(','));
+  if (state.source) q.set('source', state.source);
+  return '#' + esc(q.toString());
+};
+const topicsOf = (s) => s.topics || [];
+const siteHref = (domain) => `/site/${encodeURIComponent(domain)}/`;
+/** The site's icon (/icon/, cached on the server), or the first letter of its name where it has none. */
+const favicon = (domain, name) =>
+  `<span class="favicon" data-letter="${esc([...name.trim()][0]?.toUpperCase() ?? '')}" aria-hidden="true"><img src="/icon/${encodeURIComponent(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
+// Every matching site participates in the same ranking.
+const numberRanks = (rows) => rows.map((r, i) => ({ ...r, rank: i + 1 }));
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
 function row(domain, s) {
   const now = s.m[state.to];
@@ -102,21 +112,29 @@ function row(domain, s) {
   const radar = (state.data.radar[domain] || []).at(-1) || null;
   return {
     domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], prev: before ? before[V] : null,
-    change, search: now[S], ai: now[A], taiwan: now[T], sheet: !!now[SHEET], radar,
+    change, search: now[S], ai: now[A], taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
 }
-// 「非台灣」 sites are hidden until the reader turns on 「含非台灣」.
 function rowsFor(topic) {
   const out = [];
   for (const [d, s] of Object.entries(state.data.sites)) {
-    if (!inSource(s) || (!state.foreign && !isTaiwan(s))) continue;
+    if (!inSource(s)) continue;
     if (topic && !topicsOf(s).includes(topic)) continue;
     const r = row(d, s);
     if (r) out.push(r);
   }
   out.sort((a, b) => b.visits - a.visits);
   return numberRanks(out);
+}
+/**
+ * The sites the tag filters leave: only state.active when set, none carrying an
+ * excluded tag. Ranks are recounted among them, as for a single tag. Every
+ * redraw (filters, sorting, paging) goes through here.
+ */
+function scopedRows(all = rowsFor(null)) {
+  if (!state.active && !state.exclude.length) return all;
+  return numberRanks(all.filter((r) => (!state.active || r.topics.includes(state.active)) && !r.topics.some((t) => state.exclude.includes(t))));
 }
 const sum = (xs) => xs.reduce((a, b) => a + (b || 0), 0);
 
@@ -221,7 +239,6 @@ function lineChart(points, { width, height, pad = { t: 8, r: 8, b: 8, l: 8 }, ax
 }
 /** Axis numbers with just enough decimals for the step. */
 const axisNum = (step) => (v) => v.toLocaleString('zh-TW', { maximumFractionDigits: Math.max(0, -Math.floor(Math.log10(step))), minimumFractionDigits: 0 });
-const axisPct = (step) => (v) => `${(v * 100).toLocaleString('zh-TW', { maximumFractionDigits: Math.max(0, -Math.floor(Math.log10(step * 100))) })}%`;
 function niceStep(raw) {
   if (raw <= 0) return 1;
   const p = 10 ** Math.floor(Math.log10(raw));
@@ -234,22 +251,17 @@ function fillSelects() {
   const months = state.data.months;
   const opts = (sel) => [...months].reverse().map((m) => `<option value="${m}"${m === sel ? ' selected' : ''}>${monthLabel(m)}</option>`).join('');
   document.getElementById('to').innerHTML = opts(state.to);
-  document.getElementById('from').innerHTML = [...months].reverse().filter((m) => m < state.to).map((m) => `<option value="${m}"${m === state.from ? ' selected' : ''}>${monthLabel(m)}</option>`).join('');
-  const fromSelect = document.getElementById('from');
-  fromSelect.disabled = state.from === state.to;
-  if (state.from === state.to) fromSelect.innerHTML = '<option>無更早月份</option>';
+  // The common comparisons are named in the list itself instead of separate buttons.
   const prevYear = `${Number(state.to.slice(0, 4)) - 1}${state.to.slice(4)}`;
   const idx = months.indexOf(state.to);
-  const presets = [
-    ['上個月', months[idx - 1]],
-    ['3 個月前', months[idx - 3]],
-    ['6 個月前', months[idx - 6]],
-    ['去年同月', months.includes(prevYear) ? prevYear : null],
-  ].filter(([, m]) => m);
-  document.getElementById('presets').innerHTML = presets.map(([l, m]) => `<button type="button" data-from="${m}" aria-pressed="${m === state.from}">${l}</button>`).join('');
+  const named = new Map([[months[idx - 1], '上個月'], [months[idx - 3], '3 個月前'], [months[idx - 6], '6 個月前'], [prevYear, '去年同月']]);
+  const fromSelect = document.getElementById('from');
+  fromSelect.innerHTML = [...months].reverse().filter((m) => m < state.to).map((m) => `<option value="${m}"${m === state.from ? ' selected' : ''}>${monthLabel(m)}${named.has(m) ? `（${named.get(m)}）` : ''}</option>`).join('');
+  fromSelect.disabled = state.from === state.to;
+  if (state.from === state.to) fromSelect.innerHTML = '<option>無更早月份</option>';
 }
 function readHash() {
-  // The hash wins; ?month=&topic=&source= (links from /topics/ and old URLs) is the fallback.
+  // The hash wins; ?month=&topic=&source= (links from /tag/ and old URLs) is the fallback.
   const q = new URLSearchParams(location.hash.slice(1));
   const search = new URLSearchParams(location.search);
   if (!q.has('to') && search.has('month')) q.set('to', search.get('month'));
@@ -259,100 +271,158 @@ function readHash() {
   const i = months.indexOf(state.to);
   state.from = months.includes(q.get('from')) && q.get('from') < state.to ? q.get('from') : months[i - 1] ?? months[0];
   state.active = q.get('topic');
+  // No exclude in the address means the default (leave out 非台灣); exclude= keeps every site.
+  state.exclude = q.has('exclude') ? [...new Set(q.get('exclude').split(',').filter(Boolean))] : [...DEFAULT_EXCLUDE];
   const wanted = SOURCE_OF[q.get('source')] ?? q.get('source');
   state.source = state.data.sources.some((o) => o.source === wanted) ? wanted : null;
   state.hl = q.get('hl');
   state.bumpTop = q.get('top') === '20' ? 20 : 10;
-  state.foreign = (q.get('foreign') ?? search.get('foreign')) === '1';
   state.query = q.get('q') || '';
-  state.detailed = q.get('details') === '1';
-  const requestedPage = Number(q.get('page'));
-  state.page = Number.isFinite(requestedPage) ? Math.max(0, Math.floor(requestedPage) - 1) : 0;
-  const sortColumn = COLS.find((c) => c.sort && c.key === q.get('sort') && (state.detailed || !c.detail));
+  resetList();
+  const sortColumn = COLS.find((c) => c.sort && c.key === q.get('sort'));
   state.sort = { [state.active ?? '__all']: sortColumn ? { key: sortColumn.key, dir: q.get('order') === 'asc' ? 1 : q.get('order') === 'desc' ? -1 : sortColumn.dir } : { key: 'rank', dir: 1 } };
   document.getElementById('search').value = state.query;
 }
 function writeHash() {
   const q = new URLSearchParams({ to: state.to, from: state.from });
   if (state.active) q.set('topic', state.active);
+  if (!excludesDefault()) q.set('exclude', state.exclude.join(','));
   if (state.source) q.set('source', state.source);
   if (state.hl) q.set('hl', state.hl);
   if (state.bumpTop !== 10) q.set('top', String(state.bumpTop));
-  if (state.foreign) q.set('foreign', '1');
   if (state.query) q.set('q', state.query);
-  if (state.detailed) q.set('details', '1');
-  if (state.page) q.set('page', String(state.page + 1));
   const sort = currentSort();
   if (sort.key !== 'rank' || sort.dir !== 1) { q.set('sort', sort.key); q.set('order', sort.dir === 1 ? 'asc' : 'desc'); }
-  if (state.selected) q.set('site', state.selected);
   history.replaceState(null, '', `${location.pathname}#${q}`);
 }
 
 // ---------- page ----------
+/** Filters, sorting and month changes start the list again from its first rows. */
+function resetList() {
+  state.limit = PAGE_SIZE;
+  state.endless = false;
+}
+/** Sites with traffic this month per source, whatever source is chosen. */
+function sourceCounts() {
+  const counts = new Map();
+  for (const s of Object.values(state.data.sites)) {
+    if (s.m[state.to]?.[V] == null) continue;
+    for (const src of new Set((s.src || []).map((r) => SOURCE_OF[r] ?? r))) counts.set(src, (counts.get(src) || 0) + 1);
+  }
+  return counts;
+}
+// Sources and tags as chip rows like tag.observe.tw/media/; past the first
+// CHIPS tags the rest fold behind 「更多」 (tables.js) unless a chosen or excluded tag is there.
+// A tag chip goes off → only this tag → leave it out → off; a source chip goes on and off.
+const CHIPS = 15;
+/** Tags left out when the page opens, until a visitor brings them back. */
+const DEFAULT_EXCLUDE = ['非台灣'];
+const excludesDefault = () => state.exclude.length === DEFAULT_EXCLUDE.length && DEFAULT_EXCLUDE.every((t) => state.exclude.includes(t));
+function renderChips(topics, sources) {
+  const host = document.getElementById('chips');
+  const wasOpen = host.querySelector('[data-kind="topic"]')?.classList.contains('open');
+  const chip = (kind, value, text, { count = null, on = false, excluded = false, hint = '', extra = false } = {}) =>
+    `<button type="button" class="chip-filter${extra ? ' extra' : ''}${excluded ? ' excluded' : ''}" data-pick-${kind}="${esc(value)}" aria-pressed="${on}"${hint ? ` title="${hint}"` : ''}>${excluded ? '−' : ''}${esc(text)}${count != null ? ` <span>${count.toLocaleString('zh-TW')}</span>` : ''}</button>`;
+  const hidden = topics.length - CHIPS;
+  const open = wasOpen || topics.slice(CHIPS).some((t) => t.value === state.active || state.exclude.includes(t.value));
+  const tagHint = (t) => (t === state.active ? '再按一次改為排除' : state.exclude.includes(t) ? '已排除，再按一次取消' : '只看這個標籤');
+  host.innerHTML = `<nav class="chip-row" aria-label="追蹤來源">${chip('source', '', '全部來源', { on: !state.source })}${state.data.sources
+    .map((o) => chip('source', o.source, SOURCE_LABEL[o.source] ?? o.source, { count: sources.get(o.source) ?? 0, on: state.source === o.source, hint: state.source === o.source ? '再按一次取消' : '' }))
+    .join('')}</nav><nav class="chip-row${open ? ' open' : ''}" data-kind="topic" aria-label="網站標籤">${chip('topic', '', '全部標籤', { on: !state.active && !state.exclude.length })}${topics
+    .map((t, i) => chip('topic', t.value, t.text, { count: t.count, on: state.active === t.value, excluded: state.exclude.includes(t.value), hint: tagHint(t.value), extra: i >= CHIPS }))
+    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">按一下只看該標籤，再按一下排除，第三下取消</span></nav>`;
+}
 function render() {
   fillSelects();
   const all = rowsFor(null);
   const counts = new Map();
   for (const r of all) for (const t of r.topics) counts.set(t, (counts.get(t) || 0) + 1);
-  const topics = [...counts.keys()].sort((a, b) => (a === UNLABELLED) - (b === UNLABELLED) || counts.get(b) - counts.get(a));
+  const topics = [...counts.keys()].sort((a, b) => counts.get(b) - counts.get(a));
   if (state.active && !counts.has(state.active)) state.active = null;
-  document.getElementById('topic').innerHTML = '<option value="">全部分類</option>' + topics.map((t) => `<option value="${esc(t)}"${t === state.active ? ' selected' : ''}>${esc(t)} · ${counts.get(t)}</option>`).join('');
-  document.getElementById('source').innerHTML = '<option value="">所有來源</option>' + state.data.sources.map((o) => `<option value="${esc(o.source)}"${o.source === state.source ? ' selected' : ''}>${esc(SOURCE_LABEL[o.source] ?? o.source)}</option>`).join('');
-  document.getElementById('foreign').checked = state.foreign;
-  const scoped = state.active ? numberRanks(all.filter((r) => r.topics.includes(state.active))) : all;
+  // A tag a month lacks stays excluded, so switching months keeps the choice.
+  state.exclude = state.exclude.filter((t) => t !== state.active);
+  renderChips(topics.map((t) => ({ value: t, text: t, count: counts.get(t) })), sourceCounts());
+  const scoped = scopedRows(all);
   const total = sum(scoped.map((r) => r.visits));
   const both = scoped.filter((r) => r.prev != null);
   const before = sum(both.map((r) => r.prev));
   const change = before && state.from !== state.to ? sum(both.map((r) => r.visits)) / before - 1 : null;
-  document.getElementById('overview').innerHTML = `<div><span>${state.active ? esc(state.active) : '本期'}網站</span><strong>${scoped.length.toLocaleString('zh-TW')}<small>個</small></strong><p>目前範圍內有流量資料</p></div>
-<div><span>每月造訪估算</span><strong>${visits(total)}<small>百萬次</small></strong><p>${monthLabel(state.to)} · Similarweb／試算表</p></div>
-<div><span>與 ${monthShort(state.from)} 相比</span><strong>${deltaHtml(change)}</strong><p>${state.from === state.to ? '尚無更早月份可比較' : `以兩期都有資料的 ${both.length} 個網站計算`}</p></div>`;
+  document.getElementById('overview').innerHTML = `<div><span>${state.active ? esc(state.active) : '本期'}網站</span><b>${scoped.length.toLocaleString('zh-TW')}<small>個</small></b><small>目前範圍內有流量資料</small></div>
+<div><span>每月造訪估算</span><b>${millions(total)}</b><small>${monthLabel(state.to)}・Similarweb／試算表</small></div>
+<div><span>與 ${monthShort(state.from)} 相比</span><b>${deltaHtml(change)}</b><small>${state.from === state.to ? '尚無更早月份可比較' : `以兩期都有資料的 ${both.length} 個網站計算`}</small></div>`;
   document.getElementById('overview').setAttribute('aria-busy', 'false');
-  document.getElementById('rangeNote').textContent = `比較 ${monthLabel(state.from)} → ${monthLabel(state.to)}。造訪量單位為百萬次；非台灣群組不列入名次。`;
-  document.getElementById('filter-summary').textContent = `${SOURCE_LABEL[state.source] || '所有來源'} · ${state.foreign ? '含非台灣' : '不含非台灣群組'}`;
   document.getElementById('clear-search').hidden = !state.query;
-  document.getElementById('reset').hidden = !state.active && !state.source && !state.query && !state.foreign;
-  document.getElementById('detail-toggle').setAttribute('aria-pressed', String(state.detailed));
-  document.getElementById('detail-toggle').textContent = state.detailed ? '收起額外指標' : '更多指標';
+  document.getElementById('reset').hidden = !state.active && excludesDefault() && !state.source && !state.query;
   const q = new URLSearchParams({ month: state.to });
   if (state.active) q.set('topic', state.active);
+  // The API leaves nothing out by default, so the download always says what to leave out.
+  q.set('exclude', state.exclude.join(','));
   if (state.source) q.set('source', state.source);
-  if (state.foreign) q.set('foreign', '1');
-  document.getElementById('full-data').href = `/table/?${q}`;
+  document.getElementById('csv').href = `/api/v1/rankings.csv?${q}`;
   renderResults(scoped);
 }
 
 const COLS = [
   { key: 'rank', label: '#', cls: 'rank', sort: (r) => -r.visits, dir: 1, title: '排名（依造訪量）' },
   { key: 'name', label: '網站', cls: 'l name-cell', sort: (r) => r.name, dir: 1 },
-  { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算，單位為百萬次' },
+  { key: 'topics', label: '標籤', cls: 'l tags-cell', sort: (r) => (r.topics.length ? r.topics.join('、') : null), dir: 1 },
+  { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算' },
   { key: 'change', label: '區間變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '與所選比較月份相比' },
-  { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪（百萬）' },
-  { key: 'ai', label: 'AI 導流', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪（百萬）' },
-  { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1, detail: true },
-  { key: 'radar', label: 'Radar 全球', cls: 'l radar', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期', detail: true },
+  { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪' },
+  { key: 'ai', label: 'AI 導流', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪' },
+  { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1 },
+  { key: 'radar', label: 'Radar 全球', cls: 'l radar', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期' },
 ];
 function currentSort() {
   const sort = state.sort[state.active ?? '__all'];
-  return sort && COLS.some((c) => c.sort && c.key === sort.key && (state.detailed || !c.detail)) ? sort : { key: 'rank', dir: 1 };
+  return sort && COLS.some((c) => c.sort && c.key === sort.key) ? sort : { key: 'rank', dir: 1 };
 }
-function renderResults(scoped = rowsFor(state.active)) {
+function renderResults(scoped = scopedRows()) {
   const query = state.query.trim().toLocaleLowerCase();
   const rows = scoped.filter((r) => !query || `${r.name} ${r.domain}`.toLocaleLowerCase().includes(query));
-  document.getElementById('result-count').textContent = `${state.active || '全部網站'} · ${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '網站'} · 造訪量單位：百萬次`;
+  document.getElementById('result-count').textContent = `${state.active || '全部網站'}${state.exclude.length ? `・排除 ${state.exclude.join('、')}` : ''}・${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '網站'}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}・k、m、b＝千、百萬、十億次`;
   const host = document.getElementById('sections');
+  nearEnd.disconnect();
   host.replaceChildren(section(state.active, rows));
+  drawBumps();
   dispatchEvent(new Event('traffic:tables'));
   host.setAttribute('aria-busy', 'false');
   writeHash();
 }
+/** Volumes in millions carry an m, so the unit is visible in every cell. */
+/** Visits with a muted unit, for table cells and cards. */
+const millions = (n) => {
+  if (n == null) return '—';
+  const [v, unit] = visitParts(n);
+  return unit ? `${v}<span class="unit">${unit}</span>` : v;
+};
+function rankingRow(r, cal) {
+  const tr = document.createElement('tr');
+  tr.dataset.site = r.domain;
+  if (r.domain === state.hl) tr.className = 'hl';
+  const cells = {
+    rank: r.rank ?? '—',
+    name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</a>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台（Pro）補登的數字">Pro</span>' : ''}</span>`,
+    topics: `<span class="tags" title="${esc(r.topics.join('、'))}">${r.topics.map((t) => `<a class="tag" href="${tagHref(t)}">${esc(t)}</a>`).join('')}</span>`,
+    visits: millions(r.visits),
+    change: `<span class="trend-cell"><span class="spark-cell" title="近一年造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
+    search: millions(r.search), ai: millions(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
+  };
+  tr.innerHTML = COLS.map((c) => `<td class="${c.cls}">${cells[c.key]}</td>`).join('');
+  const pts = cal.map((k) => ({ key: k, value: state.data.sites[r.domain].m[k]?.[V] ?? null }));
+  tr.querySelector('.spark-cell').append(lineChart(pts, { width: 64, height: 24, pad: { t: 3, r: 3, b: 3, l: 3 }, mark: state.from, label: '造訪' }));
+  return tr;
+}
+const nearEnd = new IntersectionObserver((entries) => {
+  for (const entry of entries) if (entry.isIntersecting) entry.target.grow?.();
+}, { rootMargin: '0px 0px 600px 0px' });
 function section(topic, rows) {
   const id = topic ?? '__all';
   const el = document.createElement('section');
-  el.className = `ranking-section${state.detailed ? ' detailed' : ''}`;
+  el.className = 'ranking-section';
   el.setAttribute('aria-label', `${topic || '全部網站'}排行`);
-  el.innerHTML = '<div class="scroll"><table class="ranking-table"><thead><tr></tr></thead><tbody></tbody></table></div><div class="pagination"></div>';
-  const cols = COLS.filter((c) => state.detailed || !c.detail);
+  el.innerHTML = '<div class="scroll"><table class="ranking-table"><thead><tr></tr></thead><tbody></tbody></table></div><div class="table-more"><span role="status"></span><button type="button">瀏覽更多</button></div>';
+  const cols = COLS;
   const sort = currentSort();
   const col = cols.find((c) => c.key === sort.key);
   const sorted = [...rows].sort((a, b) => {
@@ -369,55 +439,41 @@ function section(topic, rows) {
   el.querySelectorAll('[data-sort]').forEach((button) => { button.addEventListener('click', () => {
     const c = COLS.find((x) => x.key === button.dataset.sort);
     state.sort[id] = { key: c.key, dir: sort.key === c.key ? -sort.dir : c.dir };
-    state.page = 0;
+    resetList();
     renderResults();
     document.querySelector(`[data-sort="${c.key}"]`).focus({ preventScroll: true });
   }); });
-  const pages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  state.page = Math.min(state.page, pages - 1);
-  const start = state.page * PAGE_SIZE;
   const tbody = el.querySelector('tbody');
   const cal = calendar(state.data.months[0], state.to).slice(-SPARK_MONTHS);
-  const maxVisits = Math.max(...rows.map((r) => r.visits), 1);
-  for (const r of sorted.slice(start, start + PAGE_SIZE)) {
-    const tr = document.createElement('tr');
-    tr.dataset.site = r.domain;
-    if (r.domain === state.selected) tr.className = 'sel';
-    else if (r.domain === state.hl) tr.className = 'hl';
-    const cells = {
-      rank: r.rank ?? '—',
-      name: `<span class="site-identity"><button type="button" class="site-name" data-open="${esc(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</button>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.sheet ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : ''}${r.rank == null ? '<span class="tag table-lead-extra">非台灣</span>' : ''}</span>`,
-      visits: `<span class="volume-cell"><span class="volume-track" aria-hidden="true"><span style="width:${Math.max(0, r.visits / maxVisits * 100).toFixed(2)}%"></span></span><span class="volume-value">${visits(r.visits)}</span></span>`,
-      change: `<span class="trend-cell"><span class="spark-cell" title="近一年造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
-      search: visits(r.search), ai: visits(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
-    };
-    tr.innerHTML = cols.map((c) => `<td class="${c.cls}">${cells[c.key]}</td>`).join('');
-    const pts = cal.map((k) => ({ key: k, value: state.data.sites[r.domain].m[k]?.[V] ?? null }));
-    tr.querySelector('.spark-cell').append(lineChart(pts, { width: 64, height: 24, pad: { t: 3, r: 3, b: 3, l: 3 }, mark: state.from, label: '造訪（百萬）' }));
-    tbody.append(tr);
-  }
-  if (!rows.length) tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><strong>${state.query ? '找不到符合的網站' : '這個範圍暫無資料'}</strong><p>${state.query ? '試試其他名稱或網域，或重設篩選條件。' : '請選擇其他月份或來源。'}</p></td></tr>`;
-  const pagination = el.querySelector('.pagination');
-  if (rows.length) pagination.innerHTML = `<span>顯示 ${start + 1}–${Math.min(start + PAGE_SIZE, rows.length)}，共 ${rows.length} 個</span><div><button type="button" data-page="prev"${state.page === 0 ? ' disabled' : ''} aria-label="上一頁">←</button><span>第 ${state.page + 1} / ${pages} 頁</span><button type="button" data-page="next"${state.page === pages - 1 ? ' disabled' : ''} aria-label="下一頁">→</button></div>`;
-  pagination.querySelectorAll('[data-page]').forEach((button) => { button.addEventListener('click', () => {
-    state.page += button.dataset.page === 'next' ? 1 : -1;
-    renderResults();
-    document.getElementById('result-count').scrollIntoView({ block: 'start', behavior: 'instant' });
-    const next = document.querySelector(`[data-page="${button.dataset.page}"]:not(:disabled)`) || document.querySelector('[data-page]:not(:disabled)');
-    next?.focus({ preventScroll: true });
-  }); });
+  const more = el.querySelector('.table-more');
+  // The first PAGE_SIZE rows, then 「瀏覽更多」; after that rows keep coming while scrolling.
+  const grow = () => {
+    const from = tbody.querySelectorAll('tr[data-site]').length;
+    state.limit = Math.max(state.limit, from + (from ? PAGE_SIZE : 0)) || PAGE_SIZE;
+    for (const r of sorted.slice(from, state.limit)) tbody.append(rankingRow(r, cal));
+    const shown = Math.min(state.limit, sorted.length);
+    more.hidden = sorted.length <= PAGE_SIZE;
+    more.firstChild.textContent = `已顯示 ${shown.toLocaleString('zh-TW')}／${sorted.length.toLocaleString('zh-TW')} 個`;
+    more.lastChild.hidden = state.endless || shown >= sorted.length;
+    nearEnd.unobserve(more);
+    if (state.endless && shown < sorted.length) nearEnd.observe(more);
+    if (from) dispatchEvent(new Event('traffic:tables'));
+  };
+  more.grow = grow;
+  more.lastChild.addEventListener('click', () => { state.endless = true; grow(); });
+  if (rows.length) grow();
+  else tbody.innerHTML = `<tr><td colspan="${cols.length}" class="empty"><strong>${state.query ? '找不到符合的網站' : '這個範圍暫無資料'}</strong><p>${state.query ? '試試其他名稱或網域，或重設篩選條件。' : '請選擇其他月份或來源。'}</p></td></tr>`;
   if (topic) {
-    const details = document.createElement('details');
-    details.className = 'disclosure trajectory';
-    details.innerHTML = `<summary>查看${esc(topic)}的排名變化<span>近一年</span></summary><div class="bump" data-topic="${esc(topic)}"></div>`;
-    details.addEventListener('toggle', () => { if (details.open) drawBump(details.querySelector('.bump'), topic); });
+    const details = document.createElement('section');
+    details.className = 'block trajectory';
+    details.innerHTML = `<h2>${esc(topic)}的排名變化</h2><div class="bump" data-topic="${esc(topic)}"></div>`;
     el.append(details);
   }
   return el;
 }
 
 // ---------- rank trajectory (排名軌跡) ----------
-// Sites of one topic ranked against each other month by month (Taiwan sites only,
+// Sites of one topic ranked against each other month by month (all matching sites,
 // like the tables). Gray lines are the top 10/20 in the latest month; the
 // highlighted site (click a line or a table row) uses the accent color.
 const topicRankCache = new Map();
@@ -425,7 +481,7 @@ function topicRanks(topic, month) {
   const key = `${state.source}|${topic}|${month}`;
   if (!topicRankCache.has(key)) {
     const list = Object.entries(state.data.sites)
-      .filter(([, s]) => inSource(s) && isTaiwan(s) && topicsOf(s).includes(topic) && s.m[month]?.[V] != null)
+      .filter(([, s]) => inSource(s) && topicsOf(s).includes(topic) && s.m[month]?.[V] != null)
       .sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
     topicRankCache.set(key, new Map(list.map(([d], i) => [d, i + 1])));
   }
@@ -451,7 +507,7 @@ function spreadLabels(ends, gap, lo, hi) {
 }
 function drawBumps() {
   topicRankCache.clear();
-  document.querySelectorAll('.disclosure[open] .bump[data-topic]').forEach((host) => { drawBump(host, host.dataset.topic); });
+  document.querySelectorAll('.trajectory .bump[data-topic]').forEach((host) => { drawBump(host, host.dataset.topic); });
 }
 function drawBump(host, topic) {
   const months = bumpMonths();
@@ -462,8 +518,8 @@ function drawBump(host, topic) {
   if (hl && !shown.includes(hl)) shown.push(hl);
   const head = `<div class="bar"><h3>排名軌跡</h3><span>${esc(topic)}・${monthShort(months[0])}–${monthShort(last)}</span>
 <span class="seg" role="group" aria-label="顯示幾名"><button type="button" data-top="10" aria-pressed="${N === 10}">前 10</button><button type="button" data-top="20" aria-pressed="${N === 20}">前 20</button></span></div>`;
-  const note = `<p class="note">同一分類的台灣網站依當月流量排名（不含「非台灣」群組${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，橘線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
-  if (!shown.length) { host.innerHTML = `${head}<p class="empty">這個分類在期間內沒有資料。</p>`; return; }
+  const note = `<p class="note">同一標籤的網站依當月流量排名（所有符合條件的網站${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，橘線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
+  if (!shown.length) { host.innerHTML = `${head}<p class="empty">這個標籤在期間內沒有資料。</p>`; return; }
   const width = Math.max(300, host.clientWidth || document.getElementById('sections').clientWidth);
   const narrow = width < 520;
   const labelW = Math.min(150, width * (narrow ? 0.34 : 0.22));
@@ -515,7 +571,7 @@ function drawBump(host, topic) {
     g += `<text class="end${e.d === hl ? ' on' : ''}" x="${width - m.r + 8}" y="${(e.y + 4).toFixed(1)}">${e.i === months.length - 1 ? e.r : '·'} ${esc(short)}</text>`;
   }
   g += `<rect class="hit" x="${m.l - 10}" y="0" width="${iw + 20}" height="${height}" fill="transparent"/>`;
-  host.innerHTML = `${head}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(topic)}分類內名次軌跡">${g}</svg>${note}`;
+  host.innerHTML = `${head}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(topic)}標籤內名次軌跡">${g}</svg>${note}`;
   const svg = host.querySelector('svg');
   const nearest = (ev) => {
     const r = svg.getBoundingClientRect();
@@ -538,7 +594,7 @@ function drawBump(host, topic) {
     if (!b) { hideTip(); return; }
     const s = state.data.sites[b.L.d];
     const v = s.m[b.q.mo]?.[V];
-    showTip(`<b>${esc(s.name || b.L.d)}</b><br>${monthLabel(b.q.mo)}：分類內第 ${b.q.r} 名<br>造訪 ${visits(v)} 百萬${s.m[b.q.mo]?.[SHEET] ? '（試算表）' : ''}`, ev.clientX, ev.clientY);
+    showTip(`<b>${esc(s.name || b.L.d)}</b><br>${monthLabel(b.q.mo)}：標籤內第 ${b.q.r} 名<br>造訪 ${visits(v)}${ORIGIN_NOTE[s.m[b.q.mo]?.[ORIGIN]] ? `（${ORIGIN_NOTE[s.m[b.q.mo][ORIGIN]]}）` : ''}`, ev.clientX, ev.clientY);
   };
   svg.addEventListener('pointermove', move);
   svg.addEventListener('pointerdown', move);
@@ -554,116 +610,60 @@ function drawBump(host, topic) {
 let resizeTimer;
 addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(drawBumps, 150); });
 
-// ---------- side panel ----------
-const panel = document.getElementById('panel');
-const backdrop = document.getElementById('backdrop');
-let returnFocus = null;
-function openPanel(domain) {
-  const s = state.data.sites[domain];
-  if (!s) return;
-  if (!state.selected) returnFocus = document.activeElement;
-  state.selected = domain;
-  document.querySelectorAll('tbody tr').forEach((tr) => { tr.classList.toggle('sel', tr.dataset.site === domain); });
-  const months = state.data.months;
-  const keys = Object.keys(s.m).sort();
-  const start = keys[0] < state.from ? keys[0] : state.from;
-  let cal = calendar(start, months.at(-1));
-  if (cal.length < 6) cal = calendar(months[0], months.at(-1)).slice(-6);
-  const now = s.m[state.to], before = state.from === state.to ? null : s.m[state.from];
-  const change = now && before?.[V] ? now[V] / before[V] - 1 : null;
-  const radar = state.data.radar[domain] || [];
-  const w = Math.min(512, innerWidth - 32);
-  panel.innerHTML = `<button type="button" class="close" aria-label="關閉">關閉 ✕</button>
-<p class="kicker">網站詳情</p><h2>${esc(s.name || domain)}</h2>
-<p class="meta">${esc(domain)}${s.group ? `・${esc(s.group)}` : ''}・${topicsOf(s).map(esc).join('、')}</p>
-<div class="stats">
-  <div><span>${monthShort(state.to)} 造訪</span><b>${visits(now?.[V])}</b></div>
-  <div><span>比 ${monthShort(state.from)}</span><b>${deltaHtml(change)}</b></div>
-  <div><span>Radar 最新</span><b style="font-size:14px">${radarText(radar.at(-1)) || '—'}</b></div>
-</div>
-<h3>每月造訪（百萬）</h3><p class="note">淺橘底為比較區間；虛線跨過沒有資料的月份。</p><div id="cv"></div>
-<details class="disclosure"><summary>搜尋與 AI 導流</summary><h3>自然搜尋占比</h3><p class="note">只有 Similarweb 有導流資料的月份才有點；試算表月份沒有占比。</p><div id="cs"></div>
-<h3>AI 導流占比</h3><p class="note">兩個占比量級差很多，所以分開畫，各用自己的刻度。</p><div id="ca"></div>
-</details><details class="disclosure"><summary>Cloudflare Radar 全球排名</summary><p class="note">DNS 查詢熱門度，前 100 名才有名次；不能換算成造訪量。</p>
-${radar.length ? `<div class="scroll"><table><thead><tr><th class="l">資料日期</th><th class="l">排名</th></tr></thead><tbody>${[...radar].reverse().map((p) => `<tr><td class="l">${p.date}</td><td class="l">${radarText(p)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="note">還沒有 Radar 資料。</p>'}
-</details><details class="disclosure"><summary>逐月數字</summary>
-<div class="scroll"><table><thead><tr><th class="l">月份</th><th class="num">造訪</th><th class="num">搜尋S</th><th class="num">AI</th><th class="num">台灣</th></tr></thead><tbody>${[...keys].reverse().map((k) => { const v = s.m[k]; return `<tr><td class="l">${monthShort(k)}${v[SHEET] ? '<span class="tag">表</span>' : ''}</td><td class="num">${visits(v[V])}</td><td class="num">${visits(v[S])}</td><td class="num">${visits(v[A])}</td><td class="num">${pct(v[T])}</td></tr>`; }).join('')}</tbody></table></div></details><a class="panel-link" href="/site/${encodeURIComponent(domain)}/">開啟完整網站報告 <span aria-hidden="true">↗</span></a>`;
-  const pv = cal.map((k) => ({ key: k, value: s.m[k]?.[V] ?? null, extra: s.m[k]?.[SHEET] ? '試算表數字' : '' }));
-  const ps = cal.map((k) => ({ key: k, value: s.m[k] && s.m[k][S] != null && s.m[k][V] ? s.m[k][S] / s.m[k][V] : null }));
-  const pa = cal.map((k) => ({ key: k, value: s.m[k] && s.m[k][A] != null && s.m[k][V] ? s.m[k][A] / s.m[k][V] : null }));
-  const pad = { t: 10, r: 10, b: 24, l: 52 };
-  panel.querySelector('#cv').append(lineChart(pv, { width: w, height: 200, pad, axes: true, band: [state.from, state.to], label: '造訪（百萬）' }));
-  panel.querySelector('#cs').append(lineChart(ps, { width: w, height: 120, pad, axes: true, fmt: (v) => pct(v, 1), tickFmt: axisPct(niceStep(Math.max(...ps.map((p) => p.value ?? 0)) / 4 || 0.01)), label: '自然搜尋占比' }));
-  panel.querySelector('#ca').append(lineChart(pa, { width: w, height: 120, pad, axes: true, fmt: (v) => pct(v, 2), tickFmt: axisPct(niceStep(Math.max(...pa.map((p) => p.value ?? 0)) / 4 || 0.001)), label: 'AI 導流占比' }));
-  panel.querySelector('.close').addEventListener('click', closePanel);
-  panel.inert = false;
-  panel.classList.add('open');
-  document.body.classList.add('panel-open');
-  for (const child of document.body.children) if (child !== panel && child !== backdrop && child !== tip && child.tagName !== 'SCRIPT') child.inert = true;
-  panel.setAttribute('aria-hidden', 'false');
-  backdrop.classList.add('open');
-  panel.scrollTop = 0;
-  panel.querySelector('.close').focus({ preventScroll: true });
-  dispatchEvent(new Event('traffic:tables'));
-  writeHash();
-}
-function closePanel(updateHash = true) {
-  if (!state.selected) return;
-  state.selected = null;
-  panel.classList.remove('open');
-  panel.inert = true;
-  document.body.classList.remove('panel-open');
-  for (const child of document.body.children) if (child !== panel) child.inert = false;
-  if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
-  panel.setAttribute('aria-hidden', 'true');
-  backdrop.classList.remove('open');
-  document.querySelectorAll('tbody tr.sel').forEach((tr) => { tr.classList.remove('sel'); });
-  hideTip();
-  if (updateHash) writeHash();
-}
-
 // ---------- events ----------
 document.addEventListener('click', (ev) => {
   if (ev.target.closest('.skip-link')) { ev.preventDefault(); document.getElementById('main').focus(); return; }
-  const preset = ev.target.closest('#presets button');
-  if (preset) { state.from = preset.dataset.from; state.page = 0; render(); return; }
   const top = ev.target.closest('.bump [data-top]');
   if (top) { state.bumpTop = Number(top.dataset.top); drawBumps(); writeHash(); return; }
-  const tr = ev.target.closest('tbody tr[data-site]');
-  if (tr && !panel.contains(tr)) { setHighlight(tr.dataset.site); openPanel(tr.dataset.site); }
-});
-backdrop.addEventListener('click', closePanel);
-addEventListener('keydown', (ev) => {
-  if (!state.selected) return;
-  if (ev.key === 'Escape') closePanel();
-  if (ev.key === 'Tab') {
-    const focusable = [...panel.querySelectorAll('button, a[href], summary, input, select, [tabindex="0"]')].filter((el) => el.getClientRects().length && !el.disabled);
-    const first = focusable[0], last = focusable.at(-1);
-    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
-    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  const pick = ev.target.closest('[data-pick-topic], [data-pick-source]');
+  if (pick) {
+    // A tag goes off → only this tag → left out → off; 「全部標籤」 clears both. A source goes on and off.
+    if ('pickTopic' in pick.dataset) {
+      const topic = pick.dataset.pickTopic;
+      if (!topic) {
+        state.active = null;
+        state.exclude = [];
+      } else if (state.active === topic) {
+        state.active = null;
+        state.exclude = [...state.exclude, topic];
+      } else if (state.exclude.includes(topic)) {
+        state.exclude = state.exclude.filter((t) => t !== topic);
+      } else {
+        state.active = topic;
+      }
+    } else {
+      const source = pick.dataset.pickSource || null;
+      state.source = state.source === source ? null : source;
+    }
+    resetList();
+    render();
+    return;
   }
+  // A click anywhere on a row opens the site's page, as its name link does.
+  if (ev.target.closest('a, button')) return;
+  const tr = ev.target.closest('tbody tr[data-site]');
+  if (tr) location.href = siteHref(tr.dataset.site);
 });
 document.getElementById('to').addEventListener('change', (ev) => {
   state.to = ev.target.value;
   const months = state.data.months;
   if (state.from >= state.to) state.from = months[months.indexOf(state.to) - 1] ?? months[0];
-  state.page = 0;
+  resetList();
   render();
 });
-for (const [id, key] of [['from', 'from'], ['topic', 'active'], ['source', 'source']]) {
-  document.getElementById(id).addEventListener('change', (ev) => { state[key] = ev.target.value || null; state.page = 0; render(); });
-}
-document.getElementById('foreign').addEventListener('change', (ev) => { state.foreign = ev.target.checked; state.page = 0; render(); });
-document.getElementById('search').addEventListener('input', (ev) => { state.query = ev.target.value; state.page = 0; render(); });
-document.getElementById('clear-search').addEventListener('click', () => { state.query = ''; state.page = 0; document.getElementById('search').value = ''; render(); document.getElementById('search').focus(); });
-document.getElementById('reset').addEventListener('click', () => { state.query = ''; state.active = null; state.source = null; state.foreign = false; state.page = 0; document.getElementById('search').value = ''; render(); document.getElementById('search').focus(); });
-document.getElementById('detail-toggle').addEventListener('click', () => { state.detailed = !state.detailed; render(); });
+document.getElementById('from').addEventListener('change', (ev) => { state.from = ev.target.value; resetList(); render(); });
+document.getElementById('search').addEventListener('input', (ev) => { state.query = ev.target.value; resetList(); render(); });
+document.getElementById('clear-search').addEventListener('click', () => { state.query = ''; resetList(); document.getElementById('search').value = ''; render(); document.getElementById('search').focus(); });
+document.getElementById('reset').addEventListener('click', () => { state.query = ''; state.active = null; state.exclude = [...DEFAULT_EXCLUDE]; state.source = null; resetList(); document.getElementById('search').value = ''; render(); document.getElementById('search').focus(); });
+/** Old links opened a site in a drawer (#…&site=example.com); that is now the site's own page. */
+const leaveForSite = () => {
+  const site = new URLSearchParams(location.hash.slice(1)).get('site');
+  if (site) location.replace(siteHref(site));
+  return !!site;
+};
 addEventListener('hashchange', () => {
-  if (!state.data?.months.length) return;
-  const selected = new URLSearchParams(location.hash.slice(1)).get('site');
-  if (state.selected) closePanel(false);
+  if (!state.data?.months.length || leaveForSite()) return;
   readHash(); render();
-  if (selected) openPanel(selected);
 });
 async function loadData() {
   try {
@@ -677,11 +677,10 @@ async function loadData() {
       document.getElementById('sections').innerHTML = '<div class="empty"><strong>還沒有流量資料</strong><p>資料更新後，網站排行會顯示在這裡。</p><a href="/status/">查看更新狀態</a></div>';
       document.getElementById('to').innerHTML = '<option>尚無資料</option>';
     } else {
-      const selected = new URLSearchParams(location.hash.slice(1)).get('site');
+      if (leaveForSite()) return;
       readHash(); render();
-      document.querySelectorAll('.report-main input, .report-main select, #detail-toggle').forEach((el) => { el.disabled = false; });
+      document.querySelectorAll('.report-main input, .report-main select').forEach((el) => { el.disabled = false; });
       if (state.from === state.to) document.getElementById('from').disabled = true;
-      if (selected) openPanel(selected);
     }
     document.getElementById('overview').setAttribute('aria-busy', 'false');
     document.getElementById('sections').setAttribute('aria-busy', 'false');
