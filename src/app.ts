@@ -216,9 +216,20 @@ export function buildApp(
   };
 
   /** The tags of known domains: what crowd.ts needs besides the votes. */
-  const tagContext = async () => {
-    const sites = await managedSites(pool);
-    return { sites: new Map(sites.map((s) => [s.domain, s])), known: new Set(sites.flatMap((s) => [...s.baseTopics, ...s.topics])) };
+  // managedSites reads every domain and sheet row, which is slow when the machine is busy; blog and tag call the tag
+  // API on every page, so one copy serves for CACHE_MS. Votes do not change the editors' lists it carries; edits clear it.
+  let contextCache: { at: number; context: Promise<{ sites: Map<string, ManagedSite>; known: Set<string> }> } | null = null;
+  const tagContext = () => {
+    if (contextCache && Date.now() - contextCache.at < CACHE_MS) return contextCache.context;
+    const context = managedSites(pool).then((sites) => ({
+      sites: new Map(sites.map((s) => [s.domain, s])),
+      known: new Set(sites.flatMap((s) => [...s.baseTopics, ...s.topics])),
+    }));
+    context.catch(() => {
+      contextCache = null;
+    });
+    contextCache = { at: Date.now(), context };
+    return context;
   };
   /** Every tag of these domains, shown or not, keyed by domain. */
   const tagsOf = async (domains: string[]) => {
@@ -258,6 +269,7 @@ export function buildApp(
       });
       views.clear();
       historyCache = null;
+      contextCache = null;
       return { tag: done };
     } catch (error) {
       if (!(error instanceof TagError)) throw error;
@@ -342,6 +354,7 @@ export function buildApp(
       request.log.info({ by: editor.email, domain: site.domain, month, remove }, 'manual month saved');
       views.clear();
       historyCache = null;
+      contextCache = null;
       return reply.redirect(`/site/${site.domain}/manual/?done=${remove ? 'deleted' : 'saved'}`, 303);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
@@ -365,6 +378,7 @@ export function buildApp(
         });
         views.clear();
         historyCache = null;
+        contextCache = null;
         return reply.redirect(`/site/${site.domain}/edit/?saved=1`, 303);
       } catch (error) {
         if (!(error instanceof EditError)) throw error;
@@ -392,6 +406,7 @@ export function buildApp(
       const count = await editSites(pool, editor.email, { domains, add: request.body.add ?? '', remove: request.body.remove ?? '' });
       views.clear();
       historyCache = null;
+      contextCache = null;
       return reply.redirect(`/sites/?updated=${count}`, 303);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
@@ -827,6 +842,7 @@ export function buildApp(
     if (changed) {
       views.clear();
       historyCache = null;
+      contextCache = null;
     }
     request.log.info({ requester, sites: list.length, changed, skipped: skipped.length }, 'ai tags replaced');
     return { ok: true, sites: list.length, changed, skipped };

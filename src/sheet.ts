@@ -136,15 +136,25 @@ export function readMonthTab(ws: ExcelJS.Worksheet, month: string): SheetRow[] {
   return out;
 }
 
-export async function readWorkbook(buffer: ArrayBuffer) {
+/** Every month tab as written: domains only from the row's own URL, link or name. */
+export async function readMonthTabs(buffer: ArrayBuffer) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buffer);
-  const rows = wb.worksheets.filter((ws) => /^20\d{4}$/.test(ws.name)).flatMap((ws) => readMonthTab(ws, ws.name));
-  for (const r of rows) r.domain ??= SHEET_DOMAINS[r.name] ?? null;
+  return wb.worksheets.filter((ws) => /^20\d{4}$/.test(ws.name)).flatMap((ws) => readMonthTab(ws, ws.name));
+}
+
+/**
+ * The rows with name-only ones matched to a domain: first the domain sheet
+ * (`domains`, where null means「不追蹤」), then SHEET_DOMAINS, then the domain
+ * the latest row of the same name had.
+ */
+export async function readWorkbook(buffer: ArrayBuffer, domains = new Map<string, string | null>()) {
+  const rows = await readMonthTabs(buffer);
+  for (const r of rows) r.domain ??= domains.has(r.name) ? (domains.get(r.name) ?? null) : (SHEET_DOMAINS[r.name] ?? null);
   // Older tabs mostly give names only: borrow the domain the latest row of the same name had.
   const byName = new Map<string, string>();
   for (const r of [...rows].sort((a, b) => a.month.localeCompare(b.month))) if (r.domain) byName.set(r.name, r.domain);
-  for (const r of rows) r.domain ??= byName.get(r.name) ?? null;
+  for (const r of rows) if (domains.get(r.name) !== null) r.domain ??= byName.get(r.name) ?? null;
   return rows;
 }
 
