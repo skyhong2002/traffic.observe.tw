@@ -13,9 +13,7 @@ const arg = (name: string) => {
   return i > 0 ? process.argv[i + 1] : undefined;
 };
 const load = async (file: string | undefined, url: string) =>
-  file
-    ? new Uint8Array(await readFile(file)).buffer
-    : await (await fetch(url, { signal: AbortSignal.timeout(60_000) })).arrayBuffer();
+  file ? new Uint8Array(await readFile(file)).buffer : await (await fetch(url, { signal: AbortSignal.timeout(60_000) })).arrayBuffer();
 
 const domainFile = arg('--domains');
 let domains = new Map<string, string | null>();
@@ -29,12 +27,10 @@ if (domainFile || DOMAIN_SHEET_ID) {
 const list = await readWorkbook(await load(arg('--input'), SHEET_URL), domains);
 const months = [...new Set(list.map((r) => r.month))].sort();
 const latest = months.slice(-2);
-const domainsInLatest = [
-  ...new Set(list.filter((r) => latest.includes(r.month) && r.domain).map((r) => r.domain as string)),
-];
+const domainsInLatest = [...new Set(list.filter((r) => latest.includes(r.month) && r.domain).map((r) => r.domain as string))];
 const unmatched = [...new Set(list.filter((r) => latest.includes(r.month) && !r.domain && !domains.has(r.name)).map((r) => r.name))];
 console.log(`${list.length} rows, months ${months[0]}–${months.at(-1)}; ${domainsInLatest.length} domains in ${latest.join(', ')}`);
-console.log(`${unmatched.length} names in ${latest.join(', ')} without a domain and not in the domain sheet`);
+console.log(`${unmatched.length} names in ${latest.join(', ')} still without a domain (不追蹤 not counted)`);
 if (process.argv.includes('--dry-run')) process.exit(0);
 const pool = createPool();
 try {

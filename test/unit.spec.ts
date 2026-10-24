@@ -1,12 +1,13 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
+import { buildDomainSheet, domainSheetRows, readDomainSheet } from '../src/domain-sheet.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
 import { categoryLabel, channelTiles, similarwebSection } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
-import { readMonthTab, readWorkbook } from '../src/sheet.ts';
+import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
 import { publicDomain, searchShare } from '../src/similarweb.ts';
 import { fetchQueue } from '../src/status.ts';
 
@@ -235,6 +236,66 @@ describe('readWorkbook', () => {
     const rows = await readWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
     expect(rows.filter((r) => r.month === '202609').map((r) => [r.name, r.domain])).toEqual([
       ['台北市', 'gov.taipei'],
+      ['某網站', 'some.tw'],
+    ]);
+  });
+
+  it('fills the blank 網址 cells of the latest tab, which win over the hand list and can opt a name out', async () => {
+    const wb = new ExcelJS.Workbook();
+    for (const [month, rows] of [
+      [
+        '202608',
+        [
+          [null, null, '名次', '網站名', '網址', '流量'],
+          [null, '舊', null, '舊站'],
+        ],
+      ],
+      [
+        '202609',
+        [
+          [null, null, '名次', '網站名', '網址', '流量', '台灣', '直接'],
+          ['公家', null, null, '台北市'],
+          ['品牌', '汽機車', null, '8891 /2', null, 3, 0.9, 0.4],
+          [null, '書', null, 'Kobo'],
+          ['媒體', null, null, '某網站', 'some.tw', 1],
+        ],
+      ],
+    ] as const) {
+      const ws = wb.addWorksheet(month);
+      for (const r of rows) ws.addRow([...r]);
+    }
+    const source = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+    const rows = domainSheetRows(await readMonthTabs(source));
+    expect(rows.map((r) => [r.name, r.domain])).toEqual([
+      ['舊站', null],
+      ['台北市', 'gov.taipei'],
+      ['8891', null],
+      ['Kobo', null],
+    ]);
+
+    const fills = new Map([['8891', { domain: '8891.com.tw', status: '已對應' as const, ai: true, note: 'AI' }]]);
+    const sheet = await buildDomainSheet(source, rows, fills);
+    expect([sheet.month, sheet.filled, sheet.older]).toEqual(['202609', 3, 1]);
+    expect(sheet.wb.worksheets.map((ws) => ws.name)).toEqual(['202609 網址', '更早月份', '說明']);
+    const tab = sheet.wb.getWorksheet('202609 網址') as ExcelJS.Worksheet;
+    expect(['E2', 'E3', 'E4', 'E5'].map((c) => tab.getCell(c).text)).toEqual(['gov.taipei', '8891.com.tw', '', 'some.tw']);
+    // The divisor leaves the name for 台灣估算, right of 台灣; later columns move over.
+    expect([
+      tab.getCell('D3').text,
+      tab.getCell('H1').text,
+      tab.getCell('H3').value,
+      tab.getCell('I1').text,
+      tab.getCell('I3').value,
+    ]).toEqual(['8891', '台灣估算', 0.5, '直接', 0.4]);
+    expect(sheet.divisors).toBe(1);
+    tab.getCell('E2').value = 'https://www.taipei.gov/';
+    tab.getCell('E4').value = '不追蹤';
+    const { domains, problems } = await readDomainSheet((await sheet.wb.xlsx.writeBuffer()) as ArrayBuffer);
+    expect(problems).toEqual([]);
+    expect((await readWorkbook(source, domains)).filter((r) => r.month === '202609').map((r) => [r.name, r.domain])).toEqual([
+      ['台北市', 'taipei.gov'],
+      ['8891', '8891.com.tw'],
+      ['Kobo', null],
       ['某網站', 'some.tw'],
     ]);
   });

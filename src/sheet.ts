@@ -34,7 +34,7 @@ export interface SheetRow {
 }
 
 type Cell = ExcelJS.Cell;
-const text = (cell: Cell): string | null => {
+export const text = (cell: Cell): string | null => {
   const v = cell.value as unknown;
   if (v === null || v === undefined) return null;
   if (typeof v === 'string') return v.trim() || null;
@@ -69,6 +69,13 @@ const share = (cell: Cell | null) => {
   return n !== null && n >= 0 && n <= 1 ? n : null;
 };
 const DIVISOR = /\s*\/\s*\d+(?:\.\d+)?\s*$/;
+/** A name cell as readMonthTab keys it: any manual divisor (「threads.com /5」) removed. */
+export const siteName = (raw: string) => raw.replace(DIVISOR, '').slice(0, 128);
+/** The divisor a name ends with (「threads.com /5」 → 5): Gene's guess that 1/5 of the visits are Taiwan's. */
+export const divisorOf = (raw: string) => {
+  const n = Number(raw.match(DIVISOR)?.[0].replace('/', '').trim());
+  return n > 0 ? n : null;
+};
 /** A domain written into the name: 「元大理財 yuantafunds.com」, 「好想去喔 (lookit.tw)」, 「電視超人isuper.tv」. */
 const nameDomain = (name: string) => {
   const found = name.match(/(?<![a-z0-9.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?![a-z0-9-])/i);
@@ -122,7 +129,7 @@ export function readMonthTab(ws: ExcelJS.Worksheet, month: string): SheetRow[] {
       rowNo,
       group: first && first !== '類型' ? first.slice(0, 32) : null,
       topics: second?.slice(0, 128) ?? null,
-      name: rawName.replace(DIVISOR, '').slice(0, 128),
+      name: siteName(rawName),
       url: url?.slice(0, 512) ?? null,
       domain,
       visits,
