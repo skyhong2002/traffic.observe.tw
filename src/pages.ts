@@ -1,3 +1,4 @@
+import { MOVER_MIN_VISITS, type SourceTrends } from './channels.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
 import { type manualCandidates, proUrl } from './manual.ts';
 import type { ranking } from './metrics.ts';
@@ -51,10 +52,10 @@ const tw = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, dateStyle: 'short', timeStyle: 'short' }) : '';
 const twDate = (iso: string) => new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
 
-export type Nav = 'report' | 'table' | 'topics' | 'status' | 'watch' | 'sites' | null;
+export type Nav = 'report' | 'table' | 'sources' | 'topics' | 'status' | 'watch' | 'sites' | null;
 /** The header holds the main pages; the ranking's two views are tabs above its title (sectionTabs). */
 const NAV: Array<[string, string, Nav[]]> = [
-  ['/', '流量排行', ['report', 'table']],
+  ['/', '流量排行', ['report', 'table', 'sources']],
   ['/tag/', '標籤概況', ['topics']],
   ['/status/', '抓取狀態', ['status']],
   ['/watch/', '追蹤網域', ['watch']],
@@ -65,6 +66,7 @@ const SECTIONS: Array<[string, Array<[Exclude<Nav, null>, string, string]>]> = [
     [
       ['report', '/', '流量總覽'],
       ['table', '/table/', '完整數據'],
+      ['sources', '/sources/', '導流來源'],
     ],
   ],
 ];
@@ -491,6 +493,8 @@ export interface SitePage {
   }>;
   /** The newest month Similarweb profiled with an estimate (similarweb.ts TrafficProfile), or null. */
   profile: TrafficProfile | null;
+  /** Every month Similarweb profiled with an estimate, oldest first. */
+  profiles: TrafficProfile[];
   /** Similarweb's category for the domain, from the last fetch. */
   category: string | null;
   similarSites: string[];
@@ -728,6 +732,94 @@ export function similarwebSection(site: Pick<SitePage, 'domain' | 'profile' | 'c
   );
 }
 
+/**
+ * A change in share as percentage points, with ▲▼. Neutral ink: a source gaining share is neither good nor bad,
+ * so the status colors stay out of it. Under 0.005 points reads as 持平.
+ */
+const points = (change: number | null) =>
+  change === null
+    ? ''
+    : Math.abs(change) < 0.00005
+      ? '<span class="shift">持平</span>'
+      : `<span class="shift">${change < 0 ? '▼' : '▲'}${Math.abs(change * 100).toFixed(Math.abs(change) < 0.001 ? 2 : 1)} 個百分點</span>`;
+/**
+ * One small line chart per traffic channel (small multiples rather than ten colors on one chart). Each has its
+ * own scale from 0, so a small channel's movement shows; the head gives the latest share and the change from
+ * the month before. Channels are ordered by their latest share, largest first.
+ */
+export function channelTiles(months: Array<{ month: string; shares: Partial<Record<TrafficChannel, number>> }>) {
+  if (!months.length) return '<p class="note muted">還沒有 Similarweb 的導流來源資料。</p>';
+  const last = months.at(-1) as (typeof months)[number];
+  const prev = months.at(-2);
+  const tiles = CHANNELS.map(([key, label, hint]) => ({ key, label, hint, now: last.shares[key] ?? 0 }))
+    .sort((a, b) => b.now - a.now)
+    .map(({ key, label, hint, now }) => {
+      const before = prev ? (prev.shares[key] ?? 0) : null;
+      const chart = lineChart(
+        months.map((m) => ({ month: m.month, value: m.shares[key] ?? 0 })),
+        { label: `${label}占比`, fmt: (v) => `${(v * 100).toFixed(!v ? 0 : v < 0.01 ? 2 : v < 0.1 ? 1 : 0)}%`, height: 150, wide: 420 },
+      );
+      return `<div class="chart-box channel-tile${now ? '' : ' zero'}"><h3>${html(label)} <b>${pct(now, now && now < 0.0095 ? 2 : 1)}</b>${before === null ? '' : points(now - before)}</h3><p class="note">${html(hint)}</p>${chart}</div>`;
+    })
+    .join('');
+  return `<div class="channel-tiles">${tiles}</div>`;
+}
+const monthsNote = (n: number, first: string) =>
+  n < 2
+    ? `目前只有 ${monthLong(first)} 一個月；Similarweb 每月只給最新一個月，之後每個月抓到就會連成折線。`
+    : `${monthLong(first)} 起共 ${n} 個月。`;
+
+/** The overview of traffic sources across sites (/sources/): visit-weighted shares per month, then the biggest movers. */
+export function sourcesPage(
+  trends: SourceTrends,
+  names: Map<string, string>,
+  topics: Array<{ topic: string; sites: number }>,
+  topic: string | null,
+) {
+  const { months, movers, latest, previous } = trends;
+  const label = (c: TrafficChannel) => CHANNELS.find(([k]) => k === c)?.[1] ?? c;
+  const href = (t: string | null) => (t ? `/sources/?topic=${encodeURIComponent(t)}` : '/sources/');
+  const chips = chipRow(
+    '標籤',
+    { href: href(null), text: '全部網站', on: !topic },
+    topics.map((t) => ({ href: href(t.topic), text: html(t.topic), count: t.sites, on: t.topic === topic })),
+  );
+  const last = months.at(-1);
+  const moverRows = movers
+    .map(
+      (m) =>
+        `<tr><td class="l" data-v="${html(names.get(m.domain) ?? m.domain)}"><span class="site-identity">${favicon(m.domain, names.get(m.domain) ?? m.domain)}<a class="site-name" href="/site/${html(m.domain)}/">${html(names.get(m.domain) ?? m.domain)}</a></span></td><td class="l">${html(label(m.channel))}</td><td class="num" data-v="${m.from}">${pct(m.from)}</td><td class="num" data-v="${m.to}">${pct(m.to)}</td><td class="num" data-v="${Math.abs(m.change)}">${points(m.change)}</td>${volCell(m.visits)}</tr>`,
+    )
+    .join('');
+  return layout(
+    '導流來源走勢',
+    {
+      title: '導流來源走勢',
+      dek: '訪客從哪些管道進到網站、各管道占比每個月怎麼變',
+      toolbar: chips,
+    },
+    `${
+      last
+        ? `<div class="stats"><div><span>統計月份</span><b>${months.length}</b><small>${monthsNote(months.length, months[0].month)}</small></div><div><span>${monthLong(last.month)} 網站數</span><b>${last.sites.toLocaleString('en-US')}</b><small>有 Similarweb 估算的網站</small></div><div><span>${monthLong(last.month)} 造訪量</span><b>${volText(last.visits)}</b><small>這些網站合計</small></div></div>`
+        : ''
+    }${section(
+      `各來源占比 <small>${topic ? html(topic) : '全部網站'}・依造訪量加權</small>`,
+      `<p class="note">每張圖是一種來源占這些網站全部造訪的比例（大網站權重較大）；各圖刻度不同，從 0 開始。標題旁是最新月份與前一個月的差距。</p>${channelTiles(months)}`,
+    )}${section(
+      `變動最大的網站${latest && previous ? ` <small>${monthLong(previous)} → ${monthLong(latest)}</small>` : ''}`,
+      previous
+        ? `<p class="note">每個網站取占比變化最大的一個來源；只算兩個月造訪量都在 ${volText(MOVER_MIN_VISITS)} 以上的網站，小網站的占比起伏較大。</p>${table(
+            '<th class="l">網站</th><th class="l">來源</th><th class="num">前一個月</th><th class="num">最新月份</th><th class="num" aria-sort="descending">變化</th><th class="num">造訪量</th>',
+            moverRows,
+            '這兩個月沒有網站的來源占比改變。',
+            6,
+          )}`
+        : '<p class="note muted">需要兩個月以上的資料才能比較；下個月的資料抓到後就會出現。</p>',
+    )}`,
+    { nav: 'sources', tips: true },
+  );
+}
+
 const TAG_SOURCE: Record<TagItem['source'], string> = {
   editor: '編輯',
   sheet: '試算表',
@@ -870,6 +962,7 @@ ${section(
   `<p class="note">Similarweb 每月造訪估算；空心點是試算表或從 Similarweb 平台手動補登的月份，斷開處是沒有資料的月份。</p><div class="chart-box">${visitsChart}</div>`,
 )}
 ${similarwebSection(site)}
+${site.profiles.length ? section('導流來源走勢', `<p class="note">各來源占這個網站造訪的比例；各圖刻度不同，從 0 開始。${monthsNote(site.profiles.length, site.profiles[0].month)}</p>${channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels })))}`) : ''}
 ${section(
   '導流占比',
   `<p class="note">兩張圖各自的刻度：自然搜尋與 GenAI 導流占全部造訪的比例。Similarweb 只給最新一個月的占比，所以點常常不連續。</p>

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
+import { loadProfiles, sourceTrends } from './channels.ts';
 import {
   cleanTag,
   loadCrowd,
@@ -35,6 +36,7 @@ import {
   siteHeader,
   sitePage,
   sourceOf,
+  sourcesPage,
   statusPage,
   topicsPage,
   watchPage,
@@ -420,6 +422,27 @@ export function buildApp(
     return r
       ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude)
       : rankingPage('', [], [], null, []);
+  });
+  /** Source trends for every site, or for the sites carrying `topic`; tags are offered by how many profiled sites carry them. */
+  const sourcesFor = async (raw: unknown) => {
+    const [profiles, sites] = await Promise.all([loadProfiles(pool), managedSites(pool)]);
+    const profiled = new Set(profiles.map((p) => p.domain));
+    const count = new Map<string, number>();
+    for (const s of sites) if (profiled.has(s.domain)) for (const t of s.topics) count.set(t, (count.get(t) ?? 0) + 1);
+    const topics = [...count].map(([topic, n]) => ({ topic, sites: n })).sort((a, b) => b.sites - a.sites);
+    const topic = typeof raw === 'string' && count.has(raw) ? raw : null;
+    const members = topic ? new Set(sites.filter((s) => s.topics.includes(topic)).map((s) => s.domain)) : null;
+    const trends = sourceTrends(members ? profiles.filter((p) => members.has(p.domain)) : profiles);
+    return { trends, topics, topic, names: new Map(sites.map((s) => [s.domain, s.name])) };
+  };
+  app.get<{ Querystring: { topic?: string } }>('/sources/', async (request, reply) => {
+    reply.type('text/html; charset=utf-8');
+    const r = await sourcesFor(request.query.topic);
+    return sourcesPage(r.trends, r.names, r.topics, r.topic);
+  });
+  app.get<{ Querystring: { topic?: string } }>('/api/v1/sources', async (request) => {
+    const r = await sourcesFor(request.query.topic);
+    return { topic: r.topic, ...r.trends, movers: r.trends.movers.map((m) => ({ ...m, name: r.names.get(m.domain) ?? m.domain })) };
   });
   app.get<{ Querystring: { topic?: string } }>('/tag/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
@@ -898,6 +921,9 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
   for (const l of labels) if (!sheetByMonth.has(l.month) || sheetByMonth.get(l.month)?.adjusted) sheetByMonth.set(l.month, l);
   const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys(), ...byHand.keys()])].sort();
   const profiles = (t?.profiles ?? {}) as Record<string, TrafficProfile>;
+  const profiled = Object.values(profiles)
+    .filter((p) => t?.monthly.some((m) => m.month === p.month && estimated(m.visits)))
+    .sort((a, b) => a.month.localeCompare(b.month));
   const raw = state?.result;
   const summary = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { category?: string | null; similarSites?: string[] } | null;
   return {
@@ -932,10 +958,8 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       };
     }),
     // The newest month Similarweb profiled with an estimate: rank, engagement, every channel and the top countries.
-    profile:
-      Object.values(profiles)
-        .filter((p) => t?.monthly.some((m) => m.month === p.month && estimated(m.visits)))
-        .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
+    profile: profiled.at(-1) ?? null,
+    profiles: profiled,
     category: summary?.category ?? null,
     similarSites: summary?.similarSites ?? [],
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),

@@ -1,9 +1,10 @@
 import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
+import { sourceTrends } from '../src/channels.ts';
 import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
-import { categoryLabel, similarwebSection } from '../src/pages.ts';
+import { categoryLabel, channelTiles, similarwebSection } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readWorkbook } from '../src/sheet.ts';
@@ -401,5 +402,53 @@ describe('Similarweb composition', () => {
     for (const text of ['#1,000', '台灣排名', '新聞與媒體', '2 分 05 秒', '直接造訪', '約 5.000m', '0.50%', '聯盟行銷', '其他國家'])
       expect(html).toContain(text);
     expect(similarwebSection({ domain: 'x.tw', category: null, similarSites: [], months: [], profile: null })).toBe('');
+  });
+});
+
+describe('traffic source trends', () => {
+  const row = (domain: string, month: string, visits: number, channels: object) => ({
+    domain,
+    month,
+    visits,
+    profile: {
+      month,
+      countries: [],
+      channels,
+      bounceRate: null,
+      pagesPerVisit: null,
+      timeOnSite: null,
+      globalRank: null,
+      countryRank: null,
+      categoryRank: null,
+    },
+  });
+  it('weights shares by visits and finds each site’s biggest move between the last two months', () => {
+    const t = sourceTrends([
+      row('big.tw', '202609', 9, { Direct: 0.5, GenAi: 0 }),
+      row('small.tw', '202609', 1, { Direct: 0.1, GenAi: 0.1 }),
+      row('big.tw', '202610', 9, { Direct: 0.3, GenAi: 0.05 }),
+      row('small.tw', '202610', 1, { Direct: 0.1, GenAi: 0.5 }),
+      row('tiny.tw', '202609', 0.01, { Direct: 0.9 }),
+      row('tiny.tw', '202610', 0.01, { Direct: 0.1 }),
+    ]);
+    expect(t.months.map((m) => m.month)).toEqual(['202609', '202610']);
+    expect(t.months[0].shares.Direct).toBeCloseTo((9 * 0.5 + 1 * 0.1 + 0.01 * 0.9) / 10.01);
+    expect([t.previous, t.latest]).toEqual(['202609', '202610']);
+    expect(t.movers.map((m) => [m.domain, m.channel, Number(m.change.toFixed(2))])).toEqual([
+      ['small.tw', 'GenAi', 0.4],
+      ['big.tw', 'Direct', -0.2],
+    ]);
+  });
+  it('draws one tile per channel, largest share first, with the change in percentage points', () => {
+    const html = channelTiles([
+      { month: '202609', shares: { Direct: 0.5, GenAi: 0.01 } },
+      { month: '202610', shares: { Direct: 0.4, GenAi: 0.03 } },
+    ]);
+    expect(html.match(/class="chart-box channel-tile/g)?.length).toBe(10);
+    expect(html.indexOf('直接造訪')).toBeLessThan(html.indexOf('AI 工具'));
+    expect(html).toContain('▼10.0 個百分點');
+    expect(html).toContain('持平');
+    expect(html).toContain('▲2.0 個百分點');
+    expect(sourceTrends([]).movers).toEqual([]);
   });
 });

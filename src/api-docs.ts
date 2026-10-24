@@ -195,6 +195,32 @@ export const ENDPOINTS: Endpoint[] = [
     ],
   },
   {
+    id: 'sources',
+    group: '標籤',
+    path: '/api/v1/sources',
+    summary: '導流來源的每月走勢與變動最大的網站',
+    detail:
+      '每個月依造訪量加權的十種導流來源占比（只算有 Similarweb 估算的網站），以及最近兩個月之間占比變化最大的網站（每站取變化最大的一個來源，兩個月造訪量都要在 10 萬以上）。Similarweb 每月只給最新一個月，月份會逐月累積。',
+    params: [{ name: 'topic', in: 'query', type: 'string', desc: '只算有這個標籤的網站；不存在的標籤視同全部網站' }],
+    example: `/api/v1/sources?topic=${encodeURIComponent('新聞')}`,
+    type: 'application/json',
+    fields: [
+      { name: 'topic', type: 'string | null' },
+      { name: 'months', type: 'object[]', desc: '舊到新' },
+      { name: 'months[].month', type: 'string (YYYYMM)' },
+      { name: 'months[].sites', type: 'integer', desc: '當月有估算的網站數' },
+      { name: 'months[].visits', type: 'number', desc: '這些網站的造訪量合計，百萬次' },
+      {
+        name: 'months[].shares',
+        type: 'object',
+        desc: 'Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate 的加權占比（0–1）',
+      },
+      { name: 'latest', type: 'string | null', desc: '最新月份' },
+      { name: 'previous', type: 'string | null', desc: '用來比較的前一個月份；只有一個月時為 null' },
+      { name: 'movers', type: 'object[]', desc: '變化最大的網站：domain、name、channel、from、to、change（占比差）、visits' },
+    ],
+  },
+  {
     id: 'site-tags',
     group: '標籤',
     path: '/api/v1/tags/{domain}',
