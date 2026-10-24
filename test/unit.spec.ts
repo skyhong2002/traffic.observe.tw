@@ -4,7 +4,7 @@ import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
 import { buildDomainSheet, domainSheetRows, readDomainSheet } from '../src/domain-sheet.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
-import { categoryLabel, channelTiles, similarwebSection } from '../src/pages.ts';
+import { categoryLabel, channelTiles, similarwebSection, watchPage } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
@@ -477,5 +477,29 @@ describe('channel tiles', () => {
     expect(html).toContain('▼10.0 個百分點');
     expect(html).toContain('持平');
     expect(html).toContain('▲2.0 個百分點');
+  });
+});
+
+describe('watchPage', () => {
+  it('shows who added a domain to editors only', () => {
+    const row = {
+      domain: 'ambassador-hotels.com',
+      requester: 'manual',
+      refreshDays: 30,
+      addedBy: 'editor@example.com',
+      note: '國賓飯店',
+      requestedAt: now,
+      lastSuccessAt: null,
+      lastAttemptAt: null,
+      lastResponseAt: null,
+      failures: 0,
+      lastError: null,
+      latestMonth: null,
+      latestVisits: null,
+    };
+    const page = (editor: { email: string } | null) => watchPage({ editor, loginEnabled: true, manual: [row], others: [], flash: null });
+    expect(page(null)).toContain('ambassador-hotels.com');
+    expect(page(null)).not.toContain('editor@example.com');
+    expect(page({ email: 'editor@example.com' })).toContain('editor@example.com');
   });
 });

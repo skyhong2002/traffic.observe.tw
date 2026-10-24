@@ -99,7 +99,7 @@
 - `/robots.txt` 只擋 `/internal/` 與 `/auth/`。`/api/` 不擋，因為 `/` 在瀏覽器端讀 `/api/v1/history`，擋掉會讓搜尋引擎算繪出空白頁；API 改以 noindex 標頭排除。
 - `/sitemap.xml` 只列 `/`、`/table/`、`/tag/` 三頁；網站頁靠內部連結被發現，不列入。網址前綴取 `TRAFFIC_PUBLIC_ORIGIN`。
 - `http://` 由 Cloudflare 規則 308 轉到 https 的同一路徑與查詢字串，本服務不處理（規則由 Codex 部署，不在本 repo）。
-- `/watch/` 匿名可讀，表格會顯示加入者（`added_by`，編輯的 email）與備註。2026-10-23 檢查時手動清單為空，沒有露出 email；是否改成登入後才顯示加入者，需要另外決定。
+- `/watch/` 匿名可讀，表格顯示網域、備註與加入時間；加入者（`added_by`，編輯的 email）2026-10-25 起只顯示給登入的編輯。
 
 2026-10-23 17:51（台北時間）以 `545f2c8` 重啟 web 服務上線（工作樹同時包含當時已上線、尚未提交的網站名稱與標籤管理改動）。公開站匿名實測：`/`、`/table/`、`/topics/`、`/site/udn.com/` 200 且 canonical 正確，帶查詢字串時 canonical 不含查詢字串；`/status/`、`/watch/`、`/login/`、`/api/v1/`、`/api/v1/history` 200 加 noindex；`/sites/`、編輯頁 303 到登入；`/nope-x1`、`/table`、`/index.html`、不存在的網站與 `/internal/*` 皆 404 加 noindex；`/robots.txt`、`/sitemap.xml` 200。可提交 Google 的 Sitemap：`https://traffic.observe.tw/sitemap.xml`，共 3 個網址。提交不代表已索引。回復方式：移除 `src/app.ts` 的 `registerSeo(app)` 與其 import，再重啟 web 服務。
 

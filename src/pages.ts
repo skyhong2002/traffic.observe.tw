@@ -1228,6 +1228,7 @@ export function watchPage({
           : w.lastAttemptAt
             ? '抓取中'
             : (queued(w) ?? '<span class="muted">排隊中</span>');
+  // Who added a domain is an editor's email: shown to signed-in editors only.
   const rowHtml = (
     w: WatchRow,
     removable: boolean,
@@ -1235,7 +1236,7 @@ export function watchPage({
     w.note && w.note !== w.domain ? `<span class="site-domain table-lead-extra">${html(w.note)}</span>` : ''
   }</span></td>
 ${sortCell('num', w.latestVisits, w.latestMonth ? `${vol(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : '')}
-${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-identity"><span class="radar">${html(w.addedBy)}</span><span class="site-domain">${tw(w.requestedAt.toISOString())}</span></span>`)}
+${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-identity">${editor ? `<span class="radar">${html(w.addedBy)}</span>` : ''}<span class="site-domain">${tw(w.requestedAt.toISOString())}</span></span>`)}
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
   const head =
     '<th class="l">網域</th><th class="num">最新造訪量</th><th class="num">週期</th><th class="l">最近成功</th><th class="l">加入</th><th data-nosort><span class="sr-only">操作</span></th>';
