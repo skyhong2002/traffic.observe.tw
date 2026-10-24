@@ -20,12 +20,12 @@ import {
 import type { WappalyzerRules } from './wappalyzer.ts';
 
 // Fetches each known site's homepage itself (blog used to look only at pages its crawler already had) and keeps the
-// latest observation per domain. A homepage is one GET, after robots.txt allows it, with an identifying user agent;
-// redirects are followed to public addresses only (every hop, DNS answers included), and at most 512 KiB is read.
+// latest observation per domain. A homepage is one GET a month with a desktop Chrome user agent (as tag's crawler
+// sends), without reading robots.txt: by the user's decision on 2026-10-25, since one public homepage a month is
+// what a reader's browser fetches anyway and an identifying agent was turned away by WAFs; redirects are followed to public addresses only (every hop, DNS answers included), and at most 512 KiB is read.
 // Successful snapshots survive later failures: a site that blocks us once keeps what it showed before.
 
-export const USER_AGENT = 'Mozilla/5.0 (compatible; traffic-observe/1.0; +https://traffic.observe.tw/tech/)';
-const ROBOTS_AGENT = 'traffic-observe';
+export const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 const HOP_TIMEOUT = 15_000;
 const DOMAIN_TIMEOUT = 40_000;
 const MAX_REDIRECTS = 5;
@@ -175,44 +175,6 @@ export const httpGet: HopGet = (url, maxBytes) =>
     });
   });
 
-/** Whether robots.txt lets `agent` fetch `path`: the most specific matching rule wins, Allow on a tie. */
-export function robotsAllows(text: string, path: string, agent = ROBOTS_AGENT) {
-  type Group = { agents: string[]; rules: Array<{ allow: boolean; pattern: string }> };
-  const groups: Group[] = [];
-  let current: Group | null = null;
-  let inAgents = false;
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.replace(/#.*/, '').trim();
-    const at = line.indexOf(':');
-    if (at < 0) continue;
-    const key = line.slice(0, at).trim().toLowerCase();
-    const value = line.slice(at + 1).trim();
-    if (key === 'user-agent') {
-      if (!current || !inAgents) {
-        current = { agents: [], rules: [] };
-        groups.push(current);
-      }
-      current.agents.push(value.toLowerCase());
-      inAgents = true;
-    } else if ((key === 'allow' || key === 'disallow') && current) {
-      inAgents = false;
-      if (value) current.rules.push({ allow: key === 'allow', pattern: value });
-    } else inAgents = false;
-  }
-  const ours = groups.filter((g) => g.agents.some((a) => a !== '*' && agent.toLowerCase().includes(a)));
-  const chosen = ours.length ? ours : groups.filter((g) => g.agents.includes('*'));
-  let best: { allow: boolean; length: number } | null = null;
-  for (const rule of chosen.flatMap((g) => g.rules)) {
-    const anchored = rule.pattern.endsWith('$');
-    const body = anchored ? rule.pattern.slice(0, -1) : rule.pattern;
-    const regex = new RegExp(`^${body.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}${anchored ? '$' : ''}`);
-    if (!regex.test(path)) continue;
-    const length = rule.pattern.length;
-    if (!best || length > best.length || (length === best.length && rule.allow)) best = { allow: rule.allow, length };
-  }
-  return best?.allow ?? true;
-}
-
 function charsetOf(contentType: string, body: Buffer) {
   const declared =
     /charset=["']?([\w-]+)/i.exec(contentType)?.[1] ??
@@ -227,36 +189,12 @@ function charsetOf(contentType: string, body: Buffer) {
 export type Page = { url: string; status: number; headers: http.IncomingHttpHeaders; html: string };
 export type PageFetcher = (domain: string) => Promise<Page>;
 
-/** The homepage of a domain: https first, plain http when https cannot connect; robots.txt checked on every host. */
+/** The homepage of a domain: https first, plain http when https cannot connect. */
 export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
   return async (domain) => {
-    const robots = new Map<string, boolean>();
-    const allowed = async (url: URL) => {
-      const known = robots.get(url.origin);
-      if (known !== undefined) return known;
-      let ok = true;
-      try {
-        let at = new URL('/robots.txt', url);
-        for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-          const response = await get(at, 128 * 1024);
-          const location = response.headers.location;
-          if (response.status >= 300 && response.status < 400 && location) {
-            at = new URL(location, at);
-            continue;
-          }
-          if (response.status >= 200 && response.status < 300) ok = robotsAllows(response.body.toString('utf8'), url.pathname || '/');
-          break;
-        }
-      } catch {
-        // An unreachable robots.txt is no rule; the page request itself will tell whether the host answers.
-      }
-      robots.set(url.origin, ok);
-      return ok;
-    };
     const follow = async (start: URL): Promise<Page> => {
       let url = start;
       for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-        if (!(await allowed(url))) throw new ScanFailure('robots');
         const response = await get(url, MAX_HTML);
         const location = response.headers.location;
         if (response.status >= 300 && response.status < 400 && location) {
@@ -311,7 +249,7 @@ export async function scanDomain(
     page = await withTimeout(fetchPage(domain), DOMAIN_TIMEOUT);
   } catch (error) {
     const failure = error instanceof ScanFailure ? error : new ScanFailure('network');
-    return stop(failure.code === 'robots' ? 'blocked' : 'failed', failure.code, failure.status);
+    return stop('failed', failure.code, failure.status);
   }
   const source = safeSourceUrl(page.url);
   const headers = page.headers as Record<string, string | string[] | undefined>;

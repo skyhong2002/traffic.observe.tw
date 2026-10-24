@@ -189,7 +189,10 @@ export const PRODUCTS = new Map(VOCABULARY.map(([id, name, category]) => [id, { 
 export const WAPPALYZER_NAMES: Record<string, string[]> = Object.fromEntries(VOCABULARY.map(([id, , , names]) => [id, names]));
 
 export type TechStatus = 'detected' | 'unknown' | 'failed' | 'blocked';
-/** Why an attempt gave no page: robots.txt, a WAF or rate limit, an HTTP status, the response type, or the connection. */
+/**
+ * Why an attempt gave no page: a WAF or rate limit, an HTTP status, the response type, or the connection. 'robots' is
+ * only on attempts made before 2026-10-25, when robots.txt was still read.
+ */
 export type TechErrorCode = 'robots' | 'waf' | 'rate-limit' | 'http-error' | 'not-html' | 'timeout' | 'network' | 'address';
 export const ERROR_CODES: TechErrorCode[] = ['robots', 'waf', 'rate-limit', 'http-error', 'not-html', 'timeout', 'network', 'address'];
 export type TechEvidence = { kind: 'generator' | 'asset' | 'marker' | 'header'; value: string };

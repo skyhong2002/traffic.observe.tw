@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { detect, PRODUCTS, safeSourceUrl, WAPPALYZER_NAMES } from '../src/tech.ts';
-import { type Hop, homepageFetcher, isPublicAddress, robotsAllows, ScanFailure, scanDomain } from '../src/tech-scan.ts';
+import { type Hop, homepageFetcher, isPublicAddress, ScanFailure, scanDomain } from '../src/tech-scan.ts';
 import { compileVocabulary, loadRules, MATCH_BUDGET_MS, matchInputOf, matchTech, readPin, rulesDirectory } from '../src/wappalyzer.ts';
 
 // Rules in the Wappalyzer format, written for these tests.
@@ -67,18 +67,6 @@ describe('detection', () => {
   });
 });
 
-describe('robots.txt', () => {
-  it('uses our group over *, the most specific rule, and Allow on a tie', () => {
-    const text = 'User-agent: *\nDisallow: /\n\nUser-agent: traffic-observe\nDisallow: /private\nAllow: /$';
-    expect(robotsAllows(text, '/')).toBe(true);
-    expect(robotsAllows(text, '/private/x')).toBe(false);
-    expect(robotsAllows('User-agent: *\nDisallow: /', '/')).toBe(false);
-    expect(robotsAllows('User-agent: *\nDisallow:', '/')).toBe(true);
-    expect(robotsAllows('User-agent: Googlebot\nDisallow: /', '/')).toBe(true);
-    expect(robotsAllows('User-agent: *\nDisallow: /*.php$\nAllow: /', '/')).toBe(true);
-  });
-});
-
 describe('addresses', () => {
   it('refuses private, loopback, link-local and mapped private addresses', () => {
     for (const a of [
@@ -116,26 +104,15 @@ const net = (routes: Record<string, Answer>) => {
 };
 
 describe('fetching a homepage', () => {
-  it('follows redirects, checks robots.txt on each new host, and records where the page came from', async () => {
+  it('follows redirects without reading robots.txt, and records where the page came from', async () => {
     const { get, seen } = net({
-      'https://a.example/robots.txt': { status: 404 },
+      'https://a.example/robots.txt': { body: 'User-agent: *\nDisallow: /' },
       'https://a.example/': { status: 301, headers: { location: 'https://www.a.example/home?x=1' } },
-      'https://www.a.example/robots.txt': { body: 'User-agent: *\nDisallow: /admin' },
       'https://www.a.example/home?x=1': { body: '<meta name="generator" content="WordPress 6.8">' },
     });
     const o = await scanDomain('a.example', rules, homepageFetcher(get), at);
     expect(o).toMatchObject({ status: 'detected', sourceUrl: 'https://www.a.example/home', httpStatus: 200 });
-    expect(seen).toEqual([
-      'https://a.example/robots.txt',
-      'https://a.example/',
-      'https://www.a.example/robots.txt',
-      'https://www.a.example/home?x=1',
-    ]);
-  });
-  it('does not fetch a page robots.txt disallows', async () => {
-    const { get, seen } = net({ 'https://b.example/robots.txt': { body: 'User-agent: *\nDisallow: /' } });
-    expect(await scanDomain('b.example', rules, homepageFetcher(get), at)).toMatchObject({ status: 'blocked', errorCode: 'robots' });
-    expect(seen).toEqual(['https://b.example/robots.txt']);
+    expect(seen).toEqual(['https://a.example/', 'https://www.a.example/home?x=1']);
   });
   it('falls back to http when https cannot connect', async () => {
     const { get } = net({ 'http://c.example/': { body: '<meta name="generator" content="Hugo 0.1">' } });

@@ -27,7 +27,7 @@ const EVIDENCE_LABEL: Record<string, string> = {
 
 const techMethod = (
   count: number,
-) => `<p>每個網域的首頁一個月抓一次（流量觀察自己抓，<code>traffic-observe</code> user agent，先看 robots.txt），比對 <a href="https://github.com/enthec/webappanalyzer" rel="noopener">Wappalyzer 社群版規則</a>裡本站列出的 ${count} 項技術：網址、HTML、script、meta、回應標頭與頁面元素。需要執行 JavaScript、讀 cookie 或另外發請求的規則不採用，所以只靠前端程式載入的技術可能看不到。</p>
+) => `<p>每個網域的首頁一個月抓一次（流量觀察自己抓，和一般瀏覽器一樣讀首頁），比對 <a href="https://github.com/enthec/webappanalyzer" rel="noopener">Wappalyzer 社群版規則</a>裡本站列出的 ${count} 項技術：網址、HTML、script、meta、回應標頭與頁面元素。需要執行 JavaScript、讀 cookie 或另外發請求的規則不採用，所以只靠前端程式載入的技術可能看不到。</p>
 <p>一頁只能證明它帶了什麼，不能證明網站沒用什麼：「未辨識」表示首頁沒有清單內任何技術的痕跡，不是沒有技術。版本只來自網頁明寫的 <code>meta generator</code>，互相矛盾時標「不明」；CDN 與主機只是提示，信心最多 40%。抓取失敗時保留上一次成功的結果。部落格原本在 blog.observe.tw 由文章頁偵測的結果已併入，等本站自己抓過後取代。</p>`;
 
 export interface TechSite {
