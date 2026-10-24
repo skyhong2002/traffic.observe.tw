@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
+import { categoryLabel, similarwebSection } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readWorkbook } from '../src/sheet.ts';
@@ -372,5 +373,33 @@ describe('crowd tags', () => {
     for (const bad of ['', '!!!', 'a、b', 'x/y', 'a'.repeat(33), 3]) expect(cleanTag(bad)).toBeNull();
     expect(voterOf(' A@Gmail.com ')).toBe('a@gmail.com');
     expect(voterOf('nobody')).toBeNull();
+  });
+});
+
+describe('Similarweb composition', () => {
+  it('names categories in plain words and shows every channel and country', () => {
+    expect(categoryLabel('Finance/Investing')).toBe('金融 › 投資');
+    expect(categoryLabel('Health/Health')).toBe('健康');
+    expect(categoryLabel('Pets_and_Animals/Birds')).toBe('寵物與動物 › Birds');
+    const html = similarwebSection({
+      domain: 'x.tw',
+      category: null,
+      similarSites: [],
+      months: [{ month: '202609', similarweb: 10, sheet: null, searchShare: null, aiShare: null, taiwanShare: null }],
+      profile: {
+        month: '202609',
+        countries: [{ code: 'TW', share: 0.9 }],
+        channels: { Direct: 0.5, SearchOrganic: 0.4, GenAi: 0.005 },
+        bounceRate: 0.5,
+        pagesPerVisit: 2,
+        timeOnSite: 125,
+        globalRank: 1000,
+        countryRank: { code: 'TW', rank: 20 },
+        categoryRank: { category: 'News_and_Media', rank: 3 },
+      },
+    });
+    for (const text of ['#1,000', '台灣排名', '新聞與媒體', '2 分 05 秒', '直接造訪', '約 5.000m', '0.50%', '聯盟行銷', '其他國家'])
+      expect(html).toContain(text);
+    expect(similarwebSection({ domain: 'x.tw', category: null, similarSites: [], months: [], profile: null })).toBe('');
   });
 });

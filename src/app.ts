@@ -876,7 +876,10 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       next_attempt_at: Date | null;
       failures: number;
       last_error: string | null;
-    }>(pool, 'SELECT last_success_at, last_attempt_at, next_attempt_at, failures, last_error FROM fetch_state WHERE domain = ?', [domain]),
+      result: unknown;
+    }>(pool, 'SELECT last_success_at, last_attempt_at, next_attempt_at, failures, last_error, result FROM fetch_state WHERE domain = ?', [
+      domain,
+    ]),
     loadRadar(pool, [domain]),
     loadMetadata(pool),
     loadManualMonths(pool, { domain }),
@@ -895,6 +898,8 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
   for (const l of labels) if (!sheetByMonth.has(l.month) || sheetByMonth.get(l.month)?.adjusted) sheetByMonth.set(l.month, l);
   const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys(), ...byHand.keys()])].sort();
   const profiles = (t?.profiles ?? {}) as Record<string, TrafficProfile>;
+  const raw = state?.result;
+  const summary = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { category?: string | null; similarSites?: string[] } | null;
   return {
     domain,
     name: metadata.get(domain)?.name ?? labels.at(-1)?.name ?? domain,
@@ -926,6 +931,13 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
         taiwanShare: p ? taiwanShare(p) : hand ? hand.taiwanShare : (sh?.taiwan_share ?? null),
       };
     }),
+    // The newest month Similarweb profiled with an estimate: rank, engagement, every channel and the top countries.
+    profile:
+      Object.values(profiles)
+        .filter((p) => t?.monthly.some((m) => m.month === p.month && estimated(m.visits)))
+        .sort((a, b) => b.month.localeCompare(a.month))[0] ?? null,
+    category: summary?.category ?? null,
+    similarSites: summary?.similarSites ?? [],
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),
     radar: radar.get(domain) ?? [],
     state: state

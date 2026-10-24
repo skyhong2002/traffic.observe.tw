@@ -3,6 +3,7 @@ import { type manualCandidates, proUrl } from './manual.ts';
 import type { ranking } from './metrics.ts';
 import type { RadarPeriod } from './radar.ts';
 import type { WatchRow } from './requests.ts';
+import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
 import type { TopicOverview } from './topics.ts';
@@ -488,6 +489,11 @@ export interface SitePage {
     /** Millions, entered by hand from Similarweb's platform. */
     manual?: number | null;
   }>;
+  /** The newest month Similarweb profiled with an estimate (similarweb.ts TrafficProfile), or null. */
+  profile: TrafficProfile | null;
+  /** Similarweb's category for the domain, from the last fetch. */
+  category: string | null;
+  similarSites: string[];
   watchers: Array<{ requester: string; kind: string; requestedAt: string }>;
   radar: RadarPeriod[];
   state: {
@@ -595,6 +601,132 @@ const DUE_LABEL: Record<string, string> = {
   lookup: '單次查詢',
 };
 const KIND_LABEL: Record<string, string> = { watch: '定期追蹤', traffic: '單次查詢（流量）', similar_sites: '單次查詢（相似網站）' };
+
+// Similarweb's channels and categories in plain words. Categories missing here read as Similarweb writes them.
+const CHANNELS: Array<[TrafficChannel, string, string]> = [
+  ['Direct', '直接造訪', '輸入網址、書籤或 App 開啟'],
+  ['SearchOrganic', '自然搜尋', 'Google 等搜尋結果，不含廣告'],
+  ['SearchPaid', '搜尋廣告', '搜尋結果上的付費廣告'],
+  ['SocialOrganic', '社群', 'Facebook、Threads、LINE 等貼文連結'],
+  ['SocialPaid', '社群廣告', '社群平台上的付費廣告'],
+  ['Referrals', '其他網站連入', '從其他網站的連結點進來'],
+  ['Mail', '電子郵件', '電子報與郵件中的連結'],
+  ['DisplayAds', '展示型廣告', '橫幅等網頁廣告'],
+  ['GenAi', 'AI 工具', 'ChatGPT、Perplexity 等 AI 助理的連結'],
+  ['Affiliate', '聯盟行銷', '導購與分潤連結'],
+];
+const CATEGORY: Record<string, string> = {
+  News_and_Media: '新聞與媒體',
+  Computers_Electronics_and_Technology: '電腦、電子與科技',
+  Programming_and_Developer_Software: '程式與開發工具',
+  Social_Networks_and_Online_Communities: '社群網路與論壇',
+  Consumer_Electronics: '消費電子',
+  Graphics_Multimedia_and_Web_Design: '設計與多媒體',
+  Computer_Hardware: '電腦硬體',
+  Food_and_Drink: '餐飲',
+  Restaurants_and_Delivery: '餐廳與外送',
+  Cooking_and_Recipes: '料理與食譜',
+  Finance: '金融',
+  Investing: '投資',
+  Financial_Planning_and_Management: '理財',
+  Lifestyle: '生活風格',
+  Fashion_and_Apparel: '時尚服飾',
+  Beauty_and_Cosmetics: '美妝',
+  Travel_and_Tourism: '旅遊',
+  Tourist_Attractions: '景點',
+  Accommodation_and_Hotels: '住宿',
+  'E-commerce_and_Shopping': '電商購物',
+  Coupons_and_Rebates: '優惠與回饋',
+  Marketplace: '購物平台',
+  Business_and_Consumer_Services: '商業與消費服務',
+  Real_Estate: '房地產',
+  Law_and_Government: '法律與政府',
+  Government: '政府',
+  Arts_and_Entertainment: '藝術與娛樂',
+  TV_Movies_and_Streaming: '影視與串流',
+  Animation_and_Comics: '動畫與漫畫',
+  Music: '音樂',
+  Games: '遊戲',
+  Video_Games_Consoles_and_Accessories: '電玩',
+  Health: '健康',
+  Jobs_and_Career: '求職與職涯',
+  Jobs_and_Employment: '求職',
+  Community_and_Society: '社區與社會',
+  Faith_and_Beliefs: '宗教信仰',
+  Pets_and_Animals: '寵物與動物',
+  Pets: '寵物',
+  Vehicles: '汽機車',
+  Sports: '運動',
+  Science_and_Education: '科學與教育',
+  Education: '教育',
+  Hobbies_and_Leisure: '嗜好與休閒',
+  Home_and_Garden: '居家與園藝',
+  Gambling: '博弈',
+  Adult: '成人',
+};
+/** "Finance/Investing" → 金融 › 投資; a repeated level ("Health/Health") is shown once. */
+export const categoryLabel = (raw: string) =>
+  [...new Set(raw.split('/'))].map((part) => CATEGORY[part] ?? part.replace(/_/g, ' ')).join(' › ');
+const REGION = new Intl.DisplayNames(['zh-TW'], { type: 'region' });
+const REGION_SHORT: Record<string, string> = { HK: '香港', MO: '澳門', CN: '中國' };
+const regionName = (code: string) => REGION_SHORT[code] ?? REGION.of(code) ?? code;
+const duration = (seconds: number) => {
+  const s = Math.round(seconds);
+  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${String(s % 60).padStart(2, '0')} 秒`;
+};
+/** One row per share: name and what it means, a bar, the percentage and, given visits, the visits it stands for. */
+const shareRows = (items: Array<{ label: string; hint?: string; share: number }>, visits: number | null) =>
+  `<ul class="share-list">${items
+    .map(
+      (i) =>
+        `<li${i.share ? '' : ' class="zero"'}><span class="share-name">${html(i.label)}${i.hint ? `<small>${html(i.hint)}</small>` : ''}</span><span class="share-bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, i.share * 100)).toFixed(1)}%"></i></span><b>${pct(i.share, i.share && i.share < 0.0095 ? 2 : 1)}</b>${visits === null ? '' : `<small class="share-visits">${i.share ? `約 ${volText(visits * i.share)}` : ''}</small>`}</li>`,
+    )
+    .join('')}</ul>`;
+
+/** Everything Similarweb said about the newest profiled month: ranks, engagement, every channel, the top countries. */
+export function similarwebSection(site: Pick<SitePage, 'domain' | 'profile' | 'category' | 'similarSites' | 'months'>) {
+  const p = site.profile;
+  if (!p) return '';
+  const visits = site.months.find((m) => m.month === p.month)?.similarweb ?? null;
+  const card = (label: string, value: string, sub = '') =>
+    `<div><span>${label}</span><b>${value || '—'}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
+  const rankText = (n: number | null | undefined) => (n ? `#${n.toLocaleString('en-US')}` : '');
+  const category = p.categoryRank?.category ?? site.category;
+  const cards = `<div class="stats">${card('全球排名', rankText(p.globalRank), '在全世界所有網站中')}${card(
+    p.countryRank ? `${html(regionName(p.countryRank.code))}排名` : '國家排名',
+    rankText(p.countryRank?.rank),
+    p.countryRank ? `在${html(regionName(p.countryRank.code))}所有網站中` : '',
+  )}${card('類別排名', rankText(p.categoryRank?.rank), category ? html(categoryLabel(category)) : '')}${card(
+    '平均停留',
+    p.timeOnSite ? duration(p.timeOnSite) : '',
+    '每次造訪',
+  )}${card('每次造訪頁數', p.pagesPerVisit ? p.pagesPerVisit.toFixed(2) : '', '平均看幾頁')}${card(
+    '跳出率',
+    p.bounceRate === null ? '' : pct(p.bounceRate),
+    '只看一頁就離開',
+  )}</div>`;
+  const channels = CHANNELS.map(([key, label, hint]) => ({ label, hint, share: p.channels[key] ?? 0 })).sort((a, b) => b.share - a.share);
+  const countryTotal = p.countries.reduce((a, c) => a + c.share, 0);
+  const countries = [
+    ...p.countries.map((c) => ({ label: regionName(c.code), share: c.share })),
+    ...(countryTotal < 0.999 ? [{ label: '其他國家', share: 1 - countryTotal }] : []),
+  ];
+  const similar = site.similarSites.length
+    ? `<h3>相似網站</h3><p class="tags">${site.similarSites.map((d) => `<a class="tag" href="/site/${html(d)}/">${html(d)}</a>`).join('')}</p>`
+    : '';
+  return section(
+    `流量組成 <small>Similarweb・${monthLong(p.month)}</small>`,
+    `<p class="note">Similarweb 每次只提供最新一個月的組成，所以這裡只有 ${monthLong(p.month)}${visits === null ? '' : `（當月造訪 ${volText(visits)}）`}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</p>${cards}
+<div class="charts"><div class="chart-box"><h3>訪客從哪裡來</h3>${shareRows(channels, visits)}</div><div class="chart-box"><h3>訪客在哪個國家</h3>${shareRows(countries, visits)}</div></div>${similar}
+<details class="method-note"><summary>這些數字怎麼來的</summary><ul class="body">
+<li>來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存；Similarweb 的數字是估算，小網站誤差較大。</li>
+<li>排名：全球與國家排名依 Similarweb 估算的造訪量；類別排名只和同一類別（${category ? html(categoryLabel(category)) : 'Similarweb 的分類'}）的網站比較。</li>
+<li>平均停留、每次造訪頁數、跳出率都是所有造訪的平均；跳出率是只看一頁就離開的造訪比例。</li>
+<li>導流來源的「自然搜尋」不含搜尋廣告；「AI 工具」是從 ChatGPT 等 AI 助理點進來的造訪。排行上的搜尋占比、AI 占比用的就是這兩項。</li>
+<li>國家只列前 5 名，「其他國家」是其餘合計。</li>
+</ul></details>`,
+  );
+}
 
 const TAG_SOURCE: Record<TagItem['source'], string> = {
   editor: '編輯',
@@ -737,6 +869,7 @@ ${section(
   '每月造訪',
   `<p class="note">Similarweb 每月造訪估算；空心點是試算表或從 Similarweb 平台手動補登的月份，斷開處是沒有資料的月份。</p><div class="chart-box">${visitsChart}</div>`,
 )}
+${similarwebSection(site)}
 ${section(
   '導流占比',
   `<p class="note">兩張圖各自的刻度：自然搜尋與 GenAI 導流占全部造訪的比例。Similarweb 只給最新一個月的占比，所以點常常不連續。</p>

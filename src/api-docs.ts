@@ -177,6 +177,14 @@ export const ENDPOINTS: Endpoint[] = [
         type: 'object[]',
         desc: '試算表原始紀錄：month、name、group（A 欄）、topics（B 欄）、visits、adjusted（人工調整，不採用）',
       },
+      {
+        name: 'profile',
+        type: 'object | null',
+        desc: 'Similarweb 最新一個有估算的月份的組成：month、countries（前 5 名 code、share）、channels（Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate 的占比）、bounceRate、pagesPerVisit、timeOnSite（秒）、globalRank、countryRank、categoryRank',
+      },
+      { name: 'category', type: 'string | null', desc: 'Similarweb 的網站類別，例如 Finance/Investing' },
+      { name: 'similarSites', type: 'string[]', desc: 'Similarweb 列出的相似網站' },
+      { name: 'tags', type: 'object[]', desc: '每個標籤的來源與票數，同 /api/v1/tags/{domain}' },
       { name: 'watchers', type: 'object[]', desc: '追蹤這個網域的來源：requester、kind、requestedAt' },
       { name: 'radar', type: 'object[]', desc: 'Cloudflare Radar：dateStart、dateEnd、rank、bucket、bucketLowerBound、fetchedAt' },
       {
