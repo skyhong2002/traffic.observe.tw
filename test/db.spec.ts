@@ -708,6 +708,17 @@ describe.skipIf(!url)('with a database', () => {
     ).toBe(403);
     await call('/internal/v1/tags/admin', { voter: 'admin@gmail.com', domain: 'food.blog', tag: '咖啡', action: 'set' });
     expect(await shown('food.blog')).toEqual(['咖啡', '美食']);
+    // An admin does not vote: disagree hides at once, agree sets, withdrawing releases.
+    await call('/internal/v1/tags/vote', { voter: 'admin@gmail.com', domain: 'food.blog', tag: '美食', vote: -1 });
+    expect(await shown('food.blog')).toEqual(['咖啡']);
+    expect(await rows(pool, "SELECT COUNT(*) AS n FROM tag_votes WHERE voter = 'admin@gmail.com'")).toEqual([{ n: 0 }]);
+    expect((await call('/internal/v1/tags', { domains: ['food.blog'], voter: 'admin@gmail.com' })).json().voter).toEqual({
+      email: 'admin@gmail.com',
+      admin: true,
+      votes: { 'food.blog': { 咖啡: 1, 美食: -1 } },
+    });
+    await call('/internal/v1/tags/vote', { voter: 'admin@gmail.com', domain: 'food.blog', tag: '美食', vote: 0 });
+    expect(await shown('food.blog')).toEqual(['咖啡', '美食']);
     // The editors' list ignores votes; an admin can still hide one of its tags.
     for (const voter of ['a@gmail.com', 'b@gmail.com', 'c@gmail.com'])
       await call('/internal/v1/tags/vote', { voter, domain: 'news.com.tw', tag: '新聞', vote: -1 });

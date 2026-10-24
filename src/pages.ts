@@ -633,13 +633,15 @@ export function tagPanel(domain: string, tags: TagItem[], viewer: TagViewer) {
   const items = tags
     .map((t) => {
       const mine = viewer.votes[t.tag] ?? 0;
-      const votes = viewer.signedIn
-        ? form(
-            'vote',
-            t.tag,
-            `${button(mine === 1 ? 0 : 1, mine === 1 ? '已同意（收回）' : '同意', mine === 1)}${button(mine === -1 ? 0 : -1, mine === -1 ? '已不同意（收回）' : '不同意', mine === -1)}`,
-          )
-        : '';
+      // Admins override instead of voting (crowd.ts), so they get the override buttons only.
+      const votes =
+        viewer.signedIn && !viewer.admin
+          ? form(
+              'vote',
+              t.tag,
+              `${button(mine === 1 ? 0 : 1, mine === 1 ? '已同意（收回）' : '同意', mine === 1)}${button(mine === -1 ? 0 : -1, mine === -1 ? '已不同意（收回）' : '不同意', mine === -1)}`,
+            )
+          : '';
       const admin = viewer.admin
         ? form(
             'admin',
@@ -658,7 +660,7 @@ export function tagPanel(domain: string, tags: TagItem[], viewer: TagViewer) {
   const message = viewer.message ? TAG_MESSAGES[viewer.message] : '';
   return section(
     '標籤',
-    `${message ? `<p class="flash" role="${viewer.message === 'done' ? 'status' : 'alert'}">${html(message)}</p>` : ''}<p class="note">編輯清單的標籤一律顯示；AI 初判在不同意比同意多 2 票時隱藏；讀者新增的標籤立即顯示，不同意追上同意時隱藏。管理員可以指定單一標籤顯示或隱藏。</p>${
+    `${message ? `<p class="flash" role="${viewer.message === 'done' ? 'status' : 'alert'}">${html(message)}</p>` : ''}<p class="note">編輯清單的標籤一律顯示；AI 初判在不同意比同意多 2 票時隱藏；讀者新增的標籤立即顯示，不同意追上同意時隱藏。管理員不投票，直接指定單一標籤顯示或隱藏，優先於所有規則。</p>${
       items ? `<ul class="tag-votes">${items}</ul>` : '<p class="note muted">還沒有標籤。</p>'
     }${add}`,
     ' id="tags"',

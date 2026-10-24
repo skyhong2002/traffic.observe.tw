@@ -2,7 +2,19 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
-import { cleanTag, loadCrowd, RESERVED_TAGS, resolveTags, setAiTags, TagError, tagAction, voterOf, voterStats, votesOf } from './crowd.ts';
+import {
+  cleanTag,
+  loadCrowd,
+  overridesOf,
+  RESERVED_TAGS,
+  resolveTags,
+  setAiTags,
+  TagError,
+  tagAction,
+  voterOf,
+  voterStats,
+  votesOf,
+} from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { buildHistory, type History } from './history.ts';
 import { iconStore } from './icons.ts';
@@ -426,7 +438,9 @@ export function buildApp(
       loginEnabled: editors.enabled,
       signedIn: !!user,
       admin: !!editor,
-      votes: user ? ((await votesOf(pool, user.email, [site.domain]))[site.domain] ?? {}) : {},
+      votes: user
+        ? ((await (editor ? overridesOf(pool, [site.domain]) : votesOf(pool, user.email, [site.domain])))[site.domain] ?? {})
+        : {},
       message: typeof request.query.tags === 'string' ? request.query.tags : undefined,
     });
   });
@@ -708,7 +722,16 @@ export function buildApp(
     const tags = await tagsOf(domains);
     return {
       domains: tags,
-      ...(voter ? { voter: { email: voter, admin: editors.isEditor(voter), votes: await votesOf(pool, voter, Object.keys(tags)) } } : {}),
+      // An admin's votes are the overrides, since an admin's agree or disagree sets or hides the tag.
+      ...(voter
+        ? {
+            voter: {
+              email: voter,
+              admin: editors.isEditor(voter),
+              votes: await (editors.isEditor(voter) ? overridesOf(pool, Object.keys(tags)) : votesOf(pool, voter, Object.keys(tags))),
+            },
+          }
+        : {}),
     };
   });
   // { voter, domain, tag, vote: 1 | -1 | 0 } · { voter, domain, tag } · { voter, domain, tag, action: set | hide | release }

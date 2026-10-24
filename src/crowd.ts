@@ -163,6 +163,19 @@ export async function votesOf(pool: Pick<Pool, 'query'>, voter: string, domains:
   return out;
 }
 
+/** What an admin sees as their votes: the admin overrides, set as 1 and hide as -1 (admins do not vote). */
+export async function overridesOf(pool: Pick<Pool, 'query'>, domains: string[]) {
+  const out: Record<string, Record<string, number>> = {};
+  if (!domains.length) return out;
+  const list = await rows<{ domain: string; tag: string; status: string }>(
+    pool,
+    "SELECT domain, tag, status FROM tag_assignments WHERE source = 'admin' AND domain IN (?)",
+    [domains],
+  );
+  for (const r of list) (out[r.domain] ??= {})[r.tag] = r.status === 'active' ? 1 : -1;
+  return out;
+}
+
 export interface ActionInput {
   domain: string;
   /** The site's editor or sheet tags, which can be voted on without being proposed. */
@@ -179,14 +192,20 @@ export interface ActionInput {
 }
 /** One reader's vote or proposal, or an admin's override, in a transaction with its log row. Returns the tag. */
 export async function tagAction(pool: Pool, input: ActionInput) {
-  const { domain, kind, voter, via } = input;
+  const { domain, voter, via } = input;
+  let { kind, value } = input;
   const tag = kind === 'propose' ? cleanTag(input.tag, input.known) : typeof input.tag === 'string' ? input.tag : null;
   if (!tag) throw new TagError('invalid_tag', `標籤需含文字或數字，最多 ${TAG_LIMIT} 字，不能有逗號、頓號或斜線。`);
-  if (kind === 'vote' && ![1, -1, 0].includes(input.value as number)) throw new TagError('invalid_vote', '投票只能是同意、不同意或收回。');
-  if (kind === 'admin' && !['set', 'hide', 'release'].includes(input.value as string))
+  if (kind === 'vote' && ![1, -1, 0].includes(value as number)) throw new TagError('invalid_vote', '投票只能是同意、不同意或收回。');
+  // Admins do not vote (2026-10-24): agree shows the tag, disagree hides it, withdrawing releases it, adding sets it.
+  if (input.admin && kind !== 'admin') {
+    value = kind === 'propose' ? 'set' : value === 1 ? 'set' : value === -1 ? 'hide' : 'release';
+    kind = 'admin';
+  }
+  if (kind === 'admin' && !['set', 'hide', 'release'].includes(value as string))
     throw new TagError('invalid_action', '管理動作只能是指定顯示、隱藏或解除覆寫。');
   if (kind === 'admin' && !input.admin) throw new TagError('not_admin', '只有管理員可以覆寫標籤。', 403);
-  if (RESERVED_TAGS.has(tag) && (kind === 'propose' || input.value === 'set')) throw RESERVED();
+  if (RESERVED_TAGS.has(tag) && (kind === 'propose' || value === 'set')) throw RESERVED();
   if (!allowWrite(voter)) throw new TagError('rate_limited', '操作太頻繁，請一分鐘後再試。', 429);
   const conn = await pool.getConnection();
   try {
@@ -197,7 +216,7 @@ export async function tagAction(pool: Pool, input: ActionInput) {
       [domain, tag],
     );
     if (kind === 'vote' && !before?.sources && !input.base.includes(tag)) throw new TagError('unknown_tag', '這個網站沒有這個標籤。', 404);
-    if (kind === 'propose' || (kind === 'admin' && !input.base.includes(tag)))
+    if (kind === 'propose' || (kind === 'admin' && value !== 'release' && !input.base.includes(tag)))
       // Admin-introduced tags keep a candidate too, so releasing the override hands them to the votes.
       await conn.query(
         `INSERT IGNORE INTO tag_assignments (domain, tag, source, status, actor, created_at, updated_at)
@@ -205,17 +224,18 @@ export async function tagAction(pool: Pool, input: ActionInput) {
         [domain, tag, voter],
       );
     if (kind === 'admin') {
-      if (input.value === 'release')
+      await conn.query('DELETE FROM tag_votes WHERE domain = ? AND tag = ? AND voter = ?', [domain, tag, voter]);
+      if (value === 'release')
         await conn.query("DELETE FROM tag_assignments WHERE domain = ? AND tag = ? AND source = 'admin'", [domain, tag]);
       else
         await conn.query(
           `INSERT INTO tag_assignments (domain, tag, source, status, actor, created_at, updated_at)
           VALUES (?, ?, 'admin', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
           ON DUPLICATE KEY UPDATE status = VALUES(status), actor = VALUES(actor), updated_at = UTC_TIMESTAMP()`,
-          [domain, tag, input.value === 'set' ? 'active' : 'hidden', voter],
+          [domain, tag, value === 'set' ? 'active' : 'hidden', voter],
         );
     } else {
-      const vote = kind === 'propose' ? 1 : (input.value as number);
+      const vote = kind === 'propose' ? 1 : (value as number);
       if (vote === 0) await conn.query('DELETE FROM tag_votes WHERE domain = ? AND tag = ? AND voter = ?', [domain, tag, voter]);
       else
         await conn.query(
@@ -227,10 +247,10 @@ export async function tagAction(pool: Pool, input: ActionInput) {
     await conn.query('INSERT INTO tag_log (at, actor, via, action, domain, tag, detail) VALUES (UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?)', [
       voter,
       via,
-      kind === 'admin' ? String(input.value) : kind,
+      kind === 'admin' ? String(value) : kind,
       domain,
       tag,
-      JSON.stringify({ before: before?.sources ?? null, value: input.value ?? null }),
+      JSON.stringify({ before: before?.sources ?? null, value: input.value ?? null, as: input.kind }),
     ]);
     await conn.commit();
     return tag;
