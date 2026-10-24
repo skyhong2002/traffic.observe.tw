@@ -10,6 +10,7 @@ const ENTRIES: Record<string, string> = {
   '/': '台灣網站每月造訪量排行：Similarweb 估算的月造訪量、自然搜尋與 AI 導流占比，可依標籤與來源篩選、比較任兩個月份。',
   '/table/': '台灣網站每月造訪量完整排行表，含自然搜尋、AI 導流與名次變化，可依月份、標籤與來源篩選並下載 CSV。',
   '/tag/': '依網站目前的標籤彙整所有月份的累計造訪量、網站數與自然搜尋、AI 導流占比，查看各標籤的完整網站清單。',
+  '/tech/': '台灣新聞媒體與部落格首頁使用的技術：內容管理系統、網站框架、CDN、分析追蹤與廣告工具，依來源與類別統計。',
 };
 const SITE = '/site/:domain/';
 const FILES = new Set(['/robots.txt', '/sitemap.xml']);

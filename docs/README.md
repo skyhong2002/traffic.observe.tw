@@ -1,6 +1,6 @@
 # traffic.observe.tw 流量觀察
 
-把 GeneHong「[Similar Web 新聞](https://docs.google.com/spreadsheets/d/1B5RsSVZSrjKSUFDFZ-2VVlU3-tpTN49J1YzLGOohalM/edit)」試算表做成自動更新的資料庫，同時是這台主機**唯一**對 `data.similarweb.com` 發請求的服務。tag.observe.tw、blog.observe.tw 等其他服務都把網域交給這裡，再讀結果，自己不打 Similarweb。
+把 GeneHong「[Similar Web 新聞](https://docs.google.com/spreadsheets/d/1B5RsSVZSrjKSUFDFZ-2VVlU3-tpTN49J1YzLGOohalM/edit)」試算表做成自動更新的資料庫，同時是這台主機**唯一**對 `data.similarweb.com` 發請求的服務。tag.observe.tw、blog.observe.tw 等其他服務都把網域交給這裡，再讀結果，自己不打 Similarweb。各網站首頁用了哪些技術（`/tech/`）也由這裡抓取與偵測，blog 只讀結果。
 
 ## 為什麼要獨立
 
@@ -18,6 +18,8 @@
 | `src/metrics.ts`、`src/topics.ts` | 月排行、跨月份標籤彙整的計算 |
 | `tools/import-tag.ts` | 一次性從 tag 資料庫複製歷史與 blog 的排隊請求 |
 | `tools/backtest-sheet.ts` | 拿試算表數字核對 Similarweb 資料 |
+| `src/tech.ts`、`src/wappalyzer.ts`、`src/tech-scan.ts`、`src/tech-pages.ts` | 網站技術：技術清單與偵測、Wappalyzer 規則比對、抓首頁與排程、頁面 |
+| `tools/fetch-wappalyzer-rules.ts`、`tools/import-blog-tech.ts` | 安裝釘選的 Wappalyzer 規則；一次性從 blog 資料庫匯入它的偵測結果 |
 
 資料庫是 tag-db（MariaDB，`127.0.0.1:13306`）裡獨立的 `traffic_observe`，帳號 `traffic_observe` 只能存取自己的資料庫；測試用 `traffic_observe_test`（測試會清空，絕不能指向正式庫）。`npm run db:migrate` 套用 `src/migrations/*.sql`。
 
@@ -117,6 +119,18 @@
 
 `/watch/` 可以一次貼多行網域或網址，設定每 7 或 30 天更新一次，並附上備註。這些網域以請求者 `manual` 存進 `watches`，記下 `added_by`，每次加入或移除都寫進 `watch_log`。表單只接受本站 `Origin` 送出的 POST。移除只會停止抓取，已經抓到的資料會保留。
 
+## 網站技術（`/tech/`）
+
+2026-10-25 從 blog.observe.tw 的 `/tech/` 搬過來，範圍擴大到所有網域。blog 以前只看自己爬蟲已經拿到的頁面；這裡改成自己去抓每個網域的首頁，blog 不再自己偵測，改讀 `POST /internal/v1/tech`。
+
+- **範圍**：各服務的定期清單（`watches` 的 `kind = 'watch'`）加上試算表的網域，2026-10-25 共約 1,950 個。其他網域可以在 `/tech/` 查詢；登入的人可以在 `/tech/<domain>/` 按「立即檢查」（每個帳號每小時 10 次，同一網域 10 分鐘內不重抓），結果會保存，但不會進入排程。
+- **排程**（`runTech`）：worker 每小時跑完 Similarweb（和 Radar）那輪之後，最多抓 `TRAFFIC_TECH_BUDGET`（預設 60，0 為關閉）個首頁，一次一個、間隔 1 秒，最長 8 分鐘，`GET_LOCK('traffic-tech')`。順序是從沒檢查過的、從 blog 匯入但我們還沒抓過的，再來是最舊的。成功的結果 30 天後重抓；失敗依次等 1、2、4…天，最多 30 天。worker 收到停止訊號時會在下一個網域前停下。
+- **怎麼抓**：先讀 robots.txt（user agent 名稱 `traffic-observe`，完整是 `Mozilla/5.0 (compatible; traffic-observe/1.0; +https://traffic.observe.tw/tech/)`），允許才抓首頁；先試 https，連不上才用 http。最多轉址 5 次，每次轉址到新主機都會再看 robots.txt。每個連線的 DNS 結果都必須是公開位址（私有、loopback、link-local、CGNAT 等一律拒絕），只用 80／443 埠。每頁最多讀 512 KiB，每次請求 15 秒逾時，每個網域總共 40 秒。依 `Content-Type` 或 `<meta charset>` 解碼（含 Big5）。
+- **偵測**（`src/tech.ts`）：比對 Wappalyzer 規則裡 `VOCABULARY` 列出的 143 項技術；blog 原本的 36 項 id 不變。實作沿用 blog 的作法：規則資料（GPL-3.0，enthec/webappanalyzer）不進 repo，`data/wappalyzer-pin.json` 記下 commit 與每個檔案的 SHA-256，`node tools/fetch-wappalyzer-rules.ts` 下載到 `TRAFFIC_WAPPALYZER_RULES_DIR`（預設 `~/.local/share/traffic-observe/wappalyzer/<commit>/`），雜湊不符就拒絕載入；`--check` 列出規則資料已經沒有的技術名稱，`--update` 抓最新版並印出新的 pin。比對器是自己寫的（MIT），不評估 js、css、cookies、xhr、dns、implies／excludes 與 dom 文字。每頁有 250 ms 的比對預算，長字串分段比對，`test/tech.spec.ts` 會拿所有編譯後的規則跑惡意輸入。**規則沒裝好時排程不抓**，以免每個網站都被記成「未辨識」。
+- **結果**（`tech_scans`，migration `0007_tech.sql`）：每個網域一列。`status`、`error_code`、`http_status`、`last_attempt_at` 描述最近一次嘗試；`observed_at`、`source_url`、`rule_version`、`detections` 是最近一次成功的結果，之後失敗也保留。較舊的嘗試不會蓋掉較新的。`origin` 是 `traffic`（自己抓的）或 `blog`（匯入的）。版本只從 `meta generator` 來，互相矛盾時是 `unknown`；CDN 與主機的信心最多 0.4；依據只寫規則類別（例如 `script URL rule`），不存頁面內容。每輪的統計在 `tech_runs`。
+- **頁面與 API**：`/tech/`（依來源、類別、結果篩選，技術排行與網站清單）、`/tech/<domain>/`（單一網域，任何網域都可查）、網站頁的「網站技術」區塊、`/api/v1/tech`、`/api/v1/tech/{domain}`。
+- **匯入 blog**：`node --env-file=.env --env-file=$HOME/.config/blog-observe.env tools/import-blog-tech.ts [--dry-run]` 唯讀複製 blog `blog_tech_scans` 裡已驗證部落格的最後一次成功結果，以 `canonical_host` 為網域、`origin = 'blog'`；已經被我們自己抓過的網域不動，不在清單裡的技術會丟掉。可重複執行。
+
 ## 服務 API（`/internal/*`）
 
 只接受直接連到 loopback、沒有 `cf-connecting-ip`、`x-forwarded-for`、`tailscale-user-login` 等轉送 header 的連線，並且要帶 `Authorization: Bearer <token>`。token 從 `TRAFFIC_TOKEN_<請求者>` 讀，至少 32 字元，token 決定請求者是誰。不符合一律回 404。
@@ -131,6 +145,7 @@
 | `POST /internal/v1/tags` | `{ domains: [...], voter? }`：每個已知網域的所有標籤（含未顯示的）與來源、票數；帶 `voter`（讀者的 Google email）時另回該讀者的票與是否為管理員 |
 | `POST /internal/v1/tags/vote`、`/propose`、`/admin` | `{ voter, domain, tag, vote: 1 \| -1 \| 0 }`、`{ voter, domain, tag }`、`{ voter, domain, tag, action: set \| hide \| release }`：代讀者投票、新增標籤、管理員覆寫；回傳該網域更新後的標籤 |
 | `PUT /internal/v1/tags/ai` | `{ sites: [{ domain, tags: [標籤 \| { tag, reason? }], reason? }] }`（最多 500 個）：以這份清單**取代**該服務對這些網域的 AI 初判；每個標籤可以各帶理由，沒有時用網站的 `reason`；未知網域列在 `skipped`，政治傾向的標籤直接略過 |
+| `POST /internal/v1/tech` | `{ domains: [...] }`（最多 2,000 個）：每個檢查過的網域的技術紀錄（`sites`，與 `/api/v1/tech/{domain}` 相同），沒檢查過的列在 `notChecked`，另附目前的規則版本 `rules` 與最近一輪 `lastRun` |
 | `POST /internal/v1/tags/voters` | `{ voters: [email...], via? }`（最多 500 個）：每位投票者目前有效的票數與最後投票時間；`via`（例如 `blog`）只算經該服務投的票 |
 
 ## 從 tag 接手（順序很重要，兩邊絕不能同時打 Similarweb）

@@ -1951,3 +1951,23 @@ svg .cross {
 .table-note {
   margin-top: 12px;
 }
+
+/* The site page's 網站技術 block: categories beside their technologies. */
+.tech-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0 0 12px;
+}
+.tech-list dt {
+  color: var(--muted);
+}
+.tech-list dd {
+  margin: 0;
+}
+.tech-list .tags,
+#tech-sites .tags {
+  flex-wrap: wrap;
+  max-width: none;
+  white-space: normal;
+}

@@ -1,10 +1,12 @@
 import { createPool } from './db.ts';
 import { runRadar } from './radar.ts';
 import { runConfig, runOnce } from './scheduler.ts';
+import { runTech, techConfig } from './tech-scan.ts';
 
 // Runs the Similarweb batch once an hour at TRAFFIC_RUN_MINUTE (default :35,
 // where tag's job ran), and the Cloudflare Radar batch once a day after the
-// run in Taipei hour TRAFFIC_RADAR_HOUR (default 3, as tag did). Config is reread every run, so a budget change in the
+// run in Taipei hour TRAFFIC_RADAR_HOUR (default 3, as tag did), then up to TRAFFIC_TECH_BUDGET homepages for /tech/
+// (tech-scan.ts; stops early when the worker is asked to stop). Config is reread every run, so a budget change in the
 // environment takes effect after a restart without a code change.
 
 const pool = createPool();
@@ -13,6 +15,7 @@ const radarHour = Number(process.env.TRAFFIC_RADAR_HOUR ?? 3);
 const taipeiHour = (now: Date) => (now.getUTCHours() + 8) % 24;
 let timer: NodeJS.Timeout | undefined;
 let running: Promise<unknown> | null = null;
+let stopping = false;
 
 const nextRun = (now = new Date()) => {
   const at = new Date(now);
@@ -33,6 +36,7 @@ async function tick() {
   const radar = taipeiHour(new Date()) === radarHour;
   running = log('similarweb', runOnce(pool, { config: runConfig() }))
     .then(() => (radar ? log('radar', runRadar(pool)) : undefined))
+    .then(() => (stopping ? undefined : log('tech', runTech(pool, { stopping: () => stopping }))))
     .finally(() => {
       running = null;
     });
@@ -41,6 +45,7 @@ async function tick() {
 }
 
 const stop = async () => {
+  stopping = true;
   clearTimeout(timer);
   await running;
   await pool.end();
@@ -48,5 +53,7 @@ const stop = async () => {
 };
 process.once('SIGTERM', stop);
 process.once('SIGINT', stop);
-console.log(JSON.stringify({ worker: 'traffic-observe', budget: runConfig().budget, next: nextRun().toISOString() }));
+console.log(
+  JSON.stringify({ worker: 'traffic-observe', budget: runConfig().budget, techBudget: techConfig().budget, next: nextRun().toISOString() }),
+);
 schedule();

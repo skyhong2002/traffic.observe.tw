@@ -49,6 +49,9 @@ import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
 import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
 import { latestTopics } from './tags.ts';
+import { activeRules, PRODUCTS } from './tech.ts';
+import { techDomainPage, techOverview, techPage, techSection } from './tech-pages.ts';
+import { checkNow, knownTechDomains, lastTechRun, loadTech, type TechRecord } from './tech-scan.ts';
 import { aggregateTopics } from './topics.ts';
 
 const CACHE_MS = 60_000;
@@ -485,15 +488,21 @@ export function buildApp(
     if (!site) return reply.code(404).send(notFoundPage(request.params.domain));
     const user = await editors.currentUser(request);
     const editor = user && editors.isEditor(user.email);
-    return sitePage(site, !!editor, {
-      loginEnabled: editors.enabled,
-      signedIn: !!user,
-      admin: !!editor,
-      votes: user
-        ? ((await (editor ? overridesOf(pool, [site.domain]) : votesOf(pool, user.email, [site.domain])))[site.domain] ?? {})
-        : {},
-      message: typeof request.query.tags === 'string' ? request.query.tags : undefined,
-    });
+    const tech = (await loadTech(pool, [site.domain])).get(site.domain) ?? null;
+    return sitePage(
+      site,
+      !!editor,
+      {
+        loginEnabled: editors.enabled,
+        signedIn: !!user,
+        admin: !!editor,
+        votes: user
+          ? ((await (editor ? overridesOf(pool, [site.domain]) : votesOf(pool, user.email, [site.domain])))[site.domain] ?? {})
+          : {},
+        message: typeof request.query.tags === 'string' ? request.query.tags : undefined,
+      },
+      techSection(site.domain, tech),
+    );
   });
   // Votes, added tags and admin overrides from the site page's tag block; back to the block afterwards.
   app.post<{ Params: { domain: string }; Body: { kind?: string; tag?: string; value?: string } }>(
@@ -514,6 +523,74 @@ export function buildApp(
       return reply.redirect(`/site/${domain}/?tags=${'error' in r ? r.error : 'done'}#tags`, 303);
     },
   );
+  // Technologies on each site's homepage (tech-scan.ts runs in the worker). The overview reads every record, so one
+  // copy serves for CACHE_MS; a check from /tech/<domain>/ clears it.
+  let techCache: { at: number; data: Promise<{ domains: string[]; names: Map<string, string>; records: Map<string, TechRecord> }> } | null =
+    null;
+  const techData = () => {
+    if (techCache && Date.now() - techCache.at < CACHE_MS) return techCache.data;
+    const data = Promise.all([knownTechDomains(pool), tagContext(), loadTech(pool)]).then(([domains, { sites }, records]) => ({
+      domains,
+      names: new Map([...sites].map(([d, site]) => [d, site.name])),
+      records,
+    }));
+    data.catch(() => {
+      techCache = null;
+    });
+    techCache = { at: Date.now(), data };
+    return data;
+  };
+  type TechQuery = { source?: string; category?: string; technology?: string; status?: string };
+  const overview = async (query: TechQuery) => {
+    const [{ domains, names, records }, lists] = await Promise.all([techData(), watched()]);
+    return techOverview(domains, names, records, lists, query);
+  };
+  // Checks asked for on /tech/<domain>/: ten an hour per account, so the page is not a free crawler.
+  const checks = new Map<string, number[]>();
+  const allowCheck = (email: string) => {
+    const now = Date.now();
+    const recent = (checks.get(email) ?? []).filter((t) => now - t < 3_600_000);
+    if (recent.length >= 10) return false;
+    checks.set(email, [...recent, now]);
+    return true;
+  };
+  app.get<{ Querystring: TechQuery }>('/tech/', async (request, reply) => {
+    reply.type('text/html; charset=utf-8');
+    return techPage(await overview(request.query));
+  });
+  app.get<{ Querystring: { domain?: string } }>('/tech/lookup', async (request, reply) => {
+    const domain = publicDomain(request.query.domain);
+    return reply.redirect(domain ? `/tech/${domain}/` : '/tech/', 303);
+  });
+  app.get<{ Params: { domain: string }; Querystring: { done?: string } }>('/tech/:domain/', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    reply.type('text/html; charset=utf-8');
+    if (!domain) return reply.code(404).send(notFoundPage(request.params.domain));
+    if (domain !== request.params.domain) return reply.redirect(`/tech/${domain}/`, 301);
+    const [{ domains, names }, record, user] = await Promise.all([
+      techData(),
+      loadTech(pool, [domain]).then((m) => m.get(domain) ?? null),
+      editors.currentUser(request),
+    ]);
+    return techDomainPage(domain, names.get(domain) ?? null, record, domains.includes(domain), {
+      loginEnabled: editors.enabled,
+      signedIn: !!user,
+      message: request.query.done,
+    });
+  });
+  app.post<{ Params: { domain: string } }>('/tech/:domain/check', async (request, reply) => {
+    reply.header('cache-control', 'no-store');
+    if (!editors.sameOrigin(request)) return reply.code(403).send({ error: 'same-origin requests only' });
+    const domain = publicDomain(request.params.domain);
+    if (!domain) return reply.code(404).send({ error: 'not found' });
+    const user = await editors.currentUser(request);
+    if (!user) return reply.redirect(`/auth/google?next=${encodeURIComponent(`/tech/${domain}/`)}`, 303);
+    if (!allowCheck(user.email)) return reply.redirect(`/tech/${domain}/?done=rate_limited`, 303);
+    const r = await checkNow(pool, domain);
+    if ('error' in r) return reply.redirect(`/tech/${domain}/?done=${r.error === 'no_rules' ? 'no_rules' : 'checked'}`, 303);
+    techCache = null;
+    return reply.redirect(`/tech/${domain}/?done=${r.fresh ? 'checked' : 'recent'}`, 303);
+  });
   app.get<{ Querystring: { error?: string } }>('/login/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
     return loginPage(request.query.error, editors.enabled);
@@ -695,6 +772,16 @@ export function buildApp(
     if (!domain || !tags) return reply.code(404).send({ error: 'not_found' });
     return { domain, tags };
   });
+  app.get<{ Querystring: TechQuery }>('/api/v1/tech', async (request) => {
+    const o = await overview(request.query);
+    return { ...o, rules: activeRules()?.version ?? null, products: PRODUCTS.size };
+  });
+  app.get<{ Params: { domain: string } }>('/api/v1/tech/:domain', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    const record = domain ? (await loadTech(pool, [domain])).get(domain) : undefined;
+    if (!record) return reply.code(404).send({ error: 'not_found' });
+    return record;
+  });
   app.get('/api/v1/status', async () => serviceStatus(pool, config));
 
   // Services on this machine (auth.ts). The /internal/similarweb pair keeps the
@@ -861,6 +948,28 @@ export function buildApp(
     return { voters: await voterStats(pool, [...new Set(voters as string[])], via as string | undefined) };
   });
   // { domains: [...] } → every stored month and profile, plus fetch state, for services that mirror the data.
+  // Every stored technology record of the domains asked for (blog's /tech/ and blog pages read these).
+  app.post<{ Body: { domains?: unknown } }>('/internal/v1/tech', async (request, reply) => {
+    const raw = request.body?.domains;
+    if (!Array.isArray(raw) || raw.length > MAX_TRAFFIC_DOMAINS) return reply.code(400).send({ error: 'invalid_domains' });
+    const domains = [...new Set(raw.map(publicDomain).filter((d): d is string => !!d))];
+    const [records, run] = await Promise.all([loadTech(pool, domains), lastTechRun(pool)]);
+    return {
+      generatedAt: new Date().toISOString(),
+      rules: activeRules()?.version ?? null,
+      lastRun: run
+        ? {
+            startedAt: run.started_at.toISOString(),
+            finishedAt: run.finished_at?.toISOString() ?? null,
+            sent: run.sent,
+            ok: run.ok,
+            failed: run.failed,
+          }
+        : null,
+      sites: Object.fromEntries(records),
+      notChecked: domains.filter((d) => !records.has(d)),
+    };
+  });
   app.post<{ Body: { domains?: unknown } }>('/internal/v1/traffic', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
     if (!requester) return reply;

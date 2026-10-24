@@ -23,7 +23,7 @@ const pct = (n: number | null, digits = 1) => (n === null ? '' : `${(n * 100).to
 const signed = (n: number | null) =>
   n === null ? '' : `<span class="delta ${n < 0 ? 'down' : 'up'}">${n < 0 ? '▼' : '▲'}${pct(Math.abs(n))}</span>`;
 /** A cell whose sort value differs from what it shows (tables.js sorts by data-v). */
-const sortCell = (cls: string, value: number | string | null, shown: string) =>
+export const sortCell = (cls: string, value: number | string | null, shown: string) =>
   `<td class="${cls}"${value === null ? '' : ` data-v="${html(value)}"`}>${shown}</td>`;
 /**
  * Visits at four significant digits: a whole number under a thousand, then k
@@ -47,15 +47,16 @@ export const vol = (millions: number | null) => {
 export const volText = (millions: number | null) => (millions === null ? '' : visitParts(millions).join(''));
 /** A visits cell, sorted by the number rather than its text. */
 const volCell = (millions: number | null, empty = '') => sortCell('num', millions, vol(millions) || empty);
-const tw = (iso: string | null) =>
+export const tw = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, dateStyle: 'short', timeStyle: 'short' }) : '';
-const twDate = (iso: string) => new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
+export const twDate = (iso: string) => new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
 
-export type Nav = 'report' | 'table' | 'topics' | 'status' | 'watch' | 'sites' | null;
+export type Nav = 'report' | 'table' | 'topics' | 'tech' | 'status' | 'watch' | 'sites' | null;
 /** The header holds the main pages; the ranking's two views are tabs above its title (sectionTabs). */
 const NAV: Array<[string, string, Nav[]]> = [
   ['/', '流量排行', ['report', 'table']],
   ['/tag/', '標籤概況', ['topics']],
+  ['/tech/', '網站技術', ['tech']],
   ['/status/', '抓取狀態', ['status']],
   ['/watch/', '追蹤網域', ['watch']],
 ];
@@ -132,11 +133,14 @@ export function siteHeader(nav: Nav) {
   ).join('')}</nav><div class="site-tools"><span class="who"><!--who--></span></div></div></header>`;
 }
 
-export function siteFooter(nav: Nav = null) {
-  return `<div class="wrap"><details class="method" id="method"><summary>資料來源與計算方式</summary>
-<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（四位有效數字）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
+const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（四位有效數字）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
 <p>Similarweb 沒有的月份以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。Similarweb 回傳 0 代表那個月沒有估算（小網站，或它不單獨計算的子網域如 tw.news.yahoo.com），視同沒有資料，不當成 0 次造訪。搜尋與 AI 占比只提供抓取時最新一個月，缺少的月份不推算；試算表中的 Ahrefs 搜尋數字與 A/S 比值不在本站資料範圍內。</p>
 <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
+`;
+
+export function siteFooter(nav: Nav = null, method = '') {
+  return `<div class="wrap"><details class="method" id="method"><summary>資料來源與計算方式</summary>
+${method || TRAFFIC_METHOD}
 </details></div>
 <footer class="site-footer"><div class="wrap"><div class="footer-main"><div class="footer-about"><a class="brand" href="/">${BRAND}</a><p>台灣網站每月的 Similarweb 造訪估算、搜尋與 AI 導流，以及 Cloudflare Radar 排名。</p></div><nav class="footer-nav" aria-label="其他頁面">${FOOTER_NAV.map(
     ([title, links]) => `<div><h2>${title}</h2>${links.map((n) => navLink(nav, n)).join('')}</div>`,
@@ -167,7 +171,12 @@ const TIP_SCRIPT = `<script>
 /** Lets the stylesheet collapse long chip rows only when the script that expands them will run. */
 export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>";
 
-export function layout(title: string, head: Masthead, body: string, { nav = null, tips = false }: { nav?: Nav; tips?: boolean } = {}) {
+export function layout(
+  title: string,
+  head: Masthead,
+  body: string,
+  { nav = null, tips = false, method = '' }: { nav?: Nav; tips?: boolean; method?: string } = {},
+) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${html(title)}｜流量觀察</title><link rel="stylesheet" href="${STYLE_HREF}">${JS_FLAG}<script src="${TABLES_HREF}" defer></script></head><body>
 ${siteHeader(nav)}
@@ -175,14 +184,14 @@ ${siteHeader(nav)}
     head.actions ? `<div class="page-actions">${head.actions}</div>` : ''
   }</div>${head.toolbar ? `<div class="toolbar">${head.toolbar}</div>` : ''}
 ${body}</main>
-${siteFooter(nav)}
+${siteFooter(nav, method)}
 ${tips ? TIP_SCRIPT : ''}</body></html>`;
 }
 
-const section = (title: string, inner: string, extra = '') => `<section class="block"${extra}><h2>${title}</h2>${inner}</section>`;
+export const section = (title: string, inner: string, extra = '') => `<section class="block"${extra}><h2>${title}</h2>${inner}</section>`;
 
 /** Every server-rendered table sorts by its headers in the browser (tables.js). */
-const table = (head: string, rows: string, empty: string, cols: number, id = '') =>
+export const table = (head: string, rows: string, empty: string, cols: number, id = '') =>
   `<div class="scroll"><table data-sortable${id ? ` id="${id}"` : ''}><thead><tr>${head}</tr></thead><tbody>${
     rows || `<tr><td colspan="${cols}" class="l empty">${empty}</td></tr>`
   }</tbody></table></div>`;
@@ -232,7 +241,7 @@ const tagLinks = (topics: string[], href: (t: string) => string) =>
 /** The site's icon (/icon/), or the first letter of its name where it has none. */
 export const favicon = (domain: string, name: string) =>
   `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
-const siteCell = (domain: string, name: string, extra = '') =>
+export const siteCell = (domain: string, name: string, extra = '') =>
   `<td class="l" data-v="${html(name)}"><span class="site-identity">${favicon(domain, name)}<a class="site-name" href="/site/${html(domain)}/" title="${html(name)} · ${html(domain)}">${html(name)}</a>${
     domain !== name ? `<span class="site-domain table-lead-extra">${html(domain)}</span>` : ''
   }${extra}</span></td>`;
@@ -933,7 +942,8 @@ export function tagPanel(domain: string, tags: TagItem[], viewer: TagViewer) {
   );
 }
 
-export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer) {
+/** `tech` is the 網站技術 block (tech-pages.ts techSection). */
+export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, tech = '') {
   const ordered = [...site.months].sort((a, b) => a.month.localeCompare(b.month));
   const visitsAt = (m: SitePage['months'][number]) => m.similarweb ?? m.manual ?? m.sheet;
   const originOf = (m: SitePage['months'][number]) =>
@@ -1044,6 +1054,7 @@ ${
       )
     : ''
 }
+${tech}
 ${section('追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${fetchState}</p>`)}`,
     { tips: true },
   );
