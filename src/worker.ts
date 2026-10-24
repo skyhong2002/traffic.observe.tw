@@ -1,6 +1,7 @@
 import { createPool } from './db.ts';
 import { runRadar } from './radar.ts';
 import { runConfig, runOnce } from './scheduler.ts';
+import { browserFetcher } from './tech-browser.ts';
 import { runTech, techConfig } from './tech-scan.ts';
 
 // Runs the Similarweb batch once an hour at TRAFFIC_RUN_MINUTE (default :35,
@@ -32,11 +33,20 @@ const log = (job: string, work: Promise<unknown>) =>
   work
     .then((result) => console.log(JSON.stringify({ at: new Date().toISOString(), job, result })))
     .catch((error) => console.error(JSON.stringify({ at: new Date().toISOString(), job, error: String(error?.stack ?? error) })));
+/** Homepages for /tech/; a WAF page gets a second try in a browser started for this run only. */
+const techRun = async () => {
+  const browser = browserFetcher();
+  try {
+    return await runTech(pool, { stopping: () => stopping, fallback: browser.fetchPage });
+  } finally {
+    await browser.close();
+  }
+};
 async function tick() {
   const radar = taipeiHour(new Date()) === radarHour;
   running = log('similarweb', runOnce(pool, { config: runConfig() }))
     .then(() => (radar ? log('radar', runRadar(pool)) : undefined))
-    .then(() => (stopping ? undefined : log('tech', runTech(pool, { stopping: () => stopping }))))
+    .then(() => (stopping ? undefined : log('tech', techRun())))
     .finally(() => {
       running = null;
     });

@@ -50,6 +50,7 @@ import { loadTraffic } from './store.ts';
 import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
 import { latestTopics } from './tags.ts';
 import { activeRules, PRODUCTS } from './tech.ts';
+import { browserFetcher } from './tech-browser.ts';
 import { techDomainPage, techOverview, techPage, techSection } from './tech-pages.ts';
 import { checkNow, knownTechDomains, lastTechRun, loadTech, type TechRecord } from './tech-scan.ts';
 import { aggregateTopics } from './topics.ts';
@@ -586,7 +587,8 @@ export function buildApp(
     const user = await editors.currentUser(request);
     if (!user) return reply.redirect(`/auth/google?next=${encodeURIComponent(`/tech/${domain}/`)}`, 303);
     if (!allowCheck(user.email)) return reply.redirect(`/tech/${domain}/?done=rate_limited`, 303);
-    const r = await checkNow(pool, domain);
+    const browser = browserFetcher();
+    const r = await checkNow(pool, domain, { fallback: browser.fetchPage }).finally(() => browser.close());
     if ('error' in r) return reply.redirect(`/tech/${domain}/?done=${r.error === 'no_rules' ? 'no_rules' : 'checked'}`, 303);
     techCache = null;
     return reply.redirect(`/tech/${domain}/?done=${r.fresh ? 'checked' : 'recent'}`, 303);

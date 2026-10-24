@@ -330,14 +330,15 @@ export function detect(
   };
 }
 
-/** A Cloudflare or WAF challenge page in place of the site. */
+/**
+ * A Cloudflare or WAF challenge page in place of the site. Not Cloudflare's /cdn-cgi/challenge-platform/ script alone:
+ * Cloudflare adds it to ordinary pages too (104.com.tw's homepage carries it), so only the challenge's own markers count.
+ */
 export const isChallenge = (html: string, headers: Record<string, string | string[] | undefined>) => {
   const head = html.slice(0, 65536);
   return (
     String(headers['cf-mitigated'] ?? '').toLowerCase() === 'challenge' ||
-    /(?:\/cdn-cgi\/challenge-platform\/|\bcf-chl-[\w-]+|<title[^>]*>\s*(?:Just a moment|Attention Required!\s*\|\s*Cloudflare))/i.test(
-      head,
-    ) ||
+    /(?:\b_?cf[-_]chl[-_][\w-]+|<title[^>]*>\s*(?:Just a moment|Attention Required!\s*\|\s*Cloudflare))/i.test(head) ||
     /<title[^>]*>\s*(?:Access Denied|Request blocked|Security verification)/i.test(head)
   );
 };

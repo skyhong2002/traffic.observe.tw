@@ -126,8 +126,39 @@ describe('fetching a homepage', () => {
     expect(await scan({ status: 403 })).toMatchObject({ status: 'blocked', errorCode: 'waf', httpStatus: 403 });
     expect(await scan({ status: 429 })).toMatchObject({ status: 'blocked', errorCode: 'rate-limit' });
     expect(await scan({ body: '<title>Just a moment...</title>' })).toMatchObject({ status: 'blocked', errorCode: 'waf' });
+    expect(await scan({ body: '<script>window._cf_chl_opt={cvId:"3"}</script>' })).toMatchObject({ status: 'blocked', errorCode: 'waf' });
+    // Cloudflare puts its challenge-platform script on ordinary pages too.
+    expect(
+      await scan({ body: '<title>104人力銀行</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>' }),
+    ).toMatchObject({
+      status: 'unknown',
+    });
     expect(await scan({ status: 503 })).toMatchObject({ status: 'failed', errorCode: 'http-error' });
     expect(await scan({ headers: { 'content-type': 'application/pdf' } })).toMatchObject({ status: 'failed', errorCode: 'not-html' });
+  });
+  it('tries the browser only after a WAF page or 429, and keeps the plain result when the browser fails too', async () => {
+    const plain = (status: number) => homepageFetcher(net({ 'https://f.example/': { status } }).get);
+    const browser = async () => ({
+      url: 'https://f.example/',
+      status: 200,
+      headers: {},
+      html: '<meta name="generator" content="Hugo 0.1">',
+    });
+    const failing = async (): Promise<never> => {
+      throw new ScanFailure('network');
+    };
+    let used = 0;
+    const counted = async () => {
+      used++;
+      return browser();
+    };
+    expect(await scanDomain('f.example', rules, plain(403), at, browser)).toMatchObject({
+      status: 'detected',
+      detections: [{ id: 'hugo' }],
+    });
+    expect(await scanDomain('f.example', rules, plain(429), at, failing)).toMatchObject({ status: 'blocked', errorCode: 'rate-limit' });
+    expect(await scanDomain('f.example', rules, plain(503), at, counted)).toMatchObject({ status: 'failed', errorCode: 'http-error' });
+    expect(used).toBe(0);
   });
   it('decodes a Big5 page by its declared charset', async () => {
     const big5 = Buffer.concat([

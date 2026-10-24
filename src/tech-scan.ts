@@ -228,13 +228,25 @@ const withTimeout = <T>(work: Promise<T>, ms: number) =>
     work.then(resolve, reject).finally(() => clearTimeout(timer));
   });
 
-/** One domain's attempt: what its homepage shows, or why there was no page. */
+/**
+ * One domain's attempt: what its homepage shows, or why there was no page. When the page is a WAF challenge or a 429
+ * and a `fallback` is given (tech-browser.ts, a real browser), the homepage is tried once more through it; its result
+ * is kept when it got the page.
+ */
 export async function scanDomain(
   domain: string,
   rules: WappalyzerRules,
   fetchPage: PageFetcher,
   at = new Date(),
+  fallback?: PageFetcher,
 ): Promise<TechObservation> {
+  const first = await scanWith(domain, rules, fetchPage, at);
+  if (!fallback || first.status !== 'blocked' || !['waf', 'rate-limit'].includes(first.errorCode ?? '')) return first;
+  const second = await scanWith(domain, rules, fallback, at);
+  return second.status === 'detected' || second.status === 'unknown' ? second : first;
+}
+
+async function scanWith(domain: string, rules: WappalyzerRules, fetchPage: PageFetcher, at: Date): Promise<TechObservation> {
   const stop = (status: TechStatus, errorCode: TechErrorCode, httpStatus: number | null = null, sourceUrl: string | null = null) => ({
     status,
     sourceUrl,
@@ -381,6 +393,7 @@ export async function runTech(
   {
     rules = activeRules(),
     fetchPage = homepageFetcher(),
+    fallback,
     now = () => new Date(),
     budget = techConfig().budget,
     pauseMs = 1000,
@@ -390,6 +403,8 @@ export async function runTech(
   }: {
     rules?: WappalyzerRules | null;
     fetchPage?: PageFetcher;
+    /** The second try for WAF pages (scanDomain). */
+    fallback?: PageFetcher;
     now?: () => Date;
     budget?: number;
     pauseMs?: number;
@@ -421,7 +436,7 @@ export async function runTech(
       }
       if (index) await delay(pauseMs);
       tally.sent++;
-      const observation = await scanDomain(domain, rules, fetchPage, now());
+      const observation = await scanDomain(domain, rules, fetchPage, now(), fallback);
       await saveObservation(pool, domain, observation);
       if (observation.status === 'detected' || observation.status === 'unknown') tally.ok++;
       else tally.failed++;
@@ -450,12 +465,21 @@ export const lastTechRun = async (pool: Pool) =>
   )[0] ?? null;
 
 /** A domain anyone asked about on /tech/: checked now unless an attempt is under ten minutes old. */
-export async function checkNow(pool: Pool, raw: unknown, { rules = activeRules(), fetchPage = homepageFetcher(), now = new Date() } = {}) {
+export async function checkNow(
+  pool: Pool,
+  raw: unknown,
+  {
+    rules = activeRules(),
+    fetchPage = homepageFetcher(),
+    fallback,
+    now = new Date(),
+  }: { rules?: WappalyzerRules | null; fetchPage?: PageFetcher; fallback?: PageFetcher; now?: Date } = {},
+) {
   const domain = publicDomain(raw);
   if (!domain) return { error: 'invalid_domain' as const };
   if (!rules) return { error: 'no_rules' as const };
   const before = (await loadTech(pool, [domain])).get(domain);
   if (before && now.getTime() - Date.parse(before.lastAttemptAt) < 10 * 60_000) return { domain, record: before, fresh: false };
-  await saveObservation(pool, domain, await scanDomain(domain, rules, fetchPage, now));
+  await saveObservation(pool, domain, await scanDomain(domain, rules, fetchPage, now, fallback));
   return { domain, record: (await loadTech(pool, [domain])).get(domain) as TechRecord, fresh: true };
 }
