@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
-import { cleanTag, loadCrowd, resolveTags, setAiTags, TagError, tagAction, voterOf, votesOf } from './crowd.ts';
+import { cleanTag, loadCrowd, RESERVED_TAGS, resolveTags, setAiTags, TagError, tagAction, voterOf, voterStats, votesOf } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { buildHistory, type History } from './history.ts';
 import { iconStore } from './icons.ts';
@@ -730,24 +730,33 @@ export function buildApp(
         return { ok: true, domain, tag: r.tag, tags: (await tagsOf([domain]))[domain] };
       },
     );
-  // { sites: [{ domain, tags: [...], reason? }] } → this service's AI suggestions for those domains, replaced.
+  // { sites: [{ domain, tags: [tag | { tag, reason? }], reason? }] } → this service's AI suggestions for those domains,
+  // replaced. A tag's own reason comes before the site's. Political leaning (RESERVED_TAGS) is dropped.
   app.put<{ Body: { sites?: unknown } }>('/internal/v1/tags/ai', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
     if (!requester) return reply;
     const raw = request.body?.sites;
     if (!Array.isArray(raw) || raw.length > 500) return reply.code(400).send({ error: 'invalid_sites' });
     const { sites, known } = await tagContext();
-    const list: Array<{ domain: string; tags: string[]; reason: string | null }> = [];
+    const reasonOf = (value: unknown) => (typeof value === 'string' && value ? value.slice(0, 2000) : null);
+    const list: Array<{ domain: string; tags: Array<{ tag: string; reason: string | null }> }> = [];
     const skipped: unknown[] = [];
     for (const item of raw as Array<{ domain?: unknown; tags?: unknown; reason?: unknown }>) {
       const domain = publicDomain(item?.domain);
-      const tags = Array.isArray(item?.tags) && item.tags.length <= 20 ? item.tags.map((t) => cleanTag(t, known)) : null;
+      const tags =
+        Array.isArray(item?.tags) && item.tags.length <= 20
+          ? item.tags.map((t: unknown) => {
+              const entry = (typeof t === 'object' && t !== null ? t : { tag: t }) as { tag?: unknown; reason?: unknown };
+              const tag = cleanTag(entry.tag, known);
+              return tag ? { tag, reason: reasonOf(entry.reason) ?? reasonOf(item.reason) } : null;
+            })
+          : null;
       if (!domain || !sites.has(domain) || !tags || tags.some((t) => !t) || list.some((x) => x.domain === domain)) {
         skipped.push(item?.domain ?? null);
         continue;
       }
-      const reason = typeof item.reason === 'string' ? item.reason.slice(0, 2000) : null;
-      list.push({ domain, tags: [...new Set(tags as string[])], reason });
+      const kept = (tags as Array<{ tag: string; reason: string | null }>).filter((t) => !RESERVED_TAGS.has(t.tag));
+      list.push({ domain, tags: kept.filter((t, i) => kept.findIndex((x) => x.tag === t.tag) === i) });
     }
     const changed = await setAiTags(pool, requester, list);
     if (changed) {
@@ -756,6 +765,19 @@ export function buildApp(
     }
     request.log.info({ requester, sites: list.length, changed, skipped: skipped.length }, 'ai tags replaced');
     return { ok: true, sites: list.length, changed, skipped };
+  });
+  // { voters: [email...], via? } → each voter's standing votes and last vote time (only those cast via `via` when given).
+  app.post<{ Body: { voters?: unknown; via?: unknown } }>('/internal/v1/tags/voters', async (request, reply) => {
+    const requester = authenticate(request, reply, tokens);
+    if (!requester) return reply;
+    const raw = request.body?.voters;
+    const via = request.body?.via;
+    if (!Array.isArray(raw) || raw.length > 500) return reply.code(400).send({ error: 'invalid_voters' });
+    if (via !== undefined && (typeof via !== 'string' || !/^[a-z0-9]{1,16}$/.test(via)))
+      return reply.code(400).send({ error: 'invalid_via' });
+    const voters = raw.map(voterOf);
+    if (voters.some((v) => !v)) return reply.code(400).send({ error: 'invalid_voters' });
+    return { voters: await voterStats(pool, [...new Set(voters as string[])], via as string | undefined) };
   });
   // { domains: [...] } → every stored month and profile, plus fetch state, for services that mirror the data.
   app.post<{ Body: { domains?: unknown } }>('/internal/v1/traffic', async (request, reply) => {

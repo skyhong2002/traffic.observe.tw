@@ -611,6 +611,7 @@ export const TAG_MESSAGES: Record<string, string> = {
   not_admin: '只有管理員可以覆寫標籤。',
   rate_limited: '操作太頻繁，請一分鐘後再試。',
   unknown_tag: '這個網站沒有這個標籤。',
+  reserved_tag: '政治傾向不是標籤，由 tag.observe.tw 另外處理。',
 };
 /** Who is looking at a site page, for its tag block. */
 export interface TagViewer {

@@ -127,7 +127,8 @@
 | `POST /internal/v1/traffic` | `{ domains: [...] }`：回傳這些網域存下的所有月份與 profile，以及抓取狀態，給要鏡像資料的服務（tag）用 |
 | `POST /internal/v1/tags` | `{ domains: [...], voter? }`：每個已知網域的所有標籤（含未顯示的）與來源、票數；帶 `voter`（讀者的 Google email）時另回該讀者的票與是否為管理員 |
 | `POST /internal/v1/tags/vote`、`/propose`、`/admin` | `{ voter, domain, tag, vote: 1 \| -1 \| 0 }`、`{ voter, domain, tag }`、`{ voter, domain, tag, action: set \| hide \| release }`：代讀者投票、新增標籤、管理員覆寫；回傳該網域更新後的標籤 |
-| `PUT /internal/v1/tags/ai` | `{ sites: [{ domain, tags: [...], reason? }] }`（最多 500 個）：以這份清單**取代**該服務對這些網域的 AI 初判；未知網域列在 `skipped` |
+| `PUT /internal/v1/tags/ai` | `{ sites: [{ domain, tags: [標籤 \| { tag, reason? }], reason? }] }`（最多 500 個）：以這份清單**取代**該服務對這些網域的 AI 初判；每個標籤可以各帶理由，沒有時用網站的 `reason`；未知網域列在 `skipped`，政治傾向的標籤直接略過 |
+| `POST /internal/v1/tags/voters` | `{ voters: [email...], via? }`（最多 500 個）：每位投票者目前有效的票數與最後投票時間；`via`（例如 `blog`）只算經該服務投的票 |
 
 ## 從 tag 接手（順序很重要，兩邊絕不能同時打 Similarweb）
 
@@ -156,6 +157,8 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 - 管理員對單一標籤「指定顯示」或「隱藏」優先於上述規則，「解除覆寫」交回投票。
 
 排行、標籤概況、網站頁與 API 的 `topics` 都是套用規則後顯示的標籤；`/site/<domain>/edit/` 與 `/sites/` 批次管理改的是編輯清單（`baseTopics`）。網站頁的「標籤」區塊列出每個標籤的來源與票數，登入後可同意、不同意、收回或新增，管理員另有覆寫按鈕；表單只接受本站 `Origin`。每個帳號每分鐘最多 30 次異動（網頁與服務合計）。公開 API `/api/v1/tags/<domain>` 只回票數，不回投票者。其他服務經 `/internal/v1/tags*` 代讀者投票，投票者是該服務登入的 Google email。
+
+政治傾向不是標籤：「藍」「綠」「藍營」「綠營」「藍營傾向（媒體）」「綠營傾向（媒體）」不能由讀者新增、管理員指定顯示或 AI 初判送入（`RESERVED_TAGS`），由 tag.observe.tw 另外管理。2026-10-24 依使用者決定，從編輯清單移除「藍」（14 個網域）與「綠」（19 個網域），並把「內容」（13 個網域）原地併入「內容農場」，共 46 個網域、其他標籤與順序不變；「新聞 (Only)」「財經 (其他)」保留原寫法，「新聞」與「新聞 (Only)」不合併。備份與異動清單在 `data/tags-cleanup-20261024/`。
 
 `tools/import-blog-tags.ts` 從 blog 資料庫複製部落格類型（類型代碼換成名稱，例如 food → 美食；網域取 `canonical_host`）、讀者新增與投票，可重複執行，只記錄新的列。2026-10-24 匯入 479 個已驗證部落格的 876 筆 AI 初判與 3 票，網域全部對得上。
 

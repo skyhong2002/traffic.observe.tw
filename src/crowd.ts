@@ -129,6 +129,9 @@ export function cleanTag(text: unknown, known: Iterable<string> = []): string | 
   for (const k of known) if (k.toLowerCase() === lower) return k;
   return tag;
 }
+/** Political leaning is not a tag (2026-10-24): tag.observe.tw keeps it. Readers, admins and AI cannot add these here. */
+export const RESERVED_TAGS = new Set(['藍', '綠', '藍營', '綠營', '藍營傾向', '綠營傾向', '藍營傾向媒體', '綠營傾向媒體']);
+const RESERVED = () => new TagError('reserved_tag', '政治傾向不是標籤，由 tag.observe.tw 另外處理。');
 /** A verified Google email, lower case; services pass their signed-in reader's. */
 export function voterOf(raw: unknown): string | null {
   if (typeof raw !== 'string' || raw.length > 255) return null;
@@ -183,6 +186,7 @@ export async function tagAction(pool: Pool, input: ActionInput) {
   if (kind === 'admin' && !['set', 'hide', 'release'].includes(input.value as string))
     throw new TagError('invalid_action', '管理動作只能是指定顯示、隱藏或解除覆寫。');
   if (kind === 'admin' && !input.admin) throw new TagError('not_admin', '只有管理員可以覆寫標籤。', 403);
+  if (RESERVED_TAGS.has(tag) && (kind === 'propose' || input.value === 'set')) throw RESERVED();
   if (!allowWrite(voter)) throw new TagError('rate_limited', '操作太頻繁，請一分鐘後再試。', 429);
   const conn = await pool.getConnection();
   try {
@@ -242,13 +246,19 @@ export async function tagAction(pool: Pool, input: ActionInput) {
  * A service's AI suggestions, replacing what that service suggested before for each listed domain
  * (other services' suggestions, reader tags and admin overrides stay). Returns how many rows changed.
  */
-export async function setAiTags(pool: Pool, requester: string, sites: Array<{ domain: string; tags: string[]; reason: string | null }>) {
+export async function setAiTags(
+  pool: Pool,
+  requester: string,
+  sites: Array<{ domain: string; tags: Array<{ tag: string; reason: string | null }> }>,
+) {
   const actor = `service:${requester}`;
   const conn = await pool.getConnection();
   let changed = 0;
   try {
     await conn.beginTransaction();
-    for (const { domain, tags, reason } of [...sites].sort((a, b) => a.domain.localeCompare(b.domain))) {
+    for (const { domain, tags: suggested } of [...sites].sort((a, b) => a.domain.localeCompare(b.domain))) {
+      const tags = suggested.map((t) => t.tag);
+      const reasonOf = (tag: string) => suggested.find((t) => t.tag === tag)?.reason ?? null;
       const old = await rows<{ tag: string }>(
         conn,
         "SELECT tag FROM tag_assignments WHERE domain = ? AND source = 'ai' AND actor = ? FOR UPDATE",
@@ -267,7 +277,7 @@ export async function setAiTags(pool: Pool, requester: string, sites: Array<{ do
           `INSERT INTO tag_assignments (domain, tag, source, status, reason, actor, created_at, updated_at)
           VALUES (?, ?, 'ai', 'active', ?, ?, UTC_TIMESTAMP(), UTC_TIMESTAMP())
           ON DUPLICATE KEY UPDATE status = 'active', reason = VALUES(reason), actor = VALUES(actor), updated_at = UTC_TIMESTAMP()`,
-          [domain, tag, reason, actor],
+          [domain, tag, reasonOf(tag), actor],
         );
       for (const [action, list] of [
         ['ai-add', added],
@@ -280,7 +290,7 @@ export async function setAiTags(pool: Pool, requester: string, sites: Array<{ do
             action,
             domain,
             tag,
-            JSON.stringify({ reason }),
+            JSON.stringify({ reason: reasonOf(tag) }),
           ]);
       changed += added.length + gone.length;
     }
@@ -292,4 +302,19 @@ export async function setAiTags(pool: Pool, requester: string, sites: Array<{ do
   } finally {
     conn.release();
   }
+}
+
+/** How many tag votes each of these voters has standing, and when they last voted; only those cast via `via` when given. */
+export async function voterStats(pool: Pick<Pool, 'query'>, voters: string[], via?: string) {
+  const out: Record<string, { votes: number; lastAt: string | null }> = Object.fromEntries(
+    voters.map((v) => [v, { votes: 0, lastAt: null }]),
+  );
+  if (!voters.length) return out;
+  const list = await rows<{ voter: string; votes: number; lastAt: Date }>(
+    pool,
+    `SELECT voter, COUNT(*) AS votes, MAX(at) AS lastAt FROM tag_votes WHERE voter IN (?) ${via ? 'AND via = ?' : ''} GROUP BY voter`,
+    via ? [voters, via] : [voters],
+  );
+  for (const r of list) out[r.voter] = { votes: Number(r.votes), lastAt: r.lastAt.toISOString() };
+  return out;
 }

@@ -762,6 +762,34 @@ describe.skipIf(!url)('with a database', () => {
     expect((await rows<{ n: number }>(pool, 'SELECT COUNT(*) AS n FROM tag_log'))[0].n).toBeGreaterThan(10);
   });
 
+  it('keeps political leaning out of tags, stores a reason per AI tag and counts votes per voter', async () => {
+    await pool.query(
+      "INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ('blog', 'food.blog', 'watch', NOW(), 7)",
+    );
+    const server = app();
+    const call = (url: string, payload: object, method: 'POST' | 'PUT' = 'POST') =>
+      server.inject({ method, url, headers: { authorization: `Bearer ${TOKEN}` }, payload });
+    const ai = await call(
+      '/internal/v1/tags/ai',
+      { sites: [{ domain: 'food.blog', reason: '全站', tags: [{ tag: '美食', reason: '食記' }, '旅遊', '藍營'] }] },
+      'PUT',
+    );
+    expect(ai.json()).toMatchObject({ sites: 1, changed: 2 });
+    expect(await rows(pool, "SELECT tag, reason FROM tag_assignments WHERE source = 'ai' ORDER BY tag")).toEqual([
+      { tag: '旅遊', reason: '全站' },
+      { tag: '美食', reason: '食記' },
+    ]);
+    const refused = await call('/internal/v1/tags/propose', { voter: 'a@gmail.com', domain: 'food.blog', tag: '綠' });
+    expect([refused.statusCode, refused.json().error]).toEqual([400, 'reserved_tag']);
+    await call('/internal/v1/tags/vote', { voter: 'a@gmail.com', domain: 'food.blog', tag: '美食', vote: 1 });
+    await call('/internal/v1/tags/propose', { voter: 'a@gmail.com', domain: 'food.blog', tag: '咖啡' });
+    const stats = (await call('/internal/v1/tags/voters', { voters: ['A@gmail.com', 'b@gmail.com'], via: 'blog' })).json().voters;
+    expect(stats['a@gmail.com'].votes).toBe(2);
+    expect(stats['b@gmail.com']).toEqual({ votes: 0, lastAt: null });
+    expect((await call('/internal/v1/tags/voters', { voters: ['a@gmail.com'], via: 'web' })).json().voters['a@gmail.com'].votes).toBe(0);
+    expect((await call('/internal/v1/tags/voters', { voters: ['nobody'] })).statusCode).toBe(400);
+  });
+
   it('fetches Cloudflare Radar for every watched domain once a day and serves the periods', async () => {
     const now = new Date('2026-10-21T19:35:00Z');
     await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
