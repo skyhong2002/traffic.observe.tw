@@ -195,10 +195,11 @@ export function buildApp(
     });
     const placed = ranking(compared, topic);
     const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
-    return { months, month, from, show, topics, topic, exclude, source, sources, list: placed };
+    const unit: 'share' | 'count' = query.unit === 'count' ? 'count' : 'share';
+    return { months, month, from, show, unit, topics, topic, exclude, source, sources, list: placed };
   };
 
-  type RankingQuery = { month?: string; from?: string; show?: string; topic?: string; exclude?: string; source?: string };
+  type RankingQuery = { month?: string; from?: string; show?: string; unit?: string; topic?: string; exclude?: string; source?: string };
   let historyCache: { at: number; data: Promise<History> } | null = null;
   const history = () => {
     if (historyCache && Date.now() - historyCache.at < HISTORY_MS) return historyCache.data;
@@ -447,7 +448,11 @@ export function buildApp(
     const r = await rankingFor({ ...request.query, exclude: request.query.exclude ?? DEFAULT_EXCLUDE.join(',') });
     reply.type('text/html; charset=utf-8');
     return r
-      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude, { from: r.from, show: r.show })
+      ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude, {
+          from: r.from,
+          show: r.show,
+          unit: r.unit,
+        })
       : rankingPage('', [], [], null, []);
   });
   app.get<{ Querystring: { topic?: string } }>('/tag/', async (request, reply) => {

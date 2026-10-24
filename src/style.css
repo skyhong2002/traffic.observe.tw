@@ -1913,3 +1913,41 @@ svg .cross {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+/* A switch of plain links (toggle): the label, then the choices as one segmented control. */
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  padding: 3px;
+  border: 1px solid var(--grid);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.seg span {
+  padding: 0 8px 0 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.seg a {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 12px;
+  border-radius: 6px;
+  color: var(--ink-2);
+}
+.seg a:hover {
+  color: var(--ink);
+  text-decoration: none;
+}
+.seg a[aria-current="true"] {
+  background: #3f3f46;
+  color: #fff;
+  font-weight: 500;
+}
+.table-note {
+  margin-top: 12px;
+}

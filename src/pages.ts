@@ -215,6 +215,11 @@ export function chipRow(label: string, all: Omit<Chip, 'count'>, items: Chip[], 
       : ''
   }${note ? `<span class="chip-note">${note}</span>` : ''}</nav>`;
 }
+/** A two- or three-way switch of plain links (works without JavaScript): [text, href, on, tooltip]. */
+export const toggle = (label: string, options: Array<[string, string, boolean, string]>) =>
+  `<nav class="seg" aria-label="${label}"><span>${label}</span>${options
+    .map(([text, href, on, hint]) => `<a href="${html(href)}" title="${html(hint)}"${on ? ' aria-current="true"' : ''}>${text}</a>`)
+    .join('')}</nav>`;
 /** What one click on a tag chip does: off → only this tag → leave it out → off. */
 export const TAG_CHIP_NOTE = '按一下只看該標籤，再按一下排除，第三下取消';
 
@@ -241,16 +246,23 @@ export function rankingPage(
   source: string | null = null,
   sources: Array<{ requester: string; domains: number }> = [],
   exclude: string[] = [],
-  { from = null, show = 'share' }: { from?: string | null; show?: 'share' | 'change' } = {},
+  { from = null, show = 'share', unit = 'share' }: { from?: string | null; show?: 'share' | 'change'; unit?: 'share' | 'count' } = {},
 ) {
   // Choosing a value reloads the page; the button is there for browsers without JavaScript.
   const select = (name: string, label: string, options: string) =>
     `<label class="select-field"><span>${label}</span><select name="${name}" onchange="this.form.submit()">${options}</select></label>`;
   // Month and search sit in one row; tags and sources are chip rows of plain links, keeping the other choices.
-  const tableHref = (q: { topic?: string | null; source?: string | null; exclude?: string[] }) => {
+  const tableHref = (q: {
+    topic?: string | null;
+    source?: string | null;
+    exclude?: string[];
+    unit?: 'share' | 'count';
+    show?: 'share' | 'change';
+  }) => {
     const p = new URLSearchParams({ month });
     if (from) p.set('from', from);
-    if (show === 'change') p.set('show', 'change');
+    if ((q.show ?? show) === 'change') p.set('show', 'change');
+    if ((q.unit ?? unit) === 'count') p.set('unit', 'count');
     const t = q.topic === undefined ? topic : q.topic;
     const src = q.source === undefined ? source : q.source;
     const out = q.exclude ?? exclude;
@@ -280,13 +292,19 @@ export function rankingPage(
             .filter((m) => m < month)
             .map((m) => `<option value="${m}"${m === from ? ' selected' : ''}>${monthLong(m)}</option>`)
             .join(''),
-        )}${select(
-          'show',
-          '占比欄',
-          `<option value="share"${show === 'share' ? ' selected' : ''}>當月占比</option><option value="change"${show === 'change' ? ' selected' : ''}>與比較月份的差距</option>`,
         )}`
       : ''
-  }${topic ? `<input type="hidden" name="topic" value="${html(topic)}">` : ''}<input type="hidden" name="exclude" value="${html(exclude.join(','))}">${source ? `<input type="hidden" name="source" value="${html(source)}">` : ''}<noscript><button type="submit">套用</button></noscript></form>`;
+  }${toggle('數值', [
+    ['%', tableHref({ unit: 'share' }), unit === 'share', '各來源占造訪的比例'],
+    ['次數', tableHref({ unit: 'count' }), unit === 'count', '造訪量 × 占比換算的造訪次數'],
+  ])}${
+    from
+      ? toggle('顯示', [
+          ['當月', tableHref({ show: 'share' }), show === 'share', '這個月份的數值'],
+          ['差距', tableHref({ show: 'change' }), show === 'change', '與比較月份相差多少'],
+        ])
+      : ''
+  }${show === 'change' ? '<input type="hidden" name="show" value="change">' : ''}${unit === 'count' ? '<input type="hidden" name="unit" value="count">' : ''}${topic ? `<input type="hidden" name="topic" value="${html(topic)}">` : ''}<input type="hidden" name="exclude" value="${html(exclude.join(','))}">${source ? `<input type="hidden" name="source" value="${html(source)}">` : ''}<noscript><button type="submit">套用</button></noscript></form>`;
   const chips = `${chipRow(
     '追蹤來源',
     { href: html(tableHref({ source: null })), text: '全部來源', on: !source },
@@ -325,9 +343,9 @@ export function rankingPage(
     now: (s: Row) => number | null;
     before: (s: Row) => number | null;
   }> = [
-    { head: '搜尋占比', title: '自然搜尋占造訪的比例', digits: 1, now: (s) => s.searchShare, before: (s) => s.prevSearchShare },
-    { head: 'AI 占比', title: 'AI 工具導流占造訪的比例', digits: 2, now: (s) => s.aiShare, before: (s) => s.prevAiShare },
-    { head: '台灣', title: '台灣訪客占比', digits: 1, now: (s) => s.taiwanShare, before: (s) => s.prevTaiwanShare ?? null },
+    { head: '搜尋', title: '自然搜尋（不含搜尋廣告）', digits: 1, now: (s) => s.searchShare, before: (s) => s.prevSearchShare },
+    { head: 'AI', title: 'AI 工具導流', digits: 2, now: (s) => s.aiShare, before: (s) => s.prevAiShare },
+    { head: '台灣', title: '台灣訪客', digits: 1, now: (s) => s.taiwanShare, before: (s) => s.prevTaiwanShare ?? null },
     ...TABLE_CHANNELS.map(([key, head]) => {
       const [, , title] = CHANNELS.find(([k]) => k === key) as (typeof CHANNELS)[number];
       return {
@@ -340,10 +358,24 @@ export function rankingPage(
       };
     }),
   ];
-  const shareCell = (now: number | null, before: number | null, digits: number) => {
-    if (show === 'share') return sortCell('num', now, pct(now, now !== null && now > 0 && now < 0.0095 ? 2 : digits));
+  // % shows the share; 次數 the visits it stands for (visits × share). 差距 shows either's change from `from`.
+  const shareCell = (s: Row, c: (typeof shareCols)[number]) => {
+    const now = c.now(s);
+    const before = c.before(s);
+    if (unit === 'count') {
+      const visits = now !== null && s.visits !== null ? s.visits * now : null;
+      if (show === 'share') return volCell(visits);
+      const earlier = before !== null && s.prevVisits !== null ? s.prevVisits * before : null;
+      const change = visits !== null && earlier !== null ? visits - earlier : null;
+      return sortCell(
+        'num',
+        change,
+        change === null ? '' : `<span class="shift">${change < 0 ? '▼' : change > 0 ? '▲' : ''}${vol(Math.abs(change))}</span>`,
+      );
+    }
+    if (show === 'share') return sortCell('num', now, pct(now, now !== null && now > 0 && now < 0.0095 ? 2 : c.digits));
     const change = now !== null && before !== null ? now - before : null;
-    // Bare numbers keep the columns narrow; the note and the heads say they are percentage points.
+    // Bare numbers keep the columns narrow; the note below says they are percentage points.
     return sortCell('num', change, points(change, ''));
   };
   const rowsHtml = list
@@ -362,8 +394,8 @@ export function rankingPage(
           s.topics.join('、'),
           tagLinks(s.topics, (t) => `/#topic=${encodeURIComponent(t)}`),
         )}
-${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>${volCell(s.searchVisits)}${volCell(s.aiVisits)}
-${shareCols.map((c) => shareCell(c.now(s), c.before(s), c.digits)).join('')}</tr>`,
+${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
+${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     )
     .join('');
   const prevHead = from && from !== shiftMonth(month, -1) ? '比較月' : '上月';
@@ -382,19 +414,16 @@ ${shareCols.map((c) => shareCell(c.now(s), c.before(s), c.digits)).join('')}</tr
       toolbar: month ? filters : '',
     },
     `${month ? `<div class="chip-rows">${chips}</div>` : ''}<section class="block"><p class="results-line" data-table-count="ranking" data-total="${list.length}">${html(topic ?? '全部網站')}${exclude.length ? `・排除 ${html(exclude.join('、'))}` : ''}・${list.length} 個網站${sourceNote ? `・${sourceNote}` : ''}</p>
-<p class="note">流量、搜尋S、AI 為每月造訪次數，k、m、b 分別是千、百萬、十億；成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。最後幾欄是各導流來源占造訪的比例${show === 'change' ? `，目前顯示與 ${from ? monthLong(from) : ''} 相差幾個百分點（▲1.2 表示多 1.2 個百分點）` : ''}；直接造訪、社群等來源只有 Similarweb 有，Similarweb 每月只給最新一個月的組成。點表頭可排序。</p>
 ${table(
-  `<th class="rank" aria-sort="ascending" title="名次">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num">流量</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th><th class="num">搜尋S</th><th class="num">AI</th>${shareCols
-    .map(
-      (c) =>
-        `<th class="num" title="${html(c.title)}${show === 'change' ? '，與比較月份相差幾個百分點' : ''}">${c.head}${show === 'change' ? ' ±' : ''}</th>`,
-    )
+  `<th class="rank" aria-sort="ascending" title="名次">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num">流量</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
+    .map((c) => `<th class="num" title="${html(c.title)}">${c.head}${unit === 'share' ? ' %' : ''}${show === 'change' ? ' ±' : ''}</th>`)
     .join('')}`,
   rowsHtml,
   '這個月份沒有資料。',
-  8 + shareCols.length,
+  6 + shareCols.length,
   'ranking',
-)}</section>`,
+)}
+<p class="note table-note">流量與「次數」是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「%」是占全部造訪的比例，「次數」是流量 × 比例換算的造訪次數（搜尋次數即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
     { nav: 'table' },
   );
 }

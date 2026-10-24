@@ -539,12 +539,17 @@ describe.skipIf(!url)('with a database', () => {
     expect(compared.from).toBe('202608');
     expect(compared.sites[0]).toMatchObject({ channels: { SearchOrganic: 0.3 }, prevChannels: { SearchOrganic: 0.2, Mail: 0.05 } });
     const shares = (await server.inject('/table/?month=202609')).body;
-    expect(shares).toContain('>郵件</th>');
+    expect(shares).toContain('>郵件 %</th>');
+    expect(shares).toContain('aria-label="數值"');
+    expect(shares.indexOf('</table>')).toBeLessThan(shares.indexOf('table-note'));
     expect(shares).toContain('30.0%');
     const changes = (await server.inject('/table/?month=202609&from=202608&show=change')).body;
-    expect(changes).toContain('郵件 ±');
+    expect(changes).toContain('郵件 % ±');
     expect(changes).toContain('>▲10.0</span>');
     expect(changes).toContain('>▼5.0</span>');
+    // 次數: visits × share (search 1.2m × 30%), and its change from 202608 (1.1m × 20%).
+    expect((await server.inject('/table/?month=202609&unit=count')).body).toContain('360.0<span class="unit">k</span>');
+    expect((await server.inject('/table/?month=202609&unit=count&show=change')).body).toContain('▲140.0<span class="unit">k</span>');
     const csv = (await server.inject('/api/v1/rankings.csv?month=202609')).body.split('\n');
     expect(csv[0]).toContain('電子郵件占比差距');
     expect(csv[1]).toContain('202608');
