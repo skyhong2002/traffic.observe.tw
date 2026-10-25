@@ -127,6 +127,8 @@ export const httpGet: HopGet = (url, maxBytes) =>
     const request = (url.protocol === 'https:' ? https : http).get(url, {
       lookup: publicLookup as never,
       agent: false,
+      // Some sites (hk.finance.yahoo.com) send more than Node's default 16 KiB of headers.
+      maxHeaderSize: 64 * 1024,
       headers: {
         'user-agent': USER_AGENT,
         accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
@@ -189,7 +191,18 @@ function charsetOf(contentType: string, body: Buffer) {
 export type Page = { url: string; status: number; headers: http.IncomingHttpHeaders; html: string };
 export type PageFetcher = (domain: string) => Promise<Page>;
 
-/** The homepage of a domain: https first, plain http when https cannot connect. */
+/**
+ * Where a domain's homepage may be, in order. Domains are stored without `www.` (publicDomain), and many sites
+ * (gov.taipei, hilife.com.tw) have DNS only for www, so www is tried when the bare name cannot connect; plain http last.
+ */
+export const homepageUrls = (domain: string) => [
+  `https://${domain}/`,
+  `https://www.${domain}/`,
+  `http://${domain}/`,
+  `http://www.${domain}/`,
+];
+
+/** The homepage of a domain: the first of homepageUrls that connects. */
 export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
   return async (domain) => {
     const follow = async (start: URL): Promise<Page> => {
@@ -213,12 +226,15 @@ export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
       }
       throw new ScanFailure('http-error');
     };
-    try {
-      return await follow(new URL(`https://${domain}/`));
-    } catch (error) {
-      if (!(error instanceof ScanFailure) || !['network', 'timeout'].includes(error.code)) throw error;
-      return await follow(new URL(`http://${domain}/`));
-    }
+    let failure: unknown;
+    for (const url of homepageUrls(domain))
+      try {
+        return await follow(new URL(url));
+      } catch (error) {
+        if (!(error instanceof ScanFailure) || !['network', 'timeout'].includes(error.code)) throw error;
+        failure = error;
+      }
+    throw failure;
   };
 }
 

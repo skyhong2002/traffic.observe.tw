@@ -2,7 +2,7 @@ import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { type Browser, chromium, type Response } from 'playwright-core';
 import { MAX_HTML } from './tech.ts';
-import { isPublicAddress, type Page, type PageFetcher, ScanFailure, USER_AGENT } from './tech-scan.ts';
+import { homepageUrls, isPublicAddress, type Page, type PageFetcher, ScanFailure, USER_AGENT } from './tech-scan.ts';
 
 // The second try for a homepage that answered a plain request with a WAF page or 429: Playwright's Chromium headless
 // shell (the build ~/.cache/ms-playwright has for playwright-core 1.64.1), which runs the challenge's JavaScript as a
@@ -10,7 +10,7 @@ import { isPublicAddress, type Page, type PageFetcher, ScanFailure, USER_AGENT }
 // (a page cannot reach this machine or the LAN), and images, media, fonts and stylesheets are not loaded: the rules
 // read the markup, scripts and headers, not what they draw.
 
-const NAVIGATION_TIMEOUT = 30_000;
+const NAVIGATION_TIMEOUT = 15_000;
 /** How long a challenge page may take to hand over to the site. */
 const SETTLE_MS = 12_000;
 const SKIPPED = new Set(['image', 'media', 'font', 'stylesheet']);
@@ -63,13 +63,15 @@ export function browserFetcher({ launch = () => chromium.launch({ headless: true
       page.on('response', (r) => {
         if (r.request().isNavigationRequest() && r.frame() === page.mainFrame()) document = r;
       });
-      try {
-        await page.goto(`https://${domain}/`, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT });
-      } catch {
-        await page.goto(`http://${domain}/`, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT }).catch(() => {
-          throw new ScanFailure('network');
-        });
+      let reached = false;
+      for (const url of homepageUrls(domain)) {
+        reached = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: NAVIGATION_TIMEOUT }).then(
+          () => true,
+          () => false,
+        );
+        if (reached) break;
       }
+      if (!reached) throw new ScanFailure('network');
       const until = Date.now() + SETTLE_MS;
       while (Date.now() < until && CHALLENGE_TITLE.test((await page.title().catch(() => '')).trim())) await page.waitForTimeout(1000);
       await page.waitForLoadState('load', { timeout: 5000 }).catch(() => undefined);

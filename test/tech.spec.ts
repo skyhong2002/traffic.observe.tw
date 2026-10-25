@@ -114,6 +114,14 @@ describe('fetching a homepage', () => {
     expect(o).toMatchObject({ status: 'detected', sourceUrl: 'https://www.a.example/home', httpStatus: 200 });
     expect(seen).toEqual(['https://a.example/', 'https://www.a.example/home?x=1']);
   });
+  it('tries www when the bare domain does not resolve', async () => {
+    const { get, seen } = net({ 'https://www.g.example/': { body: '<meta name="generator" content="Hugo 0.1">' } });
+    expect(await scanDomain('g.example', rules, homepageFetcher(get), at)).toMatchObject({
+      status: 'detected',
+      sourceUrl: 'https://www.g.example/',
+    });
+    expect(seen).toEqual(['https://g.example/', 'https://www.g.example/']);
+  });
   it('falls back to http when https cannot connect', async () => {
     const { get } = net({ 'http://c.example/': { body: '<meta name="generator" content="Hugo 0.1">' } });
     expect(await scanDomain('c.example', rules, homepageFetcher(get), at)).toMatchObject({
