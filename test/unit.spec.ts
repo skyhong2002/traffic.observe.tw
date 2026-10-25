@@ -26,7 +26,7 @@ const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => 
 });
 
 describe('dueDomains', () => {
-  it('orders by requester priority, never tried first, then the oldest success', () => {
+  it('orders never tried first, each group by requester priority, then the oldest success', () => {
     const t = now.getTime();
     const due = dueDomains(
       [
@@ -38,7 +38,7 @@ describe('dueDomains', () => {
       ],
       now,
     );
-    expect(due).toEqual(['tag-new.tw', 'tag-old.tw', 'blog.tw', 'sheet-new.tw', 'sheet-old.tw']);
+    expect(due).toEqual(['tag-new.tw', 'blog.tw', 'sheet-new.tw', 'tag-old.tw', 'sheet-old.tw']);
   });
 
   it('skips fresh domains, backoffs and answered one-off lookups', () => {
