@@ -61,8 +61,10 @@ export const previousMonth = (now: Date) => {
  * domain whose last success is older than its refresh interval; or a watched
  * domain still missing last month's profile (Similarweb only ever returns the
  * latest month's channels and countries, so a month not caught is lost), tried
- * every three days. Domains in backoff (next_attempt_at) wait. Order: never
- * tried first, each group by requester priority, then the oldest success.
+ * every three days. Domains in backoff (next_attempt_at) wait. Order: watched
+ * domains tried before but still missing last month first (that month is lost
+ * once the next one is out), then never tried, then the rest; each group by
+ * requester priority, then the oldest success.
  */
 export function dueQueue(candidates: Candidate[], now = new Date()) {
   const t = now.getTime();
@@ -74,15 +76,13 @@ export function dueQueue(candidates: Candidate[], now = new Date()) {
     if (t - c.lastSuccess >= c.refreshDays * DAY) return c.lastSuccess ? 'refresh' : 'new';
     return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
   };
+  const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.refreshDays !== null && (c.latestProfile ?? '') < last ? 0 : 2);
   return candidates
     .map((c) => ({ ...c, reason: reason(c) }))
     .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
     .sort(
       (a, b) =>
-        Number(a.lastAttempt > 0) - Number(b.lastAttempt > 0) ||
-        a.tier - b.tier ||
-        Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) ||
-        a.lastSuccess - b.lastSuccess,
+        group(a) - group(b) || a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess,
     );
 }
 /** Why a domain is due: never fetched, past its refresh interval, last month's profile still missing, or a one-off lookup. */

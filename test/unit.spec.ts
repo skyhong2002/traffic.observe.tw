@@ -26,19 +26,27 @@ const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => 
 });
 
 describe('dueDomains', () => {
-  it('orders never tried first, each group by requester priority, then the oldest success', () => {
+  it('orders missing last month first, then never tried, each group by requester priority, then the oldest success', () => {
     const t = now.getTime();
+    const month = previousMonth(now);
     const due = dueDomains(
       [
-        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, lastAttempt: t - 40 * DAY, refreshDays: 30 }),
+        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, lastAttempt: t - 40 * DAY, refreshDays: 30, latestProfile: month }),
+        candidate('sheet-behind.tw', {
+          tier: 2,
+          lastSuccess: t - 5 * DAY,
+          lastAttempt: t - 5 * DAY,
+          refreshDays: 30,
+          latestProfile: '202608',
+        }),
         candidate('sheet-new.tw', { tier: 2, refreshDays: 30 }),
-        candidate('tag-old.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY }),
+        candidate('tag-old.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY, latestProfile: month }),
         candidate('tag-new.tw'),
         candidate('blog.tw', { tier: 1, refreshDays: null, pendingSince: t - DAY }),
       ],
       now,
     );
-    expect(due).toEqual(['tag-new.tw', 'blog.tw', 'sheet-new.tw', 'tag-old.tw', 'sheet-old.tw']);
+    expect(due).toEqual(['sheet-behind.tw', 'tag-new.tw', 'blog.tw', 'sheet-new.tw', 'tag-old.tw', 'sheet-old.tw']);
   });
 
   it('skips fresh domains, backoffs and answered one-off lookups', () => {
@@ -65,7 +73,11 @@ describe('dueDomains', () => {
     const t = now.getTime();
     const config = { ...runConfig({ TRAFFIC_RUN_BUDGET: '2' }) };
     const queue = fetchQueue(
-      [candidate('a.tw'), candidate('b.tw'), candidate('c.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY })],
+      [
+        candidate('a.tw'),
+        candidate('b.tw'),
+        candidate('c.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY, latestProfile: previousMonth(now) }),
+      ],
       config,
       null,
       now,
