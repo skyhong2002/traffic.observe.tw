@@ -26,18 +26,19 @@ const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => 
 });
 
 describe('dueDomains', () => {
-  it('orders by requester priority, never fetched first, then the oldest success', () => {
+  it('orders by requester priority, never tried first, then the oldest success', () => {
     const t = now.getTime();
     const due = dueDomains(
       [
-        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, refreshDays: 30 }),
+        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, lastAttempt: t - 40 * DAY, refreshDays: 30 }),
+        candidate('sheet-new.tw', { tier: 2, refreshDays: 30 }),
         candidate('tag-old.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY }),
         candidate('tag-new.tw'),
         candidate('blog.tw', { tier: 1, refreshDays: null, pendingSince: t - DAY }),
       ],
       now,
     );
-    expect(due).toEqual(['tag-new.tw', 'tag-old.tw', 'blog.tw', 'sheet-old.tw']);
+    expect(due).toEqual(['tag-new.tw', 'tag-old.tw', 'blog.tw', 'sheet-new.tw', 'sheet-old.tw']);
   });
 
   it('skips fresh domains, backoffs and answered one-off lookups', () => {
@@ -70,9 +71,9 @@ describe('dueDomains', () => {
       now,
     );
     expect(queue.map((e) => [e.domain, e.position, e.reason, e.requester, e.expectedAt])).toEqual([
-      ['a.tw', 1, 'new', 'manual', '2026-10-21T10:35:00.000Z'],
-      ['b.tw', 2, 'new', 'manual', '2026-10-21T10:35:00.000Z'],
-      ['c.tw', 3, 'refresh', 'manual', '2026-10-21T11:35:00.000Z'],
+      ['a.tw', 1, 'new', 'tag', '2026-10-21T10:35:00.000Z'],
+      ['b.tw', 2, 'new', 'tag', '2026-10-21T10:35:00.000Z'],
+      ['c.tw', 3, 'refresh', 'tag', '2026-10-21T11:35:00.000Z'],
     ]);
     const cooling = new Date('2026-10-21T10:50:00Z');
     expect(fetchQueue([candidate('a.tw')], config, cooling, now)[0].expectedAt).toBe('2026-10-21T11:35:00.000Z');
@@ -123,6 +124,13 @@ describe('lookupStatus', () => {
     expect(lookupStatus('similar_sites', asked, state({ last_response_at: later, result: { similarSites: [] } }))).toBe('no-data');
     expect(lookupStatus('traffic', asked, state({ refused_at: later }))).toBe('blocked');
     expect(lookupStatus('traffic', asked, state({ failures: 3 }))).toBe('no-data');
+  });
+
+  it('is answered by a response from the 30 days before it was asked', () => {
+    const before = new Date('2026-10-01T00:00:00Z');
+    expect(lookupStatus('traffic', asked, state({ last_response_at: before, last_success_at: before }))).toBe('ok');
+    const old = new Date('2026-09-01T00:00:00Z');
+    expect(lookupStatus('traffic', asked, state({ last_response_at: old, last_success_at: old }))).toBe('pending');
   });
 });
 

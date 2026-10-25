@@ -180,6 +180,27 @@ describe.skipIf(!url)('with a database', () => {
       traffic: 'ok',
       similar_sites: 'ok',
     });
+
+    // A lookup for a domain fetched in the last 30 days is answered from what is stored, not sent again.
+    const { request: watched } = fakeFetch();
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES (?, ?, ?, ?, ?)', [
+      'tag',
+      'w.com.tw',
+      'watch',
+      new Date(),
+      30,
+    ]);
+    await runOnce(pool, { config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }), request: watched, pauseMs: 0, now: () => new Date() });
+    const asked = await server.inject({
+      method: 'POST',
+      url: '/internal/similarweb/requests',
+      headers: auth,
+      payload: { domain: 'w.com.tw', kind: 'similar_sites' },
+    });
+    expect(asked.json()).toMatchObject({ status: 'ok' });
+    const resent = fakeFetch();
+    await runOnce(pool, { config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }), request: resent.request, pauseMs: 0, now: () => new Date() });
+    expect(resent.sent).toEqual([]);
     await server.close();
   });
 
@@ -626,13 +647,14 @@ describe.skipIf(!url)('with a database', () => {
         { domain: 'y.com.tw', refresh_days: 30, added_by: 'sky9109@gmail.com', note: '吉進要的' },
       ],
     );
-    // Hand-added domains go first.
+    // Hand-added domains come after tag's.
     await pool.query(
       "INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ('tag', 'a.com.tw', 'watch', NOW(), 7)",
     );
     const { request, sent } = fakeFetch();
-    await run(pool, request, 2);
-    expect(sent.sort()).toEqual(['x.com.tw', 'y.com.tw']);
+    await run(pool, request, 3);
+    expect(sent[0]).toBe('a.com.tw');
+    expect(sent.slice(1).sort()).toEqual(['x.com.tw', 'y.com.tw']);
     expect((await server.inject({ url: '/watch/', headers: { cookie } })).body).toContain('1.200');
 
     expect((await form(cookie, '/watch/remove', { domain: 'x.com.tw' })).headers.location).toBe('/watch/?removed=x.com.tw');

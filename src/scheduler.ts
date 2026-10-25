@@ -14,6 +14,8 @@ const CLAIM = 15 * 60_000;
 const MAX_FAILURES = 3;
 /** A domain that is missing last month's profile is retried this often until it appears. */
 const CATCH_UP = 3 * DAY;
+/** A one-off lookup is answered by any response this recent, even one fetched before it was asked. */
+export const LOOKUP_FRESH_DAYS = 30;
 
 export function runConfig(env: Record<string, string | undefined> = process.env) {
   const num = (name: string, fallback: number) => {
@@ -25,8 +27,8 @@ export function runConfig(env: Record<string, string | undefined> = process.env)
     budget: num('TRAFFIC_RUN_BUDGET', 0),
     /** After a refusal nothing is sent for this long (tag's limit lifted after ~11 minutes). */
     cooldownMinutes: num('TRAFFIC_REFUSAL_COOLDOWN_MINUTES', 50),
-    /** Requesters in priority order; earlier ones are fetched first. Editors' hand-added domains are few and wanted now. */
-    priority: (env.TRAFFIC_PRIORITY || 'manual,tag,blog,sheet').split(',').map((s) => s.trim()),
+    /** Requesters in priority order; earlier ones are fetched first. Editors' hand-added domains (manual) come last. */
+    priority: (env.TRAFFIC_PRIORITY || 'tag,blog,sheet,manual').split(',').map((s) => s.trim()),
     /** One-off lookups a requester may submit per Taipei day. */
     submitPerDay: num('TRAFFIC_SUBMIT_PER_DAY', 200),
     /** The worker runs once an hour at this minute (:35 is where tag's job ran). */
@@ -60,7 +62,7 @@ export const previousMonth = (now: Date) => {
  * domain still missing last month's profile (Similarweb only ever returns the
  * latest month's channels and countries, so a month not caught is lost), tried
  * every three days. Domains in backoff (next_attempt_at) wait. Order: requester
- * priority, never fetched first, then the oldest success.
+ * priority, never tried first, then the oldest success.
  */
 export function dueQueue(candidates: Candidate[], now = new Date()) {
   const t = now.getTime();
@@ -75,7 +77,13 @@ export function dueQueue(candidates: Candidate[], now = new Date()) {
   return candidates
     .map((c) => ({ ...c, reason: reason(c) }))
     .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
-    .sort((a, b) => a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess);
+    .sort(
+      (a, b) =>
+        a.tier - b.tier ||
+        Number(a.lastAttempt > 0) - Number(b.lastAttempt > 0) ||
+        Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) ||
+        a.lastSuccess - b.lastSuccess,
+    );
 }
 /** Why a domain is due: never fetched, past its refresh interval, last month's profile still missing, or a one-off lookup. */
 export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
@@ -118,7 +126,7 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
     };
     c.tier = Math.min(c.tier, tier);
     if (r.kind === 'watch' && r.refresh_days !== null) c.refreshDays = Math.min(c.refreshDays ?? Infinity, r.refresh_days);
-    if (r.kind !== 'watch' && time(r.last_response_at) < r.requested_at.getTime())
+    if (r.kind !== 'watch' && time(r.last_response_at) < r.requested_at.getTime() - LOOKUP_FRESH_DAYS * DAY)
       c.pendingSince = Math.min(c.pendingSince ?? Infinity, r.requested_at.getTime());
     out.set(r.domain, c);
   }

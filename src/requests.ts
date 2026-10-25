@@ -1,18 +1,17 @@
 import { type Pool, rows } from './db.ts';
-import { type RunConfig, runConfig } from './scheduler.ts';
+import { LOOKUP_FRESH_DAYS, type RunConfig, runConfig } from './scheduler.ts';
 import { type FetchSummary, publicDomain, type TrafficProfile } from './similarweb.ts';
 import { loadTraffic } from './store.ts';
 
 // What services ask for. A standing list (`watch`, e.g. tag's outlets) is
 // refreshed on its interval; a one-off lookup (`traffic`, `similar_sites`, as
 // blog submits them) is fetched once and again only when resubmitted after 30
-// days. The request/result shape is the one tag served at /internal/similarweb
+// days; a domain answered in the 30 days before it was asked is not fetched again. The request/result shape is the one tag served at /internal/similarweb
 // (docs/api.md), so blog keeps working unchanged.
 
 export const KINDS = ['traffic', 'similar_sites'] as const;
 export type Kind = (typeof KINDS)[number];
 const DAY = 86_400_000;
-const STALE_DAYS = 30;
 const MAX_WATCH = 5000;
 
 const taipeiDayStart = (now: Date) => {
@@ -36,13 +35,14 @@ const summaryOf = (s: State | undefined) =>
 
 /** pending / ok / no-data / blocked for one lookup, from the domain's fetch state. */
 export function lookupStatus(kind: Kind, requestedAt: Date, s: State | undefined) {
-  const asked = requestedAt.getTime();
+  // A response from the LOOKUP_FRESH_DAYS before the lookup answers it (the scheduler does not fetch it again).
+  const asked = requestedAt.getTime() - LOOKUP_FRESH_DAYS * DAY;
   const at = (d: Date | null | undefined) => d?.getTime() ?? 0;
   if (s && at(s.last_response_at) >= asked) {
     if (kind === 'traffic') return at(s.last_success_at) >= asked ? 'ok' : 'no-data';
     return summaryOf(s)?.similarSites.length ? 'ok' : 'no-data';
   }
-  if (s && at(s.refused_at) >= asked) return 'blocked';
+  if (s && at(s.refused_at) >= requestedAt.getTime()) return 'blocked';
   if (s && s.failures >= 3) return 'no-data';
   return 'pending';
 }
@@ -68,7 +68,10 @@ export async function submitLookup(
   if (existing) {
     const status = lookupStatus(kind, existing.requested_at, s);
     const answered = s?.last_response_at ?? null;
-    const stale = answered && answered >= existing.requested_at && now.getTime() - answered.getTime() > STALE_DAYS * DAY;
+    const stale =
+      answered &&
+      answered.getTime() >= existing.requested_at.getTime() - LOOKUP_FRESH_DAYS * DAY &&
+      now.getTime() - answered.getTime() > LOOKUP_FRESH_DAYS * DAY;
     // A refused domain keeps its wait: resubmitting must not clear a backoff.
     if (!stale || status === 'blocked') return { domain, kind, status, created: false };
   }
@@ -84,7 +87,8 @@ export async function submitLookup(
   );
   // A stale row starts over: its old failures and backoff no longer apply.
   if (existing) await pool.query('UPDATE fetch_state SET failures = 0, next_attempt_at = NULL WHERE domain = ?', [domain]);
-  return { domain, kind, status: 'pending' as const, created: !existing };
+  // A domain answered recently enough is not fetched again: the lookup is answered already.
+  return { domain, kind, status: existing ? ('pending' as const) : lookupStatus(kind, now, s), created: !existing };
 }
 
 /** Every lookup a requester has for a domain, in tag's /internal/similarweb/results shape. */
