@@ -366,6 +366,11 @@ export const ENDPOINTS: Endpoint[] = [
       { name: 'budget', type: 'integer', desc: '每輪上限' },
       { name: 'priority', type: 'string[]', desc: '來源的優先序' },
       { name: 'coolingDownUntil', type: 'string (ISO 時間) | null', desc: '被 Similarweb 拒絕後暫停到何時' },
+      {
+        name: 'lastMonth',
+        type: 'object',
+        desc: 'month：上個月（YYYYMM）；published：Similarweb 是否已給出這個月。未給出前，缺這個月的網域每輪只抽查 1 個',
+      },
       { name: 'watched', type: 'integer', desc: '追蹤中的網域數' },
       { name: 'due', type: 'integer', desc: '目前到期的網域數' },
       {

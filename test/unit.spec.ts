@@ -62,6 +62,14 @@ describe('dueDomains', () => {
     expect(due).toEqual([]);
   });
 
+  it('sends one domain missing last month per run until the month has appeared', () => {
+    const t = now.getTime();
+    const behind = { lastSuccess: t - 5 * DAY, lastAttempt: t - 5 * DAY, latestProfile: '202608' };
+    const list = [candidate('a.tw', behind), candidate('b.tw', behind), candidate('new.tw', { tier: 1 })];
+    expect(dueDomains(list, now, false)).toEqual(['a.tw', 'new.tw']);
+    expect(dueDomains(list, now, true)).toEqual(['a.tw', 'b.tw', 'new.tw']);
+  });
+
   it('retries a watched domain still missing last month every three days', () => {
     const t = now.getTime();
     const base = { lastSuccess: t - 2 * DAY, latestProfile: '202608' };

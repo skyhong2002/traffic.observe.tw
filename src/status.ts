@@ -1,5 +1,5 @@
 import { type Pool, rows } from './db.ts';
-import { type Candidate, coolingDown, dueQueue, loadCandidates, type RunConfig } from './scheduler.ts';
+import { type Candidate, coolingDown, dueQueue, loadCandidates, monthPublished, previousMonth, type RunConfig } from './scheduler.ts';
 
 const HOUR = 3_600_000;
 /** The worker's next run at :runMinute that is not before `from`. */
@@ -15,9 +15,9 @@ function nextRunAt(from: Date, minute: number) {
  * Everything due, in the order it will be sent, with the run expected to send it:
  * batches of `budget`, one per hour from the next run (after a cooldown, if one is on).
  */
-export function fetchQueue(candidates: Candidate[], config: RunConfig, cooling: Date | null, now = new Date()) {
+export function fetchQueue(candidates: Candidate[], config: RunConfig, cooling: Date | null, now = new Date(), published = true) {
   const first = nextRunAt(cooling && cooling > now ? cooling : now, config.runMinute);
-  return dueQueue(candidates, now).map((c, i) => ({
+  return dueQueue(candidates, now, published).map((c, i) => ({
     domain: c.domain,
     position: i + 1,
     requester: config.priority[c.tier] ?? null,
@@ -30,13 +30,17 @@ export type QueueEntry = ReturnType<typeof fetchQueue>[number];
 
 /** The queue alone, for pages that only mark where a domain stands. */
 export async function loadQueue(pool: Pool, config: RunConfig, now = new Date()) {
-  const [candidates, cooling] = await Promise.all([loadCandidates(pool, config), coolingDown(pool, config, now)]);
-  return fetchQueue(candidates, config, cooling, now);
+  const [candidates, cooling, published] = await Promise.all([
+    loadCandidates(pool, config),
+    coolingDown(pool, config, now),
+    monthPublished(pool, now),
+  ]);
+  return fetchQueue(candidates, config, cooling, now, published);
 }
 
 /** Worker health for /status/ and /api/v1/status. */
 export async function serviceStatus(pool: Pool, config: RunConfig, now = new Date()) {
-  const [runs, watchers, sends, candidates, cooling] = await Promise.all([
+  const [runs, watchers, sends, candidates, cooling, published] = await Promise.all([
     rows<{
       id: number;
       started_at: Date;
@@ -57,12 +61,14 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     ]),
     loadCandidates(pool, config),
     coolingDown(pool, config, now),
+    monthPublished(pool, now),
   ]);
-  const queue = fetchQueue(candidates, config, cooling, now);
+  const queue = fetchQueue(candidates, config, cooling, now, published);
   return {
     budget: config.budget,
     priority: config.priority,
     coolingDownUntil: cooling?.toISOString() ?? null,
+    lastMonth: { month: previousMonth(now), published },
     watched: candidates.length,
     due: queue.length,
     queue,
