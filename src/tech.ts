@@ -338,7 +338,7 @@ export const isChallenge = (html: string, headers: Record<string, string | strin
   const head = html.slice(0, 65536);
   return (
     String(headers['cf-mitigated'] ?? '').toLowerCase() === 'challenge' ||
-    /(?:\b_?cf[-_]chl[-_][\w-]+|<title[^>]*>\s*(?:Just a moment|Attention Required!\s*\|\s*Cloudflare))/i.test(head) ||
+    /(?:\b_?cf[-_]chl[-_][\w-]+|<title[^>]*>\s*(?:Just a moment|請稍候|Attention Required!\s*\|\s*Cloudflare))/i.test(head) ||
     /<title[^>]*>\s*(?:Access Denied|Request blocked|Security verification)/i.test(head)
   );
 };

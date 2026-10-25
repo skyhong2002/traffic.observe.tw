@@ -135,6 +135,7 @@ describe('fetching a homepage', () => {
     expect(await scan({ status: 429 })).toMatchObject({ status: 'blocked', errorCode: 'rate-limit' });
     expect(await scan({ body: '<title>Just a moment...</title>' })).toMatchObject({ status: 'blocked', errorCode: 'waf' });
     expect(await scan({ body: '<script>window._cf_chl_opt={cvId:"3"}</script>' })).toMatchObject({ status: 'blocked', errorCode: 'waf' });
+    expect(await scan({ body: '<title>請稍候...</title>' })).toMatchObject({ status: 'blocked', errorCode: 'waf' });
     // Cloudflare puts its challenge-platform script on ordinary pages too.
     expect(
       await scan({ body: '<title>104人力銀行</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>' }),

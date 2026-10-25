@@ -14,7 +14,8 @@ const NAVIGATION_TIMEOUT = 15_000;
 /** How long a challenge page may take to hand over to the site. */
 const SETTLE_MS = 12_000;
 const SKIPPED = new Set(['image', 'media', 'font', 'stylesheet']);
-const CHALLENGE_TITLE = /^(?:Just a moment|Attention Required|Access Denied|Security verification|Request blocked)/i;
+// Cloudflare localizes its challenge title to the browser's language (zh-TW: 請稍候…).
+const CHALLENGE_TITLE = /^(?:Just a moment|請稍候|Attention Required|Access Denied|Security verification|Request blocked)/i;
 
 export interface BrowserFetcher {
   fetchPage: PageFetcher;
