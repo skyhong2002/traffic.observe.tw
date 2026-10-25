@@ -6,7 +6,7 @@ import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
 import { categoryLabel, channelTiles, similarwebSection, watchPage } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
-import { type Candidate, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
+import { type Candidate, catchUpQuota, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
 import { publicDomain, searchShare } from '../src/similarweb.ts';
 import { fetchQueue } from '../src/status.ts';
@@ -62,12 +62,20 @@ describe('dueDomains', () => {
     expect(due).toEqual([]);
   });
 
-  it('sends one domain missing last month per run until the month has appeared', () => {
+  it('keeps only the catch-up quota of the domains missing last month', () => {
     const t = now.getTime();
     const behind = { lastSuccess: t - 5 * DAY, lastAttempt: t - 5 * DAY, latestProfile: '202608' };
     const list = [candidate('a.tw', behind), candidate('b.tw', behind), candidate('new.tw', { tier: 1 })];
-    expect(dueDomains(list, now, false)).toEqual(['a.tw', 'new.tw']);
-    expect(dueDomains(list, now, true)).toEqual(['a.tw', 'b.tw', 'new.tw']);
+    expect(dueDomains(list, now, 1)).toEqual(['a.tw', 'new.tw']);
+    expect(dueDomains(list, now)).toEqual(['a.tw', 'b.tw', 'new.tw']);
+  });
+
+  it('scales the catch-up quota with how many recent answers had last month', () => {
+    const share = (sampled: number, found: number) => ({ month: '202609', sampled, found });
+    expect(catchUpQuota(share(0, 0), 15)).toBe(1);
+    expect(catchUpQuota(share(30, 0), 15)).toBe(1);
+    expect(catchUpQuota(share(30, 10), 15)).toBe(5);
+    expect(catchUpQuota(share(30, 30), 15)).toBe(15);
   });
 
   it('retries a watched domain still missing last month every three days', () => {

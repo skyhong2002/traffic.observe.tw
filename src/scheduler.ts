@@ -14,8 +14,10 @@ const CLAIM = 15 * 60_000;
 const MAX_FAILURES = 3;
 /** A domain that is missing last month's profile is retried this often until it appears. */
 const CATCH_UP = 3 * DAY;
-/** Until last month has appeared in any response, this many domains missing it are sent per run to look for it. */
+/** Domains missing last month sent per run however rarely recent responses have had it, to look for it. */
 const PROBES = 1;
+/** How far back responses count towards how often last month is out (never before the 1st). */
+const SHARE_WINDOW = DAY;
 /** A one-off lookup is answered by any response this recent, even one fetched before it was asked. */
 export const LOOKUP_FRESH_DAYS = 30;
 
@@ -66,11 +68,11 @@ export const previousMonth = (now: Date) => {
  * every three days. Domains in backoff (next_attempt_at) wait. Order: watched
  * domains tried before but still missing last month first (that month is lost
  * once the next one is out), then never tried, then the rest; each group by
- * requester priority, then the oldest success. Until last month is `published`
- * (seen in any response), only PROBES of the domains missing it are sent: the
- * rest would get the month before again.
+ * requester priority, then the oldest success. Only `catchUp` of the domains
+ * missing last month are kept (catchUpQuota): before Similarweb has it for a
+ * site, fetching it again only gets the month before.
  */
-export function dueQueue(candidates: Candidate[], now = new Date(), published = true) {
+export function dueQueue(candidates: Candidate[], now = new Date(), catchUp = Infinity) {
   const t = now.getTime();
   const last = previousMonth(now);
   const reason = (c: Candidate): DueReason | null => {
@@ -81,7 +83,7 @@ export function dueQueue(candidates: Candidate[], now = new Date(), published = 
     return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
   };
   const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.refreshDays !== null && (c.latestProfile ?? '') < last ? 0 : 2);
-  let probes = PROBES;
+  let left = catchUp;
   return candidates
     .map((c) => ({ ...c, reason: reason(c) }))
     .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
@@ -89,17 +91,35 @@ export function dueQueue(candidates: Candidate[], now = new Date(), published = 
       (a, b) =>
         group(a) - group(b) || a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess,
     )
-    .filter((c) => published || group(c) !== 0 || probes-- > 0);
+    .filter((c) => group(c) !== 0 || left-- > 0);
 }
 /** Why a domain is due: never fetched, past its refresh interval, last month's profile still missing, or a one-off lookup. */
 export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
 
-export const dueDomains = (candidates: Candidate[], now = new Date(), published = true) =>
-  dueQueue(candidates, now, published).map((c) => c.domain);
+export const dueDomains = (candidates: Candidate[], now = new Date(), catchUp = Infinity) =>
+  dueQueue(candidates, now, catchUp).map((c) => c.domain);
 
-/** Whether Similarweb has given last month for any domain yet (it only ever returns months that are over). */
-export const monthPublished = async (pool: Pool, now = new Date()) =>
-  (await rows(pool, 'SELECT 1 AS x FROM traffic_months WHERE month = ? LIMIT 1', [previousMonth(now)])).length > 0;
+/**
+ * Of the domains answered with visits in the last day (this month only), how many came with last month's profile.
+ * Similarweb may not put out a month for every site at once, so this is a share, not a yes or no.
+ */
+export async function lastMonthShare(pool: Pool, now = new Date()) {
+  const month = previousMonth(now);
+  const since = Math.max(now.getTime() - SHARE_WINDOW, Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [r] = await rows<{ sampled: number; found: number | null }>(
+    pool,
+    `SELECT COUNT(*) AS sampled,
+       SUM(EXISTS (SELECT 1 FROM traffic_profiles p WHERE p.domain = f.domain AND p.month = ?)) AS found
+     FROM fetch_state f WHERE f.last_success_at >= ? AND f.last_success_at = f.last_response_at`,
+    [month, new Date(since)],
+  );
+  return { month, sampled: Number(r?.sampled ?? 0), found: Number(r?.found ?? 0) };
+}
+export type MonthShare = Awaited<ReturnType<typeof lastMonthShare>>;
+
+/** Domains missing last month a run may send: the budget times the share of recent answers that had it, at least PROBES. */
+export const catchUpQuota = (share: MonthShare, budget: number) =>
+  Math.max(PROBES, share.sampled ? Math.round((budget * share.found) / share.sampled) : 0);
 
 const time = (d: Date | null) => d?.getTime() ?? 0;
 
@@ -192,7 +212,8 @@ export async function runOnce(
     if (lock.got !== 1) return { skipped: 'another run holds the lock' };
     const cooling = await coolingDown(pool, config, now());
     if (cooling) return { skipped: `cooling down until ${cooling.toISOString()}` };
-    const due = only ?? dueDomains(await loadCandidates(pool, config), now(), await monthPublished(pool, now()));
+    const due =
+      only ?? dueDomains(await loadCandidates(pool, config), now(), catchUpQuota(await lastMonthShare(pool, now()), config.budget));
     const batch = due.slice(0, config.budget);
     const started = now();
     const [run] = (await pool.query('INSERT INTO runs (started_at, budget) VALUES (?, ?)', [started, config.budget])) as unknown as [

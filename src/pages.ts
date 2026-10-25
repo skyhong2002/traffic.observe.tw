@@ -1115,9 +1115,9 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
     ? `<p class="note">共 ${q.length} 個網域等候抓取。${
         status.budget ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。` : '目前暫停送出，以下為等候順序。'
       }排程之後到期的網域會依同樣規則接在後面。${
-        status.lastMonth.published
+        status.lastMonth.catchUpPerRun >= status.budget
           ? ''
-          : `Similarweb 還沒給出 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域先不補抓，每輪抽查 1 個，看到新月份後全部補抓。`
+          : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
       }</p>`
     : '<p class="note">目前沒有到期的網域。</p>';
   const stats = `<div class="stats"><div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時一輪，間隔 3 秒' : '0：目前不送出任何請求'}</small></div>

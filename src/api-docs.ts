@@ -369,7 +369,7 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'lastMonth',
         type: 'object',
-        desc: 'month：上個月（YYYYMM）；published：Similarweb 是否已給出這個月。未給出前，缺這個月的網域每輪只抽查 1 個',
+        desc: 'month：上個月（YYYYMM）；sampled、found：近一天（本月內）有流量回應的網域數，與其中已有這個月資料的數量；catchUpPerRun：缺這個月的網域每輪可補抓幾個（每輪上限乘以 found／sampled，至少 1）',
       },
       { name: 'watched', type: 'integer', desc: '追蹤中的網域數' },
       { name: 'due', type: 'integer', desc: '目前到期的網域數' },

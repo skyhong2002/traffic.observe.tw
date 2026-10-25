@@ -7,7 +7,7 @@ import { editSites, managedSites } from '../src/metadata.ts';
 import { monthView, ranking, topicSummary } from '../src/metrics.ts';
 import { radarLabel } from '../src/pages.ts';
 import { runRadar } from '../src/radar.ts';
-import { runConfig, runOnce } from '../src/scheduler.ts';
+import { lastMonthShare, runConfig, runOnce } from '../src/scheduler.ts';
 import { saveSheet } from '../src/sheet.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
@@ -81,6 +81,10 @@ describe.skipIf(!url)('with a database', () => {
       { month: '202608', visits: 1_100_000 },
       { month: '202609', visits: 1_200_000 },
     ]);
+    // Both answers had 202609, last month on 10/21; a day later they no longer count, and in November they lack 202610.
+    expect(await lastMonthShare(pool, new Date('2026-10-21T12:00:00Z'))).toEqual({ month: '202609', sampled: 2, found: 2 });
+    expect(await lastMonthShare(pool, new Date('2026-10-23T12:00:00Z'))).toMatchObject({ sampled: 0 });
+    expect(await lastMonthShare(pool, new Date('2026-11-01T00:30:00Z'))).toMatchObject({ month: '202610', sampled: 0 });
     // Fetched domains are fresh now; only the sheet one is left.
     const second = fakeFetch();
     await run(pool, second.request, 5);
