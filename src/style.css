@@ -2329,8 +2329,7 @@ svg .cross {
 .tech-list dd {
   margin: 0;
 }
-.tech-list .tags,
-#tech-sites .tags {
+.tech-list .tags {
   flex-wrap: wrap;
   max-width: none;
   white-space: normal;
@@ -2512,9 +2511,19 @@ a.tag:hover,
 .tech-selection p {
   margin: 8px 0;
 }
-.tech-selected {
+#tech-sites .tags {
+  width: clamp(240px, 45vw, 720px);
+  max-width: none;
+  vertical-align: middle;
+}
+#tech-sites .tag {
+  padding: 2px 10px;
+}
+#tech-sites .tech-selected {
+  border: 0;
+  border-radius: 999px;
+  background: var(--sel-row);
   color: var(--accent);
-  outline: 1px solid var(--accent);
 }
 .tech-lookup,
 .tech-coverage {

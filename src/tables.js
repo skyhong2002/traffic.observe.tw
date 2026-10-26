@@ -57,7 +57,7 @@
   }
   function refresh() {
     for (const tags of document.querySelectorAll('td .tags:not([tabindex])')) {
-      if (tags.closest('.tech-list, #tech-sites')) continue;
+      if (tags.closest('.tech-list')) continue;
       tags.tabIndex = 0;
       tags.setAttribute('role', 'group');
       tags.setAttribute('aria-label', '標籤，可左右捲動');

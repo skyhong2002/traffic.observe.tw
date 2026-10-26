@@ -180,6 +180,7 @@ export function techPage(o: TechOverview, view?: unknown) {
       (s) =>
         `<tr>${siteCell(s.domain, s.name).replace(`href="/site/${html(s.domain)}/"`, `href="/tech/${html(s.domain)}/"`)}<td class="l"><span class="tags">${s.detections
           .filter((d) => !f.category || d.category === f.category)
+          .sort((a, b) => Number(b.id === f.technology) - Number(a.id === f.technology))
           .map((d) =>
             d.id === f.technology
               ? `<span class="tag tech-selected">${html(d.name)}${d.version !== 'unknown' ? ` ${html(d.version)}` : ''}</span>`
