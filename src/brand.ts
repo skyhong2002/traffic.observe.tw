@@ -26,7 +26,7 @@ const assets = new Map(
 );
 const href = (name: string) => `/brand/${name}?v=${assets.get(name)!.hash}`;
 
-export const BRAND = `<img class="brand-logo" src="${href('logo-horizontal-dark.svg')}" width="292" height="72" alt="臺灣流量觀察站">`;
+export const BRAND = `<img class="brand-logo" src="${href('logo-horizontal-dark.svg')}" width="273.8" height="54" alt="臺灣流量觀察站">`;
 export const BRAND_HEAD = `<link rel="icon" type="image/svg+xml" href="${href('favicon.svg')}"><link rel="icon" type="image/x-icon" sizes="16x16 32x32 48x48 64x64" href="${href('favicon.ico')}"><link rel="apple-touch-icon" sizes="180x180" href="${href('apple-touch-icon.png')}">`;
 
 export function registerBrand(app: FastifyInstance) {

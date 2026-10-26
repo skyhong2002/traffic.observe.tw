@@ -8,6 +8,7 @@ Run: python tools/brand-assets.py [NotoSerifCJK-SemiBold.ttc]
 from pathlib import Path
 from fontTools.ttLib import TTCollection
 from fontTools.pens.svgPathPen import SVGPathPen
+from fontTools.pens.boundsPen import BoundsPen
 import subprocess, shutil, sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,18 +38,24 @@ def svg(name, width, height, body, title='臺灣流量觀察站'):
     (OUT / name).write_text(value)
     return value
 
+# C lockup: 30px Chinese name, no URL; center the visible glyph bounds.
+NAME = '臺灣流量觀察站'
+boxes = []
+for ch in NAME:
+    pen = BoundsPen(glyphs)
+    glyphs[cmap[ord(ch)]].draw(pen)
+    boxes.append(pen.bounds)
+name_midline = (min(b[1] for b in boxes) + max(b[3] for b in boxes)) / 2
+
 for variant, ink, accent in [('dark','#EDEDED','#FB923C'),('light','#18181B','#C2410C'),('black','#18181B','#18181B'),('white','#FFFFFF','#FFFFFF')]:
     svg(f'logo-mark-{variant}.svg',64,64,mark(ink,accent))
-    body = '<g transform="translate(0 4)">'+mark(ink,accent)+'</g>'
-    body += outlined('臺灣流量觀察站',80,37,28,ink,1)
-    body += outlined('traffic.observe.tw',81,58,11,accent,.8)
-    svg(f'logo-horizontal-{variant}.svg',292,72,body)
+    body = '<g transform="translate(0 3) scale(.75)">'+mark(ink,accent)+'</g>'
+    body += outlined(NAME,58,27+name_midline*30/U,30,ink,.3)
+    svg(f'logo-horizontal-{variant}.svg',273.8,54,body)
     body = '<g transform="translate(90 10) scale(1.625)">'+mark(ink,accent)+'</g>'
-    body += outlined('臺灣流量觀察站',25,157,32,ink,1)
-    subtitle = 'traffic.observe.tw'
-    subtitle_width = sum(glyphs[cmap[ord(c)]].width * 11/U for c in subtitle) + .8*(len(subtitle)-1)
-    body += outlined(subtitle,(284-subtitle_width)/2,184,11,accent,.8)
-    svg(f'logo-stacked-{variant}.svg',284,208,body)
+    name_width = sum(glyphs[cmap[ord(ch)]].width*36/U for ch in NAME)+.3*(len(NAME)-1)
+    body += outlined(NAME,(284-name_width)/2,152+name_midline*36/U,36,ink,.3)
+    svg(f'logo-stacked-{variant}.svg',284,190,body)
 
 # A separate optical size: heavier circle and bars; no text or tiny details.
 fav = '<rect width="64" height="64" rx="14" fill="#18181B"/>' + '<g transform="translate(2 2) scale(.9375)">'+mark('#EDEDED','#FB923C',True)+'</g>'
@@ -59,7 +66,7 @@ svg('app-icon.svg',512,512,app)
 for variant in ['dark','light']:
     for layout in ['horizontal','stacked','mark']:
         name = f'logo-{layout}-{variant}'
-        width = {'horizontal':1168,'stacked':1136,'mark':1024}[layout]
+        width = {'horizontal':1095,'stacked':1136,'mark':1024}[layout]
         subprocess.run(['rsvg-convert','-w',str(width),'-o',str(OUT/f'{name}.png'),str(OUT/f'{name}.svg')],check=True)
 for size, name in [(180,'apple-touch-icon.png'),(192,'icon-192.png'),(512,'icon-512.png')]:
     subprocess.run(['rsvg-convert','-w',str(size),'-o',str(OUT/name),str(OUT/'app-icon.svg')],check=True)

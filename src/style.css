@@ -204,8 +204,9 @@ p.body {
 }
 .brand-logo {
   display: block;
-  width: 219px;
+  width: 273.8px;
   height: 54px;
+  max-width: calc(100vw - 76px);
 }
 .site-nav {
   display: flex;
@@ -1478,7 +1479,7 @@ svg .cross {
     gap: 18px;
   }
 }
-@media (max-width: 960px) {
+@media (max-width: 1040px) {
   .site-inner {
     flex-wrap: wrap;
     min-height: auto;
@@ -1509,10 +1510,6 @@ svg .cross {
 @media (max-width: 640px) {
   .wrap {
     padding-inline: 16px;
-  }
-  .brand-logo {
-    width: 204px;
-    height: auto;
   }
   h1 {
     font-size: 28px;
