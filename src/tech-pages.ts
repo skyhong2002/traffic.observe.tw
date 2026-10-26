@@ -113,13 +113,6 @@ export function techOverview(
 
 const techChip = (d: { id: string; name: string; version: string }, href = `/tech/?technology=${encodeURIComponent(d.id)}`) =>
   `<a class="tag" href="${html(href)}">${html(d.name)}${d.version !== 'unknown' ? ` ${html(d.version)}` : ''}</a>`;
-const statusText = (s: Pick<TechSite, 'status' | 'errorCode'>) =>
-  s.status === null
-    ? '<span class="muted">尚未檢查</span>'
-    : s.status === 'failed' || s.status === 'blocked'
-      ? `<span class="muted">${STATUS_LABEL[s.status]}${s.errorCode ? `（${ERROR_LABEL[s.errorCode] ?? html(s.errorCode)}）` : ''}</span>`
-      : STATUS_LABEL[s.status];
-
 export function techPage(o: TechOverview, view?: unknown) {
   const { coverage: c, filters: f } = o;
   const chosen = o.technologies.find((t) => t.id === f.technology) ?? PRODUCTS.get(f.technology ?? '');
@@ -134,10 +127,6 @@ export function techPage(o: TechOverview, view?: unknown) {
     const s = p.toString();
     return s ? `/tech/?${html(s)}` : '/tech/';
   };
-  const stat = (label: string, value: number, sub = '') =>
-    `<div><span>${label}</span><b>${value.toLocaleString('en-US')}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
-  const stats = `<div class="stats">${stat('網站', c.sites)}${stat('已檢查', c.checked, c.sites ? `${Math.round((c.checked / c.sites) * 100)}%` : '')}${stat('偵測到技術', c.detected)}${stat('未辨識', c.unknown)}${stat('無法讀取或被阻擋', c.failed + c.blocked)}</div>`;
-  const lookup = `<form class="toolbar-form" method="get" action="/tech/lookup"><label class="search-field"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" name="domain" aria-label="查詢任一網域" placeholder="查詢任一網域，例如 udn.com" autocomplete="off" required></label><button type="submit">查詢</button></form>`;
   const sourceChips = chipRow(
     '來源',
     { href: link({ source: null }), text: '全部來源', on: !f.source },
@@ -186,9 +175,7 @@ export function techPage(o: TechOverview, view?: unknown) {
               ? `<span class="tag tech-selected">${html(d.name)}${d.version !== 'unknown' ? ` ${html(d.version)}` : ''}</span>`
               : techChip(d, link({ technology: d.id, category: null, status: null })),
           )
-          .join(
-            '',
-          )}</span></td><td class="l">${statusText(s)}</td>${sortCell('l', s.observedAt ?? '', s.observedAt ? twDate(s.observedAt) : '')}</tr>`,
+          .join('')}</span></td>${sortCell('l', s.observedAt ?? '', s.observedAt ? twDate(s.observedAt) : '')}</tr>`,
     )
     .join('');
   const browseLink = (() => {
@@ -199,14 +186,14 @@ export function techPage(o: TechOverview, view?: unknown) {
   })();
   const search = (id: string, label: string) =>
     `<label class="search-field tech-search"><input type="search" ${id === 'tech-catalog' ? 'data-tech-search' : `data-table-filter="${id}"`} aria-label="${label}" placeholder="${label}" autocomplete="off"></label>`;
-  const filters = `<div class="tech-filters"><div><span class="tech-filter-label">網站來源</span>${sourceChips}</div>${!chosen ? `<div><span class="tech-filter-label">技術類別</span>${categoryChips}</div>` : ''}${showingSites ? `<details${f.status ? ' open' : ''}><summary>檢查結果${f.status ? `：${f.status === 'unchecked' ? '尚未檢查' : STATUS_LABEL[f.status]}` : '篩選'}</summary>${statusChips}</details>` : ''}</div>`;
+  const filters = `<div class="tech-filters"><div><span class="tech-filter-label">網站來源</span>${sourceChips}</div>${!chosen ? `<div><span class="tech-filter-label">技術類別</span>${categoryChips}</div>` : ''}${showingSites ? `<div><span class="tech-filter-label">檢查結果</span>${statusChips}</div>` : ''}</div>`;
   const heading = chosen ? `用 ${chosen.name} 的網站` : showingSites ? '所有網站的技術' : '網站技術';
   const navigation = showingSites
     ? `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="${browseLink}">← 返回技術總覽</a><span aria-current="page">${chosen ? html(chosen.name) : '所有網站'}</span></nav>`
     : `<nav class="tech-breadcrumb" aria-label="技術導覽"><span aria-current="page">技術總覽</span><a href="${link({ technology: null })}${link({ technology: null }).includes('?') ? '&amp;' : '?'}view=sites">瀏覽所有網站 →</a></nav>`;
   const content = showingSites
-    ? `${chosen ? `<div class="tech-selection"><span>${CATEGORY_LABEL[chosen.category]}</span><p>找到 <b>${o.sites.length.toLocaleString('en-US')}</b> 個網站使用這項技術。</p></div>` : ''}<details class="tech-refine"${f.source || f.category || f.status ? ' open' : ''}><summary>篩選網站來源與檢查結果${f.source ? ` · ${html(SOURCE_LABEL[f.source] ?? f.source)}` : ''}${f.category ? ` · ${CATEGORY_LABEL[f.category]}` : ''}${f.status ? ` · ${f.status === 'unchecked' ? '尚未檢查' : STATUS_LABEL[f.status]}` : ''}</summary>${filters}</details>
-      ${section('網站清單', `<div class="tech-results"><p data-table-count="tech-sites" data-total="${o.sites.length}" role="status">${o.sites.length.toLocaleString('en-US')} 個網站</p>${search('tech-sites', '搜尋網站名稱或網域')}</div>${table('<th class="l">網站</th><th class="l">偵測到的技術</th><th class="l">結果</th><th class="l">檢查日期</th>', siteRows, `沒有符合條件的網站。<a href="${link({ status: null, category: null })}">清除結果與類別篩選</a>`, 4, 'tech-sites')}`)}`
+    ? `${chosen ? `<div class="tech-selection"><span>${CATEGORY_LABEL[chosen.category]}</span><p>找到 <b>${o.sites.length.toLocaleString('en-US')}</b> 個網站使用這項技術。</p></div>` : ''}${filters}
+      ${section('網站清單', `<div class="tech-results"><p data-table-count="tech-sites" data-total="${o.sites.length}" role="status">${o.sites.length.toLocaleString('en-US')} 個網站</p>${search('tech-sites', '搜尋網站名稱或網域')}</div>${table('<th class="l">網站</th><th class="l">偵測到的技術</th><th class="l">檢查日期</th>', siteRows, `沒有符合條件的網站。<a href="${link({ status: null, category: null })}">清除結果與類別篩選</a>`, 3, 'tech-sites')}`)}`
     : `${filters}${section('選一項技術，查看哪些網站使用', `<div class="tech-results"><p data-table-count="tech-catalog" data-total="${technologies.length}" role="status">${technologies.length} 項技術 · 網站數 / 比例</p>${search('tech-catalog', '搜尋技術，例如 Google Tag Manager')}</div><label class="tech-sort">排序 <select data-tech-sort aria-label="技術排序"><option value="count">網站數最多</option><option value="name">名稱 A–Z</option></select></label><ul id="tech-catalog" class="tech-catalog" aria-label="技術，依網站數排序">${techRows}</ul><p data-tech-empty${technologies.length ? ' hidden' : ''}>沒有符合條件的技術。</p>`)}`;
   return layout(
     heading,
@@ -216,7 +203,7 @@ export function techPage(o: TechOverview, view?: unknown) {
       actions: `<a href="/api/v1/tech${link({}).slice('/tech/'.length)}">JSON</a>`,
       tabs: navigation,
     },
-    `<div class="tech-explorer">${content}<details class="tech-lookup"><summary>查詢任一網域的技術</summary><p class="note">輸入網域，直接查看這個網站的偵測結果。</p>${lookup}</details><details class="tech-coverage"><summary>資料涵蓋範圍 · ${c.sites.toLocaleString('en-US')} 個網站，已檢查 ${c.checked.toLocaleString('en-US')} 個</summary>${stats}</details></div>`,
+    `<div class="tech-explorer">${content}</div>`,
     {
       nav: 'tech',
       method: `${techMethod(PRODUCTS.size)}${methodPart('技術', `<p>每項技術出現在幾個網站的首頁；比例的分母是此來源有成功檢查結果的 ${c.withSnapshot.toLocaleString('en-US')} 個網站。一個網站可能使用多項技術。網站數與比例不受檢查結果篩選影響。</p>`)}`,

@@ -2436,24 +2436,23 @@ a.tag:hover,
 }
 .tech-filters {
   display: grid;
-  gap: 16px;
-  padding: 20px 0;
+  gap: 8px;
+  padding: 12px 0;
   border-block: 1px solid var(--grid);
 }
+.tech-filters > div {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
 .tech-filter-label {
-  display: block;
-  margin-bottom: 8px;
+  flex: 0 0 auto;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
 }
 .tech-filters .chip-row {
   margin: 0;
-}
-.tech-filters summary,
-.tech-lookup summary,
-.tech-coverage summary {
-  cursor: pointer;
-  color: var(--ink-2);
+  min-width: 0;
 }
 .tech-results {
   display: flex;
@@ -2506,14 +2505,6 @@ a.tag:hover,
   background: var(--sel-row);
   color: var(--accent);
 }
-.tech-lookup,
-.tech-coverage {
-  padding: 20px 0;
-  border-top: 1px solid var(--grid);
-}
-.tech-coverage .stats {
-  margin-top: 16px;
-}
 @media (max-width: 600px) {
   .tech-search {
     flex-basis: 100%;
@@ -2522,18 +2513,6 @@ a.tag:hover,
     padding-left: 14px;
   }
 }
-.tech-refine {
-  padding: 12px 0;
-  border-block: 1px solid var(--grid);
-}
-.tech-refine > summary {
-  cursor: pointer;
-  color: var(--ink-2);
-}
-.tech-refine .tech-filters {
-  border: 0;
-}
-
 .tech-catalog {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
