@@ -1,20 +1,41 @@
 import Fastify from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import type { Pool } from '../src/db.ts';
 import { registerSeo } from '../src/seo.ts';
+
+vi.hoisted(() => {
+  process.env.TRAFFIC_PUBLIC_ORIGIN = 'https://site.observe.tw';
+});
 
 // None of these routes reads the database.
 const app = () => buildApp({} as Pool, { tokens: new Map(), login: null, logger: false });
 
 describe('robots.txt and sitemap', () => {
+  it('moves public old-domain links and leaves internal authentication in place', async () => {
+    const server = app();
+    const res = await server.inject({ url: '/table/?q=%E6%96%B0%E8%81%9E', headers: { host: 'traffic.observe.tw' } });
+    expect(res.statusCode).toBe(308);
+    expect(res.headers.location).toBe('https://site.observe.tw/table/?q=%E6%96%B0%E8%81%9E');
+    expect(res.headers['x-robots-tag']).toBeUndefined();
+    const internal = await server.inject({
+      method: 'POST',
+      url: '/internal/v1/traffic',
+      headers: { host: 'traffic.observe.tw' },
+      payload: { domains: ['example.com'] },
+    });
+    expect(internal.statusCode).toBe(404);
+    expect(internal.headers.location).toBeUndefined();
+    await server.close();
+  });
+
   it('points crawlers at the sitemap and keeps them off service and sign-in routes', async () => {
     const res = await app().inject('/robots.txt');
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toMatch(/^text\/plain/);
     expect(res.headers['x-robots-tag']).toBeUndefined();
     expect(res.body).toContain('Disallow: /internal/\nDisallow: /auth/\n');
-    expect(res.body).toContain('Sitemap: https://traffic.observe.tw/sitemap.xml');
+    expect(res.body).toContain('Sitemap: https://site.observe.tw/sitemap.xml');
     expect(res.body).not.toMatch(/Disallow: \/api\//);
   });
 
@@ -23,10 +44,10 @@ describe('robots.txt and sitemap', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toMatch(/^application\/xml/);
     expect([...res.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])).toEqual([
-      'https://traffic.observe.tw/',
-      'https://traffic.observe.tw/table/',
-      'https://traffic.observe.tw/tag/',
-      'https://traffic.observe.tw/tech/',
+      'https://site.observe.tw/',
+      'https://site.observe.tw/table/',
+      'https://site.observe.tw/tag/',
+      'https://site.observe.tw/tech/',
     ]);
   });
 });
@@ -36,7 +57,7 @@ describe('head tags and noindex', () => {
     const res = await app().inject('/?to=202609&q=news');
     expect(res.statusCode).toBe(200);
     expect(res.headers['x-robots-tag']).toBeUndefined();
-    expect(res.body).toContain('<link rel="canonical" href="https://traffic.observe.tw/">');
+    expect(res.body).toContain('<link rel="canonical" href="https://site.observe.tw/">');
     expect(res.body).toMatch(/<meta name="description" content="[^"]+">/);
     expect(res.body).not.toContain('noindex');
   });
@@ -52,7 +73,7 @@ describe('head tags and noindex', () => {
   it('serves the public API as before, marked noindex', async () => {
     const res = await app().inject('/api/v1/');
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toHaveProperty('service', 'traffic.observe.tw');
+    expect(res.json()).toHaveProperty('service', 'site.observe.tw');
     expect(res.headers['x-robots-tag']).toBe('noindex');
   });
 
@@ -84,7 +105,7 @@ describe('head tags and noindex', () => {
     expect(spec.openapi).toBe('3.1.0');
     expect(Object.keys(spec.paths).sort()).toEqual(ENDPOINTS.map((e) => e.path).sort());
     expect(Object.keys(index.endpoints)).toHaveLength(ENDPOINTS.length);
-    expect(index).toMatchObject({ service: 'traffic.observe.tw', docs: 'https://traffic.observe.tw/api/' });
+    expect(index).toMatchObject({ service: 'site.observe.tw', docs: 'https://site.observe.tw/api/' });
     for (const e of ENDPOINTS) expect(page, e.path).toContain(`id="api-${e.id}"`);
     // Read-only and public, so browsers on other sites may call it.
     expect((await app().inject('/api/v1/')).headers['access-control-allow-origin']).toBe('*');
@@ -104,9 +125,9 @@ describe('head tags and noindex', () => {
       if (request.params.domain.includes('missing')) reply.code(404);
       return '<html><head><title>t</title></head><body></body></html>';
     });
-    registerSeo(server, 'https://traffic.observe.tw');
+    registerSeo(server, 'https://site.observe.tw');
     const found = await server.inject('/site/Example.COM.tw/');
-    expect(found.body).toContain('<link rel="canonical" href="https://traffic.observe.tw/site/example.com.tw/">');
+    expect(found.body).toContain('<link rel="canonical" href="https://site.observe.tw/site/example.com.tw/">');
     expect(found.headers['x-robots-tag']).toBeUndefined();
     const missing = await server.inject('/site/missing.tw/');
     expect(missing.statusCode).toBe(404);

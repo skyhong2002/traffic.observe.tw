@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { publicOrigin } from './origin.ts';
 import { publicDomain } from './similarweb.ts';
 
 // What search engines may index: the public report, its two plain-HTML companions
@@ -17,10 +18,7 @@ const FILES = new Set(['/robots.txt', '/sitemap.xml']);
 
 const attr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 
-export function registerSeo(
-  app: FastifyInstance,
-  origin = new URL(process.env.TRAFFIC_PUBLIC_ORIGIN || 'https://traffic.observe.tw').origin,
-) {
+export function registerSeo(app: FastifyInstance, origin = publicOrigin()) {
   app.get('/robots.txt', async (_request, reply) =>
     reply
       .type('text/plain; charset=utf-8')
@@ -39,6 +37,8 @@ export function registerSeo(
   );
 
   app.addHook('onSend', async (request, reply, payload) => {
+    // Crawlers should follow permanent domain moves without a noindex directive.
+    if (reply.statusCode === 308 && String(reply.getHeader('location')).startsWith(`${origin}/`)) return payload;
     const route = request.routeOptions.url;
     if (route && FILES.has(route)) return payload;
     const domain = route === SITE ? publicDomain((request.params as { domain?: string }).domain) : null;

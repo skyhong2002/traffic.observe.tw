@@ -1,5 +1,5 @@
 [Unit]
-Description=traffic.observe.tw web and API (pages, /api/v1, /internal for local services)
+Description=site.observe.tw web and API (pages, /api/v1, /internal for local services)
 After=network-online.target
 
 [Service]

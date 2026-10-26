@@ -1,5 +1,5 @@
 [Unit]
-Description=traffic.observe.tw worker: the machine's only Similarweb requester (hourly)
+Description=site.observe.tw worker: the machine's only Similarweb requester (hourly)
 After=network-online.target
 
 [Service]

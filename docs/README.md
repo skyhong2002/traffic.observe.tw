@@ -1,4 +1,4 @@
-# traffic.observe.tw 流量觀察
+# 網站雷達 site.observe.tw
 
 把 GeneHong「[Similar Web 新聞](https://docs.google.com/spreadsheets/d/1B5RsSVZSrjKSUFDFZ-2VVlU3-tpTN49J1YzLGOohalM/edit)」試算表做成自動更新的資料庫，同時是這台主機**唯一**對 `data.similarweb.com` 發請求的服務。tag.observe.tw、blog.observe.tw 等其他服務都把網域交給這裡，再讀結果，自己不打 Similarweb。各網站首頁用了哪些技術（`/tech/`）也由這裡抓取與偵測，blog 只讀結果。
 
@@ -114,7 +114,7 @@
 | 變數 | 說明 |
 | --- | --- |
 | `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` | 與 tag 相同。兩個都沒設時關閉登入。 |
-| `TRAFFIC_PUBLIC_ORIGIN` | 預設 `https://traffic.observe.tw`。callback `$TRAFFIC_PUBLIC_ORIGIN/auth/google/callback` 必須登記在 OAuth client 的「已授權的重新導向 URI」。 |
+| `TRAFFIC_PUBLIC_ORIGIN` | 預設 `https://site.observe.tw`。callback `$TRAFFIC_PUBLIC_ORIGIN/auth/google/callback` 必須登記在 OAuth client 的「已授權的重新導向 URI」。 |
 | `TRAFFIC_ADMIN_EMAILS` | 逗號分隔，可以手動加入或移除網域的編輯。 |
 
 `/watch/` 可以一次貼多行網域或網址，設定每 7 或 30 天更新一次，並附上備註。這些網域以請求者 `manual` 存進 `watches`，記下 `added_by`，每次加入或移除都寫進 `watch_log`。表單只接受本站 `Origin` 送出的 POST。移除只會停止抓取，已經抓到的資料會保留。
@@ -213,7 +213,7 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 
 ## 品牌標誌（2026-10-26）
 
-「臺灣流量觀察站」採觀測環、流量刻度與橘色訊號點，中文字標為 Noto Serif CJK TC SemiBold，延續 tag.observe.tw、blog.observe.tw 的宋體風格。橫式、直式、深淺底、單色 SVG 與透明 PNG、favicon、Apple／應用程式圖示在 `assets/brand/`，使用規範與字型授權同目錄；離線展示與整套 ZIP 在 `docs/brand/`。`tools/brand-assets.py` 可重產素材。
+「臺灣流量觀察站」（2026-10-27 更名為「網站雷達」）採觀測環、流量刻度與橘色訊號點，中文字標為 Noto Serif CJK TC SemiBold，延續 tag.observe.tw、blog.observe.tw 的宋體風格。橫式、直式、深淺底、單色 SVG 與透明 PNG、favicon、Apple／應用程式圖示在 `assets/brand/`，使用規範與字型授權同目錄；離線展示與整套 ZIP 在 `docs/brand/`。`tools/brand-assets.py` 可重產素材。
 
 頁首頁尾共用 `src/brand.ts` 的字標，所有頁面及 API 文件統一名稱。`/brand/:name` 僅提供固定清單中的素材；字標、SVG／ICO favicon 與 Apple 圖示均使用內容雜湊網址，避免 CDN 或瀏覽器沿用舊版本。另保留 `/favicon.ico` 與 `/apple-touch-icon.png` 慣例路徑。
 
@@ -239,3 +239,23 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 2026-10-26 23:24:50（台北時間）可互動標籤統一膠囊樣式：單站/批次picker、投票/管理員顯示隱藏、各頁連結標籤與共現/標籤雲沿用篩選chip的灰底/橘色選取/紅色負向狀態。投票以標籤及同意/不同意票數為一組膠囊，保留AJAX與撤回；未選灰色，批次移除使用紅色及減號。typecheck、lint通過；首次全套119項中的DB初始化遇到主機負載逾時，延長hookTimeout至60秒重跑DB16項全部通過，其餘103項通過。桌面1280/手機390實測選取、批次移除、同意→不同意→撤回、admin狀態色皆正常且無溢出。正式首頁/網站頁/標籤概況/health皆200並載入新CSS；備份 `data/tag-pills-20261026T151936Z/before/`，還原src檔案並重啟web即可回復。
 
 2026-10-26 23:55（台北時間）表格標籤欄改為獨立橫向捲動，提供細捲軸、鍵盤焦點及無障礙標示；保留單列膠囊與連結。390px/1280px 驗證可捲到末端且外層表格位置不變、頁面無溢出。typecheck、lint、123 tests 與 diff 檢查通過，重啟 web 後正式站 CSS/JS 及 healthz 核對正常；未執行 migration。變更前 CSS/JS 在 data/tag-scroll-before/。
+
+
+## 網站雷達更名與網域切換（2026-10-27）
+
+品牌改為「網站雷達」，規劃正式網址 `https://site.observe.tw`，涵蓋網站技術、流量、相似網站及協作分類。Logo 延用 C 版宋體與圖形，四字橫式為 182.9×54px，中文字仍為 30px；新素材包為 `docs/brand/site-radar-logo-kit.zip`，舊素材包與 A/B/C 預覽保留為歷史紀錄。展示頁由 `python tools/brand-showcase.py` 重產。
+
+程式預設來源改為新網域。切換前正式 `.env` 暫留 `TRAFFIC_PUBLIC_ORIGIN=https://traffic.observe.tw`，現有網域與 Google 登入可繼續使用；這時僅發布新品牌，不代表新網域已上線。切換條件與順序：
+
+1. Cloudflare Tunnel `observe-steamos` 新增公開 hostname `site.observe.tw` → `http://127.0.0.1:18150`，保留 `traffic.observe.tw` 路由；建立對應 DNS，確認 HTTPS 可用。新網域應沿用 HTTP → HTTPS 轉址。
+2. 既有 Google Web OAuth client 新增 `https://site.observe.tw/auth/google/callback` 為已授權重新導向 URI；保留舊 callback，避免影響其他 observe.tw 站台。僅登入所需的 openid/email/profile，未新增 GSC、GA 或 GTM 匯入。
+3. `.env` 將 `TRAFFIC_PUBLIC_ORIGIN` 改為 `https://site.observe.tw`，重啟 `traffic-observe-web.service`。不需 migration，不需重啟 worker。
+4. 驗證新站首頁、API、canonical、robots、sitemap 與 Google 登入；舊 host 對公開路徑回 308，保留原 path/query。loopback 與 `/internal/*` 保留既有行為。Session cookie 為 host-only，換網域後使用者需重新登入。
+5. Google Search Console 新增新網址資源、提交 `https://site.observe.tw/sitemap.xml`，再於舊資源完成網址變更（管理權限就緒後執行）。
+
+保留現有 checkout 路徑、systemd unit 名稱及 `TRAFFIC_*` 設定名稱，以相容本機服務。回復網域切換：將 `.env` 的公開來源改回舊網址，再重啟 web；`src/origin.ts` 會自動停用舊 host 轉址。原版程式與環境設定備份位於 `data/last-site-radar-release.txt` 指向的私有目錄。
+
+
+2026-10-27 03:53（台北時間）新品牌已發布到現有 `traffic.observe.tw`：頁首頁尾、標題、API 文件與 Logo 更新，T3 專案名稱亦改為「網站雷達」。本機與正式首頁皆 200、無舊品牌文字；canonical 與 Google callback 仍為舊網域，未啟用舊站轉址。桌面 1280px、手機 390px 無頁面橫向溢出；typecheck、lint、遷移與 SEO 15 項測試通過。完整套件初次 130 項通過、1 項 Radar 測試因 MySQL 全伺服器 named lock `traffic-radar` 已由另一連線持有而失敗，單項重試相同；未中斷持鎖程序。
+
+使用者將自行處理 Cloudflare 與 Google 管理端設定，明確要求待通知後才切換正式來源或啟用舊站轉址。現有 Tunnel `observe-steamos`，ID `f6342ca7-0e3b-4998-8971-f8f1837d37e9`（從執行中的 connector 驗證），目前 ingress `traffic.observe.tw` → `http://127.0.0.1:18150`。OAuth client 所屬 project number 為 `453403068137`；控制台的專案／client 顯示名稱尚未驗證。勿將 analytics service account 的專案視為已確認的 OAuth 專案。

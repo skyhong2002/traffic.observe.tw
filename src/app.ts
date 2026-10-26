@@ -34,6 +34,7 @@ import {
 import { EditError, editSites, loadMetadata, type ManagedSite, managedSites } from './metadata.ts';
 import { editSitePage, type ManualForm, manageSitesPage, manualPage, tagsByUse } from './metadata-pages.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
+import { publicOrigin, registerLegacyOrigin } from './origin.ts';
 import {
   discoverPage,
   JS_FLAG,
@@ -97,7 +98,7 @@ const CSV_CHANNELS: Array<[TrafficChannel, string]> = [
   ['GenAi', 'AI工具'],
   ['Affiliate', '聯盟行銷'],
 ];
-const PUBLIC_ORIGIN = new URL(process.env.TRAFFIC_PUBLIC_ORIGIN || 'https://traffic.observe.tw').origin;
+const PUBLIC_ORIGIN = publicOrigin();
 /** Tags the ranking pages leave out until a visitor brings them back. */
 const DEFAULT_EXCLUDE = ['非台灣'];
 
@@ -125,6 +126,7 @@ export function buildApp(
   app.addHook('onRequest', async (request, reply) => {
     if (request.url.startsWith('/internal/') && !authenticate(request, reply, tokens)) return reply;
   });
+  registerLegacyOrigin(app, PUBLIC_ORIGIN);
   // HTML forms on /watch/.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) =>
     done(null, Object.fromEntries(new URLSearchParams(body as string))),

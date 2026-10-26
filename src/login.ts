@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { type Pool, rows } from './db.ts';
+import { publicOrigin } from './origin.ts';
 
 // Google sign-in, ported from tag (app/src/auth/google-login.ts) and cut down.
 // Any verified Google account gets a session, to vote on and add site tags
@@ -23,7 +24,7 @@ export function loginConfig(env: Record<string, string | undefined> = process.en
   const clientSecret = env.GOOGLE_CLIENT_SECRET?.trim();
   if (!clientId && !clientSecret) return null;
   if (!clientId || !clientSecret) throw Error('Google login needs both GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET');
-  const origin = new URL(env.TRAFFIC_PUBLIC_ORIGIN || 'https://traffic.observe.tw');
+  const origin = new URL(publicOrigin(env));
   if (!['http:', 'https:'].includes(origin.protocol)) throw Error('TRAFFIC_PUBLIC_ORIGIN must be http(s)');
   const admins = new Set(
     (env.TRAFFIC_ADMIN_EMAILS ?? '')

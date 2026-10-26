@@ -22,10 +22,10 @@ const FILLS = { ai: 'FFFFF2CC', unsure: 'FFFCE5CD', todo: 'FFF4CCCC' };
 const HELP: Array<[string, string?]> = [
   ['網址對照表怎麼填'],
   [''],
-  ['用途', '「Similar Web 新聞」月份分頁只寫網站名、沒寫網址的網站，在這裡補上網址，traffic.observe.tw 才能追蹤流量、套上標籤。'],
+  ['用途', '「Similar Web 新聞」月份分頁只寫網站名、沒寫網址的網站，在這裡補上網址，site.observe.tw 才能追蹤流量、套上標籤。'],
   [
     '格式',
-    '和月份分頁相同。系統只讀「網站名」和「網址」兩欄，其他欄照抄原表供參考，改了不會有作用；標籤請在 traffic.observe.tw 的網站頁修改。',
+    '和月份分頁相同。系統只讀「網站名」和「網址」兩欄，其他欄照抄原表供參考，改了不會有作用；標籤請在 site.observe.tw 的網站頁修改。',
   ],
   ['網址', '寫網域或網址都可以，例如 8891.com.tw、https://www.kktix.com/；子網域可以（tw.news.yahoo.com）。'],
   ['不追蹤', '不是網站、已經關站，或不要追蹤的，在網址欄寫「不追蹤」。'],
