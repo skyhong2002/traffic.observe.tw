@@ -278,18 +278,23 @@ const tableSearch = (target: string, label: string) =>
 const tagLinks = (topics: string[], href: (t: string) => string) =>
   `<span class="tags" title="${html(topics.join('、'))}">${topics.map((t) => `<a class="tag" href="${href(t)}">${html(t)}</a>`).join('')}</span>`;
 /** Name and domain on one line; the domain is left out when it is the name. */
-/** The site's icon (/icon/), or the first letter of its name where it has none. */
 /** A hue from the domain, so sites without an icon get their own colour on the letter tile rather than all looking alike. */
 const tileHue = (domain: string) => [...domain].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
-export const favicon = (domain: string, name: string) =>
-  `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}" aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
+/**
+ * The site's icon (/icon/), or the first letter of its name where it has none. Hovering it shows the name and domain;
+ * pass `titled: false` where the surrounding element already has its own tooltip.
+ */
+export const favicon = (domain: string, name: string, { titled = true }: { titled?: boolean } = {}) =>
+  `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}"${
+    titled ? ` title="${html(name.trim() && name.trim() !== domain ? `${name.trim()} · ${domain}` : domain)}"` : ''
+  } aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
 /**
  * A site shown by its logo alone, for places where its name would be too small to read: the name, the domain and
  * any note go in the tooltip. Untracked sites have no page, so they are not links and get a dashed edge.
  */
 export const logoChip = (domain: string, { note = '', tracked = true }: { note?: string; tracked?: boolean } = {}) => {
   const title = `${domain}${note ? `・${note}` : ''}${tracked ? '' : '（本站尚未追蹤）'}`;
-  const inner = favicon(domain, domain);
+  const inner = favicon(domain, domain, { titled: false });
   return tracked
     ? `<a class="logo-chip" href="/site/${html(domain)}/" title="${html(title)}" aria-label="${html(title)}">${inner}</a>`
     : `<span class="logo-chip untracked" title="${html(title)}" role="img" aria-label="${html(title)}">${inner}</span>`;
@@ -598,7 +603,7 @@ ${
       return `<tr><td class="l"><a class="site-name" href="${topicHref(t.topic)}">${html(t.topic)}</a></td><td class="num">${t.sites}</td><td class="num">${t.sitesWithData}</td>${volCell(t.visits, '—')}${volCell(t.visits !== null && t.sitesWithData ? t.visits / t.sitesWithData : null, '—')}<td class="num">${pct(t.searchShare, 2) || '—'}</td><td class="num">${pct(t.aiShare, 2) || '—'}</td><td class="l"><span class="leaders">${top
         .map(
           (s) =>
-            `<a class="with-logo" href="/site/${html(s.domain)}/" title="${html(s.domain)}・累計 ${volText(s.visits)}">${favicon(s.domain, s.name)}${html(s.name)}</a>`,
+            `<a class="with-logo" href="/site/${html(s.domain)}/" title="${html(s.domain)}・累計 ${volText(s.visits)}">${favicon(s.domain, s.name, { titled: false })}${html(s.name)}</a>`,
         )
         .join('、')}</span></td></tr>`;
     })
