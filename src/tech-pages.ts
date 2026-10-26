@@ -1,4 +1,18 @@
-import { chipRow, favicon, html, layout, methodPart, SOURCE_LABEL, section, siteCell, sortCell, table, tw, twDate } from './pages.ts';
+import {
+  chipRow,
+  displayHtml,
+  favicon,
+  html,
+  layout,
+  methodPart,
+  SOURCE_LABEL,
+  section,
+  siteCell,
+  sortCell,
+  table,
+  tw,
+  twDate,
+} from './pages.ts';
 import { CATEGORIES, CATEGORY_LABEL, PRODUCTS, type TechCategory, type TechErrorCode, type TechStatus } from './tech.ts';
 import type { TechRecord } from './tech-scan.ts';
 
@@ -249,7 +263,7 @@ export function techDomainPage(domain: string, name: string | null, record: Tech
     ? `<div class="stats">${stat('最近一次', STATUS_LABEL[record.status], record.errorCode ? (ERROR_LABEL[record.errorCode] ?? html(record.errorCode)) : '')}${stat('技術', String(record.detections.length))}${stat('結果時間', record.observedAt ? twDate(record.observedAt) : '', record.origin === 'blog' ? '來自 blog.observe.tw' : '')}${stat('最近嘗試', twDate(record.lastAttemptAt), record.httpStatus ? `HTTP ${record.httpStatus}` : '')}</div>
 ${section(
   '偵測到的技術',
-  `${record.observedAt === null ? '<p class="note">還沒有成功讀到首頁。</p>' : `<p class="note">${record.sourceUrl ? `讀的是 <a href="${html(record.sourceUrl)}" rel="noopener nofollow">${html(record.sourceUrl)}</a>，` : ''}${tw(record.observedAt)}。${record.status === 'failed' || record.status === 'blocked' ? '之後的檢查沒有成功，這是上一次成功的結果。' : ''}</p>`}${table(
+  `${record.observedAt === null ? '<p class="note">還沒有成功讀到首頁。</p>' : `<p class="note">${record.sourceUrl ? `讀的是 <a href="${html(record.sourceUrl)}" rel="noopener nofollow">${displayHtml(record.sourceUrl)}</a>，` : ''}${tw(record.observedAt)}。${record.status === 'failed' || record.status === 'blocked' ? '之後的檢查沒有成功，這是上一次成功的結果。' : ''}</p>`}${table(
     '<th class="l">技術</th><th class="l" aria-sort="ascending">類別</th><th class="l">版本</th><th class="num">信心</th><th class="l">依據</th>',
     detectionRows(record),
     record.observedAt === null ? '沒有結果。' : '首頁沒有清單內任何技術的痕跡（未辨識，不代表沒有技術）。',
@@ -264,10 +278,10 @@ ${section(
     `${title} 的網站技術`,
     {
       title,
-      dek: `${favicon(domain, title)}<a href="https://${html(domain)}/" rel="noopener">${html(domain)} ↗</a>${known ? `<span class="sep" aria-hidden="true">·</span><a href="/site/${html(domain)}/">流量資料</a>` : ''}`,
+      dek: `${favicon(domain, title)}<a href="https://${html(domain)}/" rel="noopener">${displayHtml(domain)} ↗</a>${known ? `<span class="sep" aria-hidden="true">·</span><a href="/site/${html(domain)}/">流量資料</a>` : ''}`,
       actions: `${check}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
     },
-    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${html(domain)}</span></nav>${flash}${body}`,
+    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${displayHtml(domain)}</span></nav>${flash}${body}`,
     {
       nav: 'tech',
       method: `${techMethod(PRODUCTS.size)}${record ? methodPart('偵測到的技術', '<p>「依據」是哪一類規則比對到，不是頁面內容。</p>') : ''}`,

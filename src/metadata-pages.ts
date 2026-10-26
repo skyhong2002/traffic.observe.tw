@@ -1,7 +1,7 @@
 import { type ManualMonth, manualChannels, manualDetailFields, manualDetailValues, proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals } from './manual-breakdowns.ts';
 import type { ManagedSite } from './metadata.ts';
-import { favicon, html, layout, siteTabs, vol, volText } from './pages.ts';
+import { displayHtml, favicon, html, layout, siteTabs, vol, volText } from './pages.ts';
 
 export interface ManualForm {
   months: ManualMonth[];
@@ -21,11 +21,15 @@ const millions = (n: number) => volText(n / 1e6);
 /** How a share is written back into the form: 0.3645 → "36.45". */
 const percentInput = (n: number | null) => (n === null ? '' : String(Math.round(n * 1e4) / 100));
 const flash = (error?: string, message?: string) =>
-  error ? `<p class="flash" role="alert">${html(error)}</p>` : message ? `<p class="flash" role="status">${html(message)}</p>` : '';
+  error
+    ? `<p class="flash" role="alert">${displayHtml(error)}</p>`
+    : message
+      ? `<p class="flash" role="status">${displayHtml(message)}</p>`
+      : '';
 /** The site's own head on every page of it, with the sub-pages as tabs. */
 const siteHead = (site: Pick<ManagedSite, 'domain' | 'name'>, tab: 'edit' | 'manual', actions = '') => ({
   title: site.name,
-  dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${html(site.domain)} ↗</a>`,
+  dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${displayHtml(site.domain)} ↗</a>`,
   tabs: siteTabs(site.domain, tab),
   actions,
 });
@@ -126,7 +130,7 @@ export function editSitePage(
     `${flash(error, message)}
 <form class="form edit-form" method="post" action="/site/${html(site.domain)}/edit/">
 <input type="hidden" name="revision" value="${html(draft?.revision ?? site.revision)}">
-<div class="field edit-name"><label for="site-name">網站名稱</label><input id="site-name" name="name" maxlength="128" value="${html(draft?.name ?? site.name)}"></div>
+<div class="field edit-name"><label for="site-name">網站名稱</label><input id="site-name" name="name" maxlength="128" value="${displayHtml(draft?.name ?? site.name)}"></div>
 ${tagInput('topics', '標籤', draft?.topics ?? site.baseTopics.join(', '), '點選加入或移除，儲存後生效。')}
 <div class="form-actions"><button type="submit" class="tag-save">儲存變更 →</button><a href="/site/${html(site.domain)}/#tags">查看標籤投票</a></div><details class="tag-help"><summary>編輯說明</summary><p>名稱留空會沿用試算表。這裡調整的是編輯清單，匯入試算表不會覆蓋設定；讀者提議與管理員顯示設定可到網站的標籤區操作。</p></details>
 </form>${options(suggestions)}${TAG_SCRIPT}`,
@@ -229,27 +233,27 @@ export function manageSitesPage(sites: ManagedSite[], message = '', draft?: { do
   return layout(
     '網站與標籤管理',
     { title: '網站與標籤管理', dek: '搜尋網站、修改名稱，或一次替多個網站新增與移除標籤。' },
-    `${message ? `<p class="flash" role="status">${html(message)}</p>` : ''}
+    `${message ? `<p class="flash" role="status">${displayHtml(message)}</p>` : ''}
 <form method="post" action="/sites/" id="bulk-edit">
-<div class="form bulk-form"><label for="domains">選取網域（每行一個，最多 200 個）</label><textarea id="domains" name="domains" rows="4" required>${html(draft?.domains ?? '')}</textarea>
+<div class="form bulk-form"><label for="domains">選取網域（每行一個，最多 200 個）</label><textarea id="domains" name="domains" rows="4" required>${displayHtml(draft?.domains ?? '')}</textarea>
 ${tagInput('add', '要加上的標籤', draft?.add ?? '', '加到每個選取的網站，原有標籤保留。')}${tagInput('remove', '要移除的標籤', draft?.remove ?? '', '從每個選取的網站拿掉，沒有這個標籤的網站不受影響。')}
 <p class="note">只加減指定標籤，其他標籤與名稱保持原值。</p>
 <div class="row"><span id="selection-count" role="status"></span><button type="submit">套用至選取網站</button></div></div>
 <div class="toolbar"><label class="search-field"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" id="manage-search" aria-label="搜尋名稱或網域" placeholder="搜尋名稱或網域" autocomplete="off"></label><label class="select-field"><span>標籤</span><select id="manage-topic"><option value="">全部標籤</option>${topics.map((t) => `<option>${html(t)}</option>`).join('')}</select></label><button type="button" id="select-visible">選取目前結果（最多 200 個）</button><button type="button" id="clear-selection" class="quiet">清除選取</button></div>
 <p class="results-line" id="manage-count" role="status">${sites.length} 個網站</p>
-<div class="scroll"><table data-sortable><thead><tr><th data-nosort><span class="sr-only">選取</span></th><th class="l" aria-sort="ascending">網站</th><th class="l">網域</th><th class="l">標籤</th><th class="l" data-nosort>編輯</th></tr></thead><tbody>${sites.map((s) => `<tr data-domain="${html(s.domain)}" data-name="${html(s.name)}" data-topics="${html(JSON.stringify(s.topics))}"><td><input type="checkbox" class="site-select" aria-label="選取 ${html(s.domain)}"></td><td class="l" data-v="${html(s.name)}"><span class="site-identity">${favicon(s.domain, s.name)}<a class="site-name" href="/site/${html(s.domain)}/">${html(s.name)}</a></span></td><td class="l" data-v="${html(s.domain)}"><span class="site-domain">${html(s.domain)}</span></td><td class="l" data-v="${html(s.topics.join('、'))}"><span class="tags">${s.topics.map((t) => `<span class="tag">${html(t)}</span>`).join('')}</span></td><td class="l"><a href="/site/${html(s.domain)}/edit/">編輯</a></td></tr>`).join('')}</tbody></table></div>
+<div class="scroll"><table data-sortable><thead><tr><th data-nosort><span class="sr-only">選取</span></th><th class="l" aria-sort="ascending">網站</th><th class="l">網域</th><th class="l">標籤</th><th class="l" data-nosort>編輯</th></tr></thead><tbody>${sites.map((s) => `<tr data-domain="${html(s.domain)}" data-name="${displayHtml(s.name)}" data-topics="${html(JSON.stringify(s.topics))}"><td><input type="checkbox" class="site-select" aria-label="選取 ${displayHtml(s.domain)}"></td><td class="l" data-v="${displayHtml(s.name)}"><span class="site-identity">${favicon(s.domain, s.name)}<a class="site-name" href="/site/${html(s.domain)}/">${displayHtml(s.name)}</a></span></td><td class="l" data-v="${html(s.domain)}"><span class="site-domain">${displayHtml(s.domain)}</span></td><td class="l" data-v="${html(s.topics.join('、'))}"><span class="tags">${s.topics.map((t) => `<span class="tag">${html(t)}</span>`).join('')}</span></td><td class="l"><a href="/site/${html(s.domain)}/edit/">編輯</a></td></tr>`).join('')}</tbody></table></div>
 </form>${options(tagsByUse(sites))}${TAG_SCRIPT}
 <script>
 (() => {
  const rows = [...document.querySelectorAll('tr[data-domain]')], field = document.getElementById('domains');
- const selection = () => [...new Set(field.value.split(/[\\s,]+/).filter(Boolean))];
+ const selection = () => [...new Set(field.value.split(/[\\s,]+/).filter(Boolean).map(d => { try { return new URL('https://' + d).hostname; } catch { return d; } }))];
  const sync = () => { const selected = new Set(selection()); rows.forEach(r => r.querySelector('input').checked = selected.has(r.dataset.domain)); document.getElementById('selection-count').textContent = '已選取 ' + selected.size + ' 個網站'; };
  const search = document.getElementById('manage-search'), topic = document.getElementById('manage-topic');
- const filter = () => { let count = 0; rows.forEach(r => { const out = !(r.dataset.name + ' ' + r.dataset.domain).toLowerCase().includes(search.value.trim().toLowerCase()) || (topic.value && !JSON.parse(r.dataset.topics).includes(topic.value)); r.toggleAttribute('data-out', !!out); if (!out) count++; }); document.getElementById('manage-count').textContent = count + ' 個網站'; rows[0]?.closest('table').dispatchEvent(new Event('traffic:rows')); };
+ const filter = () => { let count = 0; rows.forEach(r => { const out = !window.displayDomainText(r.dataset.name + ' ' + r.dataset.domain).toLowerCase().includes(window.displayDomainText(search.value.trim()).toLowerCase()) || (topic.value && !JSON.parse(r.dataset.topics).includes(topic.value)); r.toggleAttribute('data-out', !!out); if (!out) count++; }); document.getElementById('manage-count').textContent = count + ' 個網站'; rows[0]?.closest('table').dispatchEvent(new Event('traffic:rows')); };
  search.addEventListener('input', filter); topic.addEventListener('change', filter);
- rows.forEach(r => r.querySelector('input').addEventListener('change', e => { const selected = new Set(selection()); if(e.target.checked) selected.add(r.dataset.domain); else selected.delete(r.dataset.domain); field.value = [...selected].join('\\n'); sync(); }));
+ rows.forEach(r => r.querySelector('input').addEventListener('change', e => { const selected = new Set(selection()); if(e.target.checked) selected.add(r.dataset.domain); else selected.delete(r.dataset.domain); field.value = [...selected].map(window.displayDomainText).join('\\n'); sync(); }));
  field.addEventListener('input', sync);
- document.getElementById('select-visible').addEventListener('click', () => { field.value = [...document.querySelectorAll('tr[data-domain]')].filter(r => !r.hasAttribute('data-out')).slice(0, 200).map(r => r.dataset.domain).join('\\n'); sync(); });
+ document.getElementById('select-visible').addEventListener('click', () => { field.value = [...document.querySelectorAll('tr[data-domain]')].filter(r => !r.hasAttribute('data-out')).slice(0, 200).map(r => window.displayDomainText(r.dataset.domain)).join('\\n'); sync(); });
  document.getElementById('clear-selection').addEventListener('click', () => { field.value = ''; sync(); }); sync();
 })();
 </script>`,

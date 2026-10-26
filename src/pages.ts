@@ -1,5 +1,6 @@
 import { BRAND, BRAND_HEAD } from './brand.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
+import { DOMAIN_DISPLAY_SCRIPT, displayDomainText } from './domain-display.ts';
 import { type manualCandidates, proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals, reportedPercentText } from './manual-breakdowns.ts';
 import { type ranking, shiftMonth } from './metrics.ts';
@@ -19,6 +20,8 @@ import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } f
 
 export const html = (value: unknown) =>
   String(value ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+
+export const displayHtml = (value: unknown) => html(displayDomainText(value));
 
 const monthLabel = (m: string) => `${m.slice(0, 4)}/${m.slice(4)}`;
 const monthLong = (m: string) => `${m.slice(0, 4)} 年 ${Number(m.slice(4))} 月`;
@@ -236,9 +239,9 @@ export const SITE_CARD_SCRIPT = `<script>
   };
   const open = (el, tapped) => {
     const d = el.dataset;
-    const name = d.cardName || d.card;
-    card.innerHTML = '<strong>' + esc(name) + '</strong>' + (d.cardName ? '<span class="muted">' + esc(d.card) + '</span>' : '') +
-      (d.cardNote ? '<span class="note">' + esc(d.cardNote) + '</span>' : '') +
+    const name = window.displayDomainText(d.cardName || d.card);
+    card.innerHTML = '<strong>' + esc(name) + '</strong>' + (d.cardName ? '<span class="muted">' + esc(window.displayDomainText(d.card)) + '</span>' : '') +
+      (d.cardNote ? '<span class="note">' + esc(window.displayDomainText(d.cardNote)) + '</span>' : '') +
       (tapped && d.cardHref ? '<a class="go" href="' + esc(d.cardHref) + '">前往' + esc(name) + '網站頁 →</a>' : '');
     card.setAttribute('role', tapped ? 'dialog' : 'tooltip');
     card.classList.toggle('tapped', tapped);
@@ -290,7 +293,7 @@ export const SITE_CARD_SCRIPT = `<script>
 </script>`;
 
 /** Lets the stylesheet collapse long chip rows only when the script that expands them will run. */
-export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>";
+export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>" + DOMAIN_DISPLAY_SCRIPT;
 
 export function layout(
   title: string,
@@ -299,9 +302,9 @@ export function layout(
   { nav = null, tips = false, method = '' }: { nav?: Nav; tips?: boolean; method?: string } = {},
 ) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${html(title)}｜網站雷達</title>${BRAND_HEAD}<link rel="stylesheet" href="${STYLE_HREF}">${JS_FLAG}<script src="${TABLES_HREF}" defer></script></head><body>
+<title>${displayHtml(title)}｜網站雷達</title>${BRAND_HEAD}<link rel="stylesheet" href="${STYLE_HREF}">${JS_FLAG}<script src="${TABLES_HREF}" defer></script></head><body>
 ${siteHeader(nav)}
-<main class="wrap" id="main">${head.tabs ?? sectionTabs(nav)}<div class="page-head"><div><h1>${html(head.title)}</h1><p class="dek">${head.dek ? `${head.dek.replace(/。$/, '')}<span class="sep" aria-hidden="true">·</span>` : ''}${METHOD_LINK}</p></div>${
+<main class="wrap" id="main">${head.tabs ?? sectionTabs(nav)}<div class="page-head"><div><h1>${displayHtml(head.title)}</h1><p class="dek">${head.dek ? `${head.dek.replace(/。$/, '')}<span class="sep" aria-hidden="true">·</span>` : ''}${METHOD_LINK}</p></div>${
     head.actions ? `<div class="page-actions">${head.actions}</div>` : ''
   }</div>${head.toolbar ? `<div class="toolbar">${head.toolbar}</div>` : ''}
 ${body}</main>
@@ -363,7 +366,7 @@ const tagLinks = (topics: string[], href: (t: string) => string) =>
 const tileHue = (domain: string) => [...domain].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 /** What the site card (SITE_CARD_SCRIPT) shows for a site: its name, its domain, a note and where its page is. */
 const cardData = (domain: string, name = domain, { note = '', href = `/site/${domain}/` }: { note?: string; href?: string } = {}) =>
-  ` data-card="${html(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${html(name.trim())}"` : ''}${
+  ` data-card="${html(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${displayHtml(name.trim())}"` : ''}${
     note ? ` data-card-note="${html(note)}"` : ''
   }${href ? ` data-card-href="${html(href)}"` : ''}`;
 /**
@@ -371,7 +374,7 @@ const cardData = (domain: string, name = domain, { note = '', href = `/site/${do
  * the name and domain; pass `titled: false` where the surrounding element already has its own card or tooltip.
  */
 export const favicon = (domain: string, name: string, { titled = true }: { titled?: boolean } = {}) =>
-  `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}"${
+  `<span class="favicon" data-letter="${html([...displayDomainText(name).trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}"${
     titled ? cardData(domain, name) : ''
   } aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
 /**
@@ -379,15 +382,15 @@ export const favicon = (domain: string, name: string, { titled = true }: { title
  * any note go in the tooltip. Untracked sites have no page, so they are not links and get a dashed edge.
  */
 export const logoChip = (domain: string, { note = '', tracked = true }: { note?: string; tracked?: boolean } = {}) => {
-  const title = `${domain}${note ? `・${note}` : ''}${tracked ? '' : '（本站尚未追蹤）'}`;
+  const title = `${displayDomainText(domain)}${note ? `・${note}` : ''}${tracked ? '' : '（本站尚未追蹤）'}`;
   const card = cardData(domain, domain, {
     note: `${note}${note && !tracked ? '・' : ''}${tracked ? '' : '本站尚未追蹤'}`,
     href: tracked ? undefined : '',
   });
   const inner = favicon(domain, domain, { titled: false });
   return tracked
-    ? `<a class="logo-chip" href="/site/${html(domain)}/"${card} aria-label="${html(title)}">${inner}</a>`
-    : `<span class="logo-chip untracked"${card} role="img" aria-label="${html(title)}">${inner}</span>`;
+    ? `<a class="logo-chip" href="/site/${html(domain)}/"${card} aria-label="${displayHtml(title)}">${inner}</a>`
+    : `<span class="logo-chip untracked"${card} role="img" aria-label="${displayHtml(title)}">${inner}</span>`;
 };
 /** Marks a visits figure that is not Similarweb's own: a month taken from the sheet, or entered by hand from the platform. */
 const visitsSourceCell = (source: string | null | undefined) =>
@@ -399,9 +402,9 @@ const visitsSourceCell = (source: string | null | undefined) =>
 
 /** The site's logo and name; `stacked` puts the domain under the name instead of beside it. */
 export const siteCell = (domain: string, name: string, extra = '', stacked = false) => {
-  const link = `<a class="site-name" href="/site/${html(domain)}/" title="${html(name)} · ${html(domain)}">${html(name)}</a>`;
-  const domainText = domain !== name ? `<span class="site-domain table-lead-extra">${html(domain)}</span>` : '';
-  return `<td class="l" data-v="${html(name)}"><span class="site-identity${stacked ? ' stacked' : ''}">${favicon(domain, name)}${
+  const link = `<a class="site-name" href="/site/${html(domain)}/" title="${displayHtml(name)} · ${displayHtml(domain)}">${displayHtml(name)}</a>`;
+  const domainText = domain !== name ? `<span class="site-domain table-lead-extra">${displayHtml(domain)}</span>` : '';
+  return `<td class="l" data-v="${displayHtml(name)}"><span class="site-identity${stacked ? ' stacked' : ''}">${favicon(domain, name)}${
     stacked ? `<span class="site-lines">${link}${domainText}</span>` : `${link}${domainText}`
   }${extra}</span></td>`;
 };
@@ -646,7 +649,7 @@ export function topicsPage(data: TopicOverview, topic?: string) {
         dek: `這個標籤的所有網站與累計流量（${period}）`,
         actions: `<a href="/tag/">← 全部標籤</a><a href="/#topic=${encodeURIComponent(selected.topic)}">本月排行</a>`,
       },
-      `<div class="stats">${statCard('網站數', String(selected.sites), `${selected.sitesWithData} 個有流量資料`)}${statCard('累計造訪', vol(selected.visits), '加總所有已知月份')}${statCard('流量最大的網站', leader ? `<a href="/site/${html(leader.domain)}/" title="${html(leader.name)}">${html(leader.name)}</a>` : '', leader && topShare(1) !== null ? `占 ${pct(topShare(1))}` : '')}${statCard('前 5 大網站占比', pct(topShare(5)), known.length > 5 ? `其餘 ${known.length - 5} 個網站占 ${pct(1 - (topShare(5) as number))}` : '')}${statCard('搜尋占比', pct(selected.searchShare, 1))}${statCard('AI 占比', pct(selected.aiShare, 2))}</div>
+      `<div class="stats">${statCard('網站數', String(selected.sites), `${selected.sitesWithData} 個有流量資料`)}${statCard('累計造訪', vol(selected.visits), '加總所有已知月份')}${statCard('流量最大的網站', leader ? `<a href="/site/${html(leader.domain)}/" title="${displayHtml(leader.name)}">${displayHtml(leader.name)}</a>` : '', leader && topShare(1) !== null ? `占 ${pct(topShare(1))}` : '')}${statCard('前 5 大網站占比', pct(topShare(5)), known.length > 5 ? `其餘 ${known.length - 5} 個網站占 ${pct(1 - (topShare(5) as number))}` : '')}${statCard('搜尋占比', pct(selected.searchShare, 1))}${statCard('AI 占比', pct(selected.aiShare, 2))}</div>
 ${
   pairs.length
     ? section(
@@ -694,7 +697,7 @@ ${
       return `<tr><td class="l"><a class="site-name" href="${topicHref(t.topic)}">${html(t.topic)}</a></td><td class="num">${t.sites}</td><td class="num">${t.sitesWithData}</td>${volCell(t.visits, '—')}${volCell(t.visits !== null && t.sitesWithData ? t.visits / t.sitesWithData : null, '—')}<td class="num">${pct(t.searchShare, 2) || '—'}</td><td class="num">${pct(t.aiShare, 2) || '—'}</td><td class="l"><span class="leaders">${top
         .map(
           (s) =>
-            `<a class="with-logo" href="/site/${html(s.domain)}/" title="${html(s.domain)}・累計 ${volText(s.visits)}">${favicon(s.domain, s.name, { titled: false })}${html(s.name)}</a>`,
+            `<a class="with-logo" href="/site/${html(s.domain)}/" title="${displayHtml(s.domain)}・累計 ${volText(s.visits)}">${favicon(s.domain, s.name, { titled: false })}${displayHtml(s.name)}</a>`,
         )
         .join('、')}</span></td></tr>`;
     })
@@ -947,7 +950,7 @@ const shareRows = (items: Array<{ label: string; hint?: string; share: number }>
   `<ul class="share-list">${items
     .map(
       (i) =>
-        `<li${i.share ? '' : ' class="zero"'}><span class="share-name">${html(i.label)}${i.hint ? `<small>${html(i.hint)}</small>` : ''}</span><span class="share-bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, i.share * 100)).toFixed(1)}%"></i></span><b>${pct(i.share, i.share && i.share < 0.0095 ? 2 : 1)}</b>${visits === null ? '' : `<small class="share-visits">${i.share ? `約 ${volText(visits * i.share)}` : ''}</small>`}</li>`,
+        `<li${i.share ? '' : ' class="zero"'}><span class="share-name">${displayHtml(i.label)}${i.hint ? `<small>${html(i.hint)}</small>` : ''}</span><span class="share-bar" aria-hidden="true"><i style="width:${Math.max(0, Math.min(100, i.share * 100)).toFixed(1)}%"></i></span><b>${pct(i.share, i.share && i.share < 0.0095 ? 2 : 1)}</b>${visits === null ? '' : `<small class="share-visits">${i.share ? `約 ${volText(visits * i.share)}` : ''}</small>`}</li>`,
     )
     .join('')}</ul>`;
 
@@ -1100,7 +1103,7 @@ export function tagPanel(domain: string, tags: TagItem[], viewer: TagViewer) {
   const form = (kind: string, tag: string, buttons: string) =>
     `<form class="inline" method="post" action="${action}"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="tag" value="${html(tag)}">${buttons}</form>`;
   const button = (value: string | number, label: string, pressed: boolean, title: string, choice: string) =>
-    `<button type="submit" class="tag-text-button" name="value" value="${value}" aria-pressed="${pressed}" title="${html(title)}" data-choice="${choice}">${pressed ? '<span aria-hidden="true">✓ </span>' : ''}${label}</button>`;
+    `<button type="submit" class="tag-text-button" name="value" value="${value}" aria-pressed="${pressed}" title="${displayHtml(title)}" data-choice="${choice}">${pressed ? '<span aria-hidden="true">✓ </span>' : ''}${label}</button>`;
   const items = tags
     .map((t) => {
       const mine = viewer.votes[t.tag] ?? 0;
@@ -1204,7 +1207,7 @@ export function platformBreakdownsSection(profiles: TrafficProfile[]) {
             const rows = data[key]
               .map(
                 (row) =>
-                  `<tr><td class="l">${html(row.name ?? '未提供名稱')}</td><td class="num">${html(reportedPercentText(row.share))}</td><td class="num">${html(row.change ?? '—')}</td></tr>`,
+                  `<tr><td class="l">${displayHtml(row.name ?? '未提供名稱')}</td><td class="num">${html(reportedPercentText(row.share))}</td><td class="num">${html(row.change ?? '—')}</td></tr>`,
               )
               .join('');
             return `<div class="breakdown-list"><h3>${html(label)}</h3><p class="note">${html(denominator)}</p><div class="scroll"><table><thead><tr><th class="l">名稱</th><th class="num">占比</th><th class="num">平台變化</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
@@ -1261,7 +1264,7 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
   const topics = site.topics;
   const s = site.state;
   const fetchState = s
-    ? `最近成功抓取 ${tw(s.lastSuccessAt) || '—'}；最近嘗試 ${tw(s.lastAttemptAt) || '—'}${s.nextAttemptAt ? `；下次最早 ${tw(s.nextAttemptAt)}` : ''}${s.failures ? `；連續失敗 ${s.failures} 次（${html(s.lastError)}）` : ''}。`
+    ? `最近成功抓取 ${tw(s.lastSuccessAt) || '—'}；最近嘗試 ${tw(s.lastAttemptAt) || '—'}${s.nextAttemptAt ? `；下次最早 ${tw(s.nextAttemptAt)}` : ''}${s.failures ? `；連續失敗 ${s.failures} 次（${displayHtml(s.lastError)}）` : ''}。`
     : '尚未向 Similarweb 抓取。';
   const watchers = site.watchers.length
     ? site.watchers.map((w) => `${requesterLabel(w.requester)}・${KIND_LABEL[w.kind] ?? html(w.kind)}`).join('、')
@@ -1271,7 +1274,7 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
     site.name,
     {
       title: site.name,
-      dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${html(site.domain)} ↗</a>${topics.length ? tagLinks(topics, (topic) => `/#topic=${encodeURIComponent(topic)}&hl=${encodeURIComponent(site.domain)}`) : ''}`,
+      dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${displayHtml(site.domain)} ↗</a>${topics.length ? tagLinks(topics, (topic) => `/#topic=${encodeURIComponent(topic)}&hl=${encodeURIComponent(site.domain)}`) : ''}`,
       actions: `${canEdit ? '' : `<a href="/auth/google?next=${encodeURIComponent(`/site/${site.domain}/`)}">登入編輯</a>`}<a href="/api/v1/sites/${html(site.domain)}">JSON</a>`,
       tabs: siteTabs(site.domain, 'overview', canEdit),
     },
@@ -1330,7 +1333,7 @@ ${section('追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${f
 export function notFoundPage(raw: string) {
   return layout(
     '找不到網站',
-    { title: '沒有這個網站的資料', dek: `${html(raw)} 不在任何追蹤清單裡，也沒有抓到過資料。` },
+    { title: '沒有這個網站的資料', dek: `${displayHtml(raw)} 不在任何追蹤清單裡，也沒有抓到過資料。` },
     section('接下來', '<p class="body"><a href="/">回流量總覽</a>，或到<a href="/watch/">追蹤網域</a>登入後把它加進來。</p>'),
   );
 }
@@ -1546,7 +1549,7 @@ export function watchPage({
       : w.lastResponseAt
         ? `<span class="muted" title="Similarweb 有回應但沒有造訪量估算，小網站常見">Similarweb 沒有估算</span>`
         : w.failures
-          ? `<span class="down" title="${html(w.lastError)}">▼ 失敗 ${w.failures} 次</span>`
+          ? `<span class="down" title="${displayHtml(w.lastError)}">▼ 失敗 ${w.failures} 次</span>`
           : w.lastAttemptAt
             ? '抓取中'
             : (queued(w) ?? '<span class="muted">排隊中</span>');
@@ -1554,11 +1557,11 @@ export function watchPage({
   const rowHtml = (
     w: WatchRow,
     removable: boolean,
-  ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity">${favicon(w.domain, w.domain)}<a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a></span></td>
+  ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity">${favicon(w.domain, w.domain)}<a class="site-name" href="/site/${html(w.domain)}/">${displayHtml(w.domain)}</a></span></td>
 <td class="l">${w.note && w.note !== w.domain ? html(w.note) : ''}</td>
 ${sortCell('num', w.latestVisits, w.latestMonth ? `${vol(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : '')}
 ${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-domain">${tw(w.requestedAt.toISOString())}</span>`)}${editor ? `<td class="l"><span class="radar">${html(w.addedBy)}</span></td>` : ''}
-<td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
+<td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${displayHtml(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
   const head = `<th class="l">網域</th><th class="l">備註</th><th class="num">最新造訪量</th><th class="l">最近成功</th><th class="l">加入時間</th>${editor ? '<th class="l">加入者</th>' : ''}<th data-nosort><span class="sr-only">操作</span></th>`;
   const cols = editor ? 7 : 6;
   const services = others.filter((o) => o.requester !== 'sheet');
@@ -1582,7 +1585,7 @@ ${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l'
       title: '追蹤網域',
       dek: '加入網站並定期更新流量資料',
     },
-    `${flash ? `<p class="flash">${html(flash)}</p>` : ''}${form}
+    `${flash ? `<p class="flash">${displayHtml(flash)}</p>` : ''}${form}
 <section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', cols)}</section>
 ${listSection}`,
     {
@@ -1651,7 +1654,7 @@ export function discoverPage({
     const add = editor
       ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="${html(self)}"><input type="hidden" name="domains" value="${html(c.domain)}"><input type="hidden" name="note" value="similarsites 候選（${c.votes} 站推薦）"><button type="submit" class="quiet">加入追蹤</button></form>`
       : '';
-    return `<tr><td class="l" data-v="${html(c.domain)}"><span class="site-identity">${favicon(c.domain, c.domain)}<span class="site-name">${html(c.domain)}</span></span></td>
+    return `<tr><td class="l" data-v="${html(c.domain)}"><span class="site-identity">${favicon(c.domain, c.domain)}<span class="site-name">${displayHtml(c.domain)}</span></span></td>
 ${sortCell('l', c.clue ? 1 : 0, clueBadge(c.clue))}<td class="l">${c.category ? html(categoryLabel(c.category)) : ''}</td>${sortCell('num', c.votes, `${c.votes} 個`)}${sortCell(
       'num',
       c.avgGrade,
@@ -1724,12 +1727,12 @@ export function similarPage({
       .replace(/\s+/g, ' ')
       .trim();
     const clue = taiwanClue(e.similar, [blurb]);
-    return `<tr><td class="l" data-v="${html(name ?? e.similar)}"><span class="site-identity">${favicon(e.similar, name ?? e.similar)}${
+    return `<tr><td class="l" data-v="${displayHtml(name ?? e.similar)}"><span class="site-identity">${favicon(e.similar, name ?? e.similar)}${
       tracked.has(e.similar)
-        ? `<a class="site-name" href="/site/${html(e.similar)}/">${html(name ?? e.similar)}</a>`
-        : `<span class="site-name">${html(name ?? e.similar)}</span>`
+        ? `<a class="site-name" href="/site/${html(e.similar)}/">${displayHtml(name ?? e.similar)}</a>`
+        : `<span class="site-name">${displayHtml(name ?? e.similar)}</span>`
     }</span></td>
-<td class="l"><span class="site-domain">${html(e.similar)}</span></td><td class="l">${blurb ? `<p class="site-blurb">${html(blurb)}</p>` : ''}</td>
+<td class="l"><span class="site-domain">${displayHtml(e.similar)}</span></td><td class="l">${blurb ? `<p class="site-blurb">${displayHtml(blurb)}</p>` : ''}</td>
 <td class="l">${e.category ? html(categoryLabel(e.category)) : ''}</td>${sortCell('l', clue ? 1 : 0, clueBadge(clue))}${sortCell(
       'num',
       e.grade,
@@ -1740,7 +1743,7 @@ export function similarPage({
   const untracked = listing.similar.filter((e) => !tracked.has(e.similar)).length;
   const reverse = listing.listedBy.length
     ? section(
-        `也把 ${html(site.domain)} 列為相似的網站<small>${listing.listedBy.length} 個</small>`,
+        `也把 ${displayHtml(site.domain)} 列為相似的網站<small>${listing.listedBy.length} 個</small>`,
         `<p class="logos">${listing.listedBy
           .map((l) => logoChip(l.domain, { note: `相似度 ${Math.round(l.grade * 100)}%`, tracked: tracked.has(l.domain) }))
           .join('')}</p>`,
@@ -1750,7 +1753,7 @@ export function similarPage({
     `${site.name} 的相似網站`,
     {
       title: site.name,
-      dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${html(site.domain)} ↗</a>`,
+      dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${displayHtml(site.domain)} ↗</a>`,
       tabs: siteTabs(site.domain, 'similar', !!editor),
     },
     `${addedFlash(added)}${section(
@@ -1765,12 +1768,15 @@ export function similarPage({
       nav: null,
       method: `<p>相似網站名單來自 similarsites.com（Similarweb 旗下），每個網站最多 20 個。簡介、類別、月造訪與國內排名都是 similarsites.com 的估算，與本站 Similarweb 數字來源相近，但不保證相同。加入追蹤前，這些網站沒有本站的流量資料。</p>${methodPart(
         '相似網站',
-        `<p>similarsites.com 依瀏覽行為與內容認定與 ${html(site.domain)} 相似的網站，${
+        `<p>similarsites.com 依瀏覽行為與內容認定與 ${displayHtml(site.domain)} 相似的網站，${
           fetched ? `${twDate(new Date(fetched).toISOString())} 取得，` : ''
         }相似度 0–100%。</p>`,
       )}${
         listing.listedBy.length
-          ? methodPart(`也把 ${html(site.domain)} 列為相似的網站`, '<p>這些追蹤中的網站，相似網站名單裡有它；排在前面的相似度最高。</p>')
+          ? methodPart(
+              `也把 ${displayHtml(site.domain)} 列為相似的網站`,
+              '<p>這些追蹤中的網站，相似網站名單裡有它；排在前面的相似度最高。</p>',
+            )
           : ''
       }`,
     },

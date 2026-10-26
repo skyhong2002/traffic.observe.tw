@@ -223,7 +223,7 @@
         if (e.key === 'Enter' && !e.isComposing) e.preventDefault();
       });
       input.addEventListener('input', () => {
-        const query = input.value.trim().toLocaleLowerCase();
+        const query = (window.displayDomainText?.(input.value.trim()) ?? input.value.trim()).toLocaleLowerCase();
         for (const row of table.tBodies[0].rows) {
           if (row.cells.length === 1) continue;
           const text = (row.querySelector('.table-lead') ?? row).textContent.toLocaleLowerCase();

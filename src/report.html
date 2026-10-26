@@ -103,7 +103,7 @@ const topicsOf = (s) => s.topics || [];
 const siteHref = (domain) => `/site/${encodeURIComponent(domain)}/`;
 /** The site's icon (/icon/, cached on the server), or the first letter of its name where it has none; hovering it opens the site card (SITE_CARD_SCRIPT). */
 const favicon = (domain, name) =>
-  `<span class="favicon" data-letter="${esc([...name.trim()][0]?.toUpperCase() ?? '')}" data-card="${esc(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${esc(name.trim())}"` : ''} data-card-href="${siteHref(domain)}" aria-hidden="true"><img src="/icon/${encodeURIComponent(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
+  `<span class="favicon" data-letter="${esc([...window.displayDomainText(name).trim()][0]?.toUpperCase() ?? '')}" data-card="${esc(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${esc(name.trim())}"` : ''} data-card-href="${siteHref(domain)}" aria-hidden="true"><img src="/icon/${encodeURIComponent(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
 // Every matching site participates in the same ranking.
 const numberRanks = (rows) => rows.map((r, i) => ({ ...r, rank: i + 1 }));
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
@@ -123,7 +123,7 @@ function row(domain, s) {
     : taiwanBefore > 0 ? taiwanNow / taiwanBefore - 1 : before ? null : 'new';
   const radar = (state.data.radar[domain] || []).at(-1) || null;
   return {
-    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], twVisits: taiwanNow, twBasis: now[BASIS] || 0, twShare: twShare(now), twCapped: now[CAPPED] === 1, prev: before ? before[V] : null,
+    domain, displayDomain: window.displayDomainText(domain), name: window.displayDomainText(s.name || domain), group: s.group, topics: topicsOf(s), visits: now[V], twVisits: taiwanNow, twBasis: now[BASIS] || 0, twShare: twShare(now), twCapped: now[CAPPED] === 1, prev: before ? before[V] : null,
     change, search: now[S], ai: now[A], taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
@@ -406,7 +406,7 @@ function currentSort() {
 }
 function renderResults(scoped = scopedRows()) {
   const query = state.query.trim().toLocaleLowerCase();
-  const rows = scoped.filter((r) => !query || `${r.name} ${r.domain}`.toLocaleLowerCase().includes(query));
+  const rows = scoped.filter((r) => !query || `${r.name} ${r.domain} ${r.displayDomain}`.toLocaleLowerCase().includes(query));
   document.getElementById('result-count').textContent = `${activeKey() || '全部網站'}${state.exclude.length ? `・排除 ${state.exclude.join('、')}` : ''}・${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '網站'}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}`;
   const host = document.getElementById('sections');
   nearEnd.disconnect();
@@ -436,7 +436,7 @@ function rankingRow(r, cal) {
   if (r.domain === state.hl) tr.className = 'hl';
   const cells = {
     rank: r.rank ?? '—',
-    name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</a>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台補登的數字">人工</span>' : ''}</span>`,
+    name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.displayDomain)}">${esc(r.name)}</a>${r.name !== r.displayDomain ? `<span class="site-domain table-lead-extra" title="${esc(r.displayDomain)}">${esc(r.displayDomain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台補登的數字">人工</span>' : ''}</span>`,
     topics: `<span class="tags" title="${esc(r.topics.join('、'))}">${r.topics.map((t) => `<a class="tag" href="${tagHref(t)}">${esc(t)}</a>`).join('')}</span>`,
     twVisits: twCell(r),
     visits: millions(r.visits),
@@ -602,7 +602,7 @@ function drawBump(host, topic) {
   spreadLabels(ends, narrow ? 11 : 13, m.t + 4, height - m.b - 2);
   const maxChars = Math.max(3, Math.floor((labelW - 26) / 12));
   for (const e of ends) {
-    const name = state.data.sites[e.d].name || e.d;
+    const name = window.displayDomainText(state.data.sites[e.d].name || e.d);
     const short = name.length > maxChars ? `${name.slice(0, maxChars - 1)}…` : name;
     g += `<text class="end${e.d === hl ? ' on' : ''}" x="${width - m.r + 8}" y="${(e.y + 4).toFixed(1)}">${e.i === months.length - 1 ? e.r : '·'} ${esc(short)}</text>`;
   }
@@ -630,7 +630,7 @@ function drawBump(host, topic) {
     if (!b) { hideTip(); return; }
     const s = state.data.sites[b.L.d];
     const v = s.m[b.q.mo]?.[V];
-    showTip(`<b>${esc(s.name || b.L.d)}</b><br>${monthLabel(b.q.mo)}：標籤內第 ${b.q.r} 名<br>造訪 ${visits(v)}${ORIGIN_NOTE[s.m[b.q.mo]?.[ORIGIN]] ? `（${ORIGIN_NOTE[s.m[b.q.mo][ORIGIN]]}）` : ''}`, ev.clientX, ev.clientY);
+    showTip(`<b>${esc(window.displayDomainText(s.name || b.L.d))}</b><br>${monthLabel(b.q.mo)}：標籤內第 ${b.q.r} 名<br>造訪 ${visits(v)}${ORIGIN_NOTE[s.m[b.q.mo]?.[ORIGIN]] ? `（${ORIGIN_NOTE[s.m[b.q.mo][ORIGIN]]}）` : ''}`, ev.clientX, ev.clientY);
   };
   svg.addEventListener('pointermove', move);
   svg.addEventListener('pointerdown', move);
