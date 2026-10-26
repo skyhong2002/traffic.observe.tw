@@ -1432,6 +1432,17 @@ details.method p {
   line-height: 1.9;
   margin: 0 0 12px;
 }
+details.method h3 {
+  margin: 20px 0 6px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+details.method ul {
+  max-width: 65em;
+  line-height: 1.9;
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
 details.method[open] {
   padding-bottom: 12px;
 }
@@ -2227,15 +2238,6 @@ svg .cross {
   text-align: right;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-}
-.method-note {
-  margin-top: 16px;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.method-note ul {
-  margin: 8px 0 0;
-  padding-left: 20px;
 }
 @media (max-width: 640px) {
   .share-list li {

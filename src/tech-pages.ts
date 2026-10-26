@@ -1,4 +1,4 @@
-import { chipRow, favicon, html, layout, SOURCE_LABEL, section, siteCell, sortCell, table, tw, twDate } from './pages.ts';
+import { chipRow, favicon, html, layout, methodPart, SOURCE_LABEL, section, siteCell, sortCell, table, tw, twDate } from './pages.ts';
 import { CATEGORIES, CATEGORY_LABEL, PRODUCTS, type TechCategory, type TechErrorCode, type TechStatus } from './tech.ts';
 import type { TechRecord } from './tech-scan.ts';
 
@@ -195,7 +195,7 @@ export function techPage(o: TechOverview) {
 ${sourceChips}${categoryChips}${statusChips}
 ${section(
   '技術',
-  `<p class="note">每項技術出現在幾個網站的首頁；比例的分母是有成功檢查結果的 ${c.withSnapshot.toLocaleString('en-US')} 個網站。按名稱只看用它的網站。</p>${table(
+  `${table(
     '<th class="l">技術</th><th class="l">類別</th><th class="num" aria-sort="descending">網站數</th><th class="num">比例</th>',
     techRows,
     '還沒有檢查結果。',
@@ -212,7 +212,13 @@ ${section(
     'tech-sites',
   )}`,
 )}`,
-    { nav: 'tech', method: techMethod(PRODUCTS.size) },
+    {
+      nav: 'tech',
+      method: `${techMethod(PRODUCTS.size)}${methodPart(
+        '技術',
+        `<p>每項技術出現在幾個網站的首頁；比例的分母是有成功檢查結果的 ${c.withSnapshot.toLocaleString('en-US')} 個網站。按名稱只看用它的網站。</p>`,
+      )}`,
+    },
   );
 }
 

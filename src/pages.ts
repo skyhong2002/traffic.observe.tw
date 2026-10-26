@@ -178,6 +178,9 @@ const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪�
 <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
 `;
 
+/** One part of a page's method note, titled after the section of the page it explains. */
+export const methodPart = (title: string, inner: string) => `<h3>${title}</h3>${inner}`;
+
 export function siteFooter(nav: Nav = null, method = '') {
   return `<div class="wrap"><details class="method" id="method"><summary>資料來源與計算方式</summary>
 ${method || TRAFFIC_METHOD}
@@ -526,10 +529,10 @@ export function topicsPage(data: TopicOverview, topic?: string) {
     ? `${monthLong(data.months[0])} 至 ${monthLong(data.months.at(-1) as string)}，共 ${data.months.length} 個有流量資料的月份`
     : '尚無流量資料';
   const topicHref = (t: string) => `/tag/?topic=${encodeURIComponent(t)}`;
-  const method = section(
+  const method = `${TRAFFIC_METHOD}${methodPart(
     '標籤如何計算',
-    '<p class="note">以網站目前的標籤彙整全部歷史流量。每個標籤內，同一網域只計為一個網站，尚無流量資料的網站也列入。累計造訪量加總各網站所有已知月份；各站資料月數可能不同，缺少的月份不補零。搜尋與 AI 占比分別以有該項資料的網站月份加權計算。多標籤網站會計入各個標籤，標籤之間的流量不可直接相加。資料月數不同的網站可用「月平均」比較。標籤雲依累計造訪量或網站數的排名決定字級；「前 5 大網站占比」是這 5 個網站的累計造訪量占標籤總量的比例。</p>',
-  );
+    '<p>以網站目前的標籤彙整全部歷史流量。每個標籤內，同一網域只計為一個網站，尚無流量資料的網站也列入。累計造訪量加總各網站所有已知月份；各站資料月數可能不同，缺少的月份不補零。搜尋與 AI 占比分別以有該項資料的網站月份加權計算。多標籤網站會計入各個標籤，標籤之間的流量不可直接相加。資料月數不同的網站可用「月平均」比較。標籤雲依累計造訪量或網站數的排名決定字級；「前 5 大網站占比」是這 5 個網站的累計造訪量占標籤總量的比例。</p>',
+  )}`;
   if (selected) {
     const known = members.filter((s) => s.visits !== null).map((s) => s.visits as number);
     const total = known.reduce((a, b) => a + b, 0);
@@ -573,8 +576,8 @@ ${
         '尚無網站。',
         8,
         'members',
-      )}</section>${method}`,
-      { nav: 'topics' },
+      )}</section>`,
+      { nav: 'topics', method },
     );
   }
 
@@ -623,8 +626,8 @@ ${
       '尚無標籤。',
       8,
       'topics',
-    )}</section>${method}${CLOUD_SCRIPT}`,
-    { nav: 'topics' },
+    )}</section>${CLOUD_SCRIPT}`,
+    { nav: 'topics', method },
   );
 }
 
@@ -899,21 +902,36 @@ export function similarwebSection(
     return logoChip(d, { note: g === undefined ? '' : `相似度 ${Math.round(g * 100)}%`, tracked: !tracked || tracked.has(d) });
   };
   const similar = site.similarSites.length
-    ? `<h3>相似網站</h3><p class="logos">${site.similarSites.map(similarChip).join('')}</p><p class="note"><a href="/site/${html(site.domain)}/similar/">查看全部相似網站與簡介 →</a>　依相似程度排列，滑過 logo 看網域與相似度${
-        tracked && site.similarSites.some((d) => !tracked.has(d)) ? '；虛線外框是本站尚未追蹤的網站' : ''
-      }。</p>`
+    ? `<h3>相似網站</h3><p class="logos">${site.similarSites.map(similarChip).join('')}</p><p class="note"><a href="/site/${html(site.domain)}/similar/">查看全部相似網站與簡介 →</a></p>`
     : '';
   return section(
     `流量組成 <small>Similarweb${p.source === 'manual' ? ' 平台補登' : ''}・${monthLong(p.month)}</small>`,
     `<p class="note">${p.source === 'manual' ? '以下為編輯者從 Similarweb 平台補登的資料，未填欄位不代表 0。資料月份：' : 'Similarweb 每次只提供最新一個月的組成，這裡顯示：'}${monthLong(p.month)}${visits === null ? '' : `（當月造訪 ${volText(visits)}）`}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</p>${cards}
-<div class="charts"><div class="chart-box"><h3>訪客從哪裡來</h3>${shareRows(channels, visits)}</div><div class="chart-box"><h3>訪客在哪個國家</h3>${shareRows(countries, visits)}</div></div>${similar}
-<details class="method-note"><summary>這些數字怎麼來的</summary><ul class="body">
+<div class="charts"><div class="chart-box"><h3>訪客從哪裡來</h3>${shareRows(channels, visits)}</div><div class="chart-box"><h3>訪客在哪個國家</h3>${shareRows(countries, visits)}</div></div>${similar}`,
+  );
+}
+
+/** How the composition section's numbers come about, for the method note at the foot of the site page. */
+function similarwebMethod(site: Pick<SitePage, 'profile' | 'category' | 'similarSites' | 'trackedSimilar'>) {
+  const p = site.profile;
+  if (!p) return '';
+  const category = p.categoryRank?.category ?? site.category;
+  const tracked = site.trackedSimilar ? new Set(site.trackedSimilar) : null;
+  const similar = site.similarSites.length
+    ? `<li>相似網站依相似程度排列，滑過 logo 看網域與相似度${
+        tracked && site.similarSites.some((d) => !tracked.has(d)) ? '；虛線外框是本站尚未追蹤的網站' : ''
+      }。</li>`
+    : '';
+  return methodPart(
+    '流量組成',
+    `<ul>
 <li>${p.source === 'manual' ? '來源是編輯者從 Similarweb 平台手動補登，保留每次修改紀錄' : '來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存'}；Similarweb 的數字是估算，小網站誤差較大。</li>
 <li>排名：全球與國家排名依 Similarweb 估算的造訪量；類別排名只和同一類別（${category ? html(categoryLabel(category)) : 'Similarweb 的分類'}）的網站比較。</li>
 <li>平均停留、每次造訪頁數、跳出率都是所有造訪的平均；跳出率是只看一頁就離開的造訪比例。</li>
 <li>導流來源的「自然搜尋」不含搜尋廣告；「AI 工具」是從 ChatGPT 等 AI 助理點進來的造訪。排行上的搜尋占比、AI 占比用的就是這兩項。</li>
 <li>${limitedTraffic() ? '公開資料只列台灣占比。' : p.source === 'manual' ? '只列出已補登的國家占比。' : '國家只列前 5 名，「其他國家」是其餘合計。'}</li>
-</ul></details>`,
+${similar}
+</ul>`,
   );
 }
 
@@ -1175,11 +1193,10 @@ ${section(
 )}
 ${similarwebSection(site)}
 ${platformBreakdownsSection(site.manualProfiles ?? site.profiles)}
-${site.profiles.length ? section('導流來源走勢', `<p class="note">各來源占這個網站造訪的比例；各圖刻度不同，從 0 開始。${monthsNote(site.profiles.length, site.profiles[0].month)}</p>${channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels, source: p.source })))}`) : ''}
+${site.profiles.length ? section('導流來源走勢', channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels, source: p.source })))) : ''}
 ${section(
   '導流占比',
-  `<p class="note">兩張圖各自的刻度：自然搜尋與 GenAI 導流占全部造訪的比例。Similarweb 只給最新一個月的占比，所以點常常不連續。</p>
-<div class="charts"><div class="chart-box"><h3>搜尋占比</h3>${shareChart('searchShare', 0, '搜尋占比')}</div><div class="chart-box"><h3>AI 占比</h3>${shareChart('aiShare', 2, 'AI 占比')}</div></div>`,
+  `<div class="charts"><div class="chart-box"><h3>搜尋占比</h3>${shareChart('searchShare', 0, '搜尋占比')}</div><div class="chart-box"><h3>AI 占比</h3>${shareChart('aiShare', 2, 'AI 占比')}</div></div>`,
 )}
 ${section(
   '逐月數字',
@@ -1198,13 +1215,23 @@ ${
   radarRows
     ? section(
         'Cloudflare Radar 全球排名',
-        `<p class="note">依 1.1.1.1 DNS 查詢的熱門程度；前 100 名才有名次，其餘只有級距。不能換算成造訪量。</p>${table('<th class="l" aria-sort="descending">資料日期</th><th class="l">排名</th><th class="l">抓取時間</th>', radarRows, '', 3)}`,
+        table('<th class="l" aria-sort="descending">資料日期</th><th class="l">排名</th><th class="l">抓取時間</th>', radarRows, '', 3),
       )
     : ''
 }
 ${tech}
 ${section('追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${fetchState}</p>`)}`,
-    { tips: true },
+    {
+      tips: true,
+      method: `${TRAFFIC_METHOD}${similarwebMethod(site)}${
+        site.profiles.length
+          ? methodPart(
+              '導流來源走勢',
+              `<p>各來源占這個網站造訪的比例；各圖刻度不同，從 0 開始。${monthsNote(site.profiles.length, site.profiles[0].month)}</p>`,
+            )
+          : ''
+      }${methodPart('導流占比', '<p>兩張圖各自的刻度：自然搜尋與 GenAI 導流占全部造訪的比例。Similarweb 只給最新一個月的占比，所以點常常不連續。</p>')}`,
+    },
   );
 }
 
@@ -1260,14 +1287,14 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   const queueHead =
     '<th class="rank" aria-sort="ascending" title="抓取順序">#</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>';
   const queueNote = q.length
-    ? `<p class="note">共 ${q.length} 個網域等候抓取。${
-        status.budget ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。` : '目前暫停送出，以下為等候順序。'
+    ? `<p>共 ${q.length} 個網域等候抓取。${
+        status.budget ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。` : '目前暫停送出，表格是等候順序。'
       }排程之後到期的網域會依同樣規則接在後面。${
         status.lastMonth.catchUpPerRun >= status.budget
           ? ''
           : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
       }</p>`
-    : '<p class="note">目前沒有到期的網域。</p>';
+    : '<p>目前沒有到期的網域。</p>';
   const stats = `<div class="stats"><div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時一輪，間隔 3 秒' : '0：目前不送出任何請求'}</small></div>
 <div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small><a href="#queue">看排程</a></small></div>
 <div><span>近 24 小時請求</span><b>${sent24}</b><small>${
@@ -1283,11 +1310,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
       actions: '<a href="/api/v1/status">JSON</a>',
     },
     `${status.coolingDownUntil ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>` : ''}${stats}
-${section(
-  status.budget ? '下一輪抓取' : '等候抓取',
-  `${queueNote}${table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6)}`,
-  ' id="queue"',
-)}
+${section(status.budget ? '下一輪抓取' : '等候抓取', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
 ${manualSection}
 ${section(
   '排程方式與追蹤來源',
@@ -1312,7 +1335,7 @@ ${section(
     6,
   ),
 )}`,
-    { nav: 'status' },
+    { nav: 'status', method: `${TRAFFIC_METHOD}${methodPart(status.budget ? '下一輪抓取' : '等候抓取', queueNote)}` },
   );
 }
 
@@ -1457,12 +1480,11 @@ ${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l
     },
     `${flash ? `<p class="flash">${html(flash)}</p>` : ''}${form}
 <section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', cols)}</section>
-${section(
-  '更新方式與其他來源',
-  `<p class="body">Similarweb 每小時依排程抓取，之後依設定的週期更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p class="body">其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,
-)}
 ${listSection}`,
-    { nav: 'watch' },
+    {
+      nav: 'watch',
+      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 每小時依排程抓取，之後依設定的週期更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
+    },
   );
 }
 
