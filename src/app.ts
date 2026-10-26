@@ -40,6 +40,7 @@ import {
   JS_FLAG,
   loginPage,
   METHOD_LINK,
+  methodPart,
   notFoundPage,
   rankingPage,
   type SitePage,
@@ -50,6 +51,7 @@ import {
   sitePage,
   sourceOf,
   statusPage,
+  TRAFFIC_METHOD,
   topicsPage,
   watchPage,
   whoSlot,
@@ -83,7 +85,16 @@ const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
   .replace('<!--tabs-->', sectionTabs('report'))
   .replace('<!--method-->', METHOD_LINK)
   .replace('<!--header-->', siteHeader('report'))
-  .replace('<!--footer-->', siteFooter());
+  .replace(
+    '<!--footer-->',
+    siteFooter(
+      null,
+      `${TRAFFIC_METHOD}${methodPart(
+        '排名軌跡',
+        '<p>同一標籤的網站依當月流量排名（所有符合條件的網站；選了來源時只算該來源追蹤的網域）。灰線是最新月份的前 10 或前 20 名，橘線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>',
+      )}`,
+    ),
+  );
 const MAX_TRAFFIC_DOMAINS = 2000;
 /** Every Similarweb channel in the CSV, Similarweb's own figures (搜尋占比 and AI占比 may come from the sheet). */
 const CSV_CHANNELS: Array<[TrafficChannel, string]> = [

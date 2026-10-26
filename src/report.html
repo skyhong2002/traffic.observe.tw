@@ -555,7 +555,6 @@ function drawBump(host, topic) {
   if (hl && !shown.includes(hl)) shown.push(hl);
   const head = `<div class="bar"><h3>排名軌跡</h3><span>${esc(topic)}・${monthShort(months[0])}–${monthShort(last)}</span>
 <span class="seg" role="group" aria-label="顯示幾名"><button type="button" data-top="10" aria-pressed="${N === 10}">前 10</button><button type="button" data-top="20" aria-pressed="${N === 20}">前 20</button></span></div>`;
-  const note = `<p class="note">同一標籤的網站依當月流量排名（所有符合條件的網站${state.source ? `；只算${esc(SOURCE_LABEL[state.source] ?? state.source)}追蹤的網域` : ''}）。灰線是 ${monthShort(last)} 的前 ${N} 名，橘線是選取的網站（點線或下方表格列）。斷開處是沒有資料的月份，不補線。</p>`;
   if (!shown.length) { host.innerHTML = `${head}<p class="empty">這個標籤在期間內沒有資料。</p>`; return; }
   const width = Math.max(300, host.clientWidth || document.getElementById('sections').clientWidth);
   const narrow = width < 520;
@@ -608,7 +607,7 @@ function drawBump(host, topic) {
     g += `<text class="end${e.d === hl ? ' on' : ''}" x="${width - m.r + 8}" y="${(e.y + 4).toFixed(1)}">${e.i === months.length - 1 ? e.r : '·'} ${esc(short)}</text>`;
   }
   g += `<rect class="hit" x="${m.l - 10}" y="0" width="${iw + 20}" height="${height}" fill="transparent"/>`;
-  host.innerHTML = `${head}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(topic)}標籤內名次軌跡">${g}</svg>${note}`;
+  host.innerHTML = `${head}<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(topic)}標籤內名次軌跡">${g}</svg>`;
   const svg = host.querySelector('svg');
   const nearest = (ev) => {
     const r = svg.getBoundingClientRect();

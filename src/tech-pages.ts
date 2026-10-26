@@ -260,7 +260,7 @@ export function techDomainPage(domain: string, name: string | null, record: Tech
     ? `<div class="stats">${stat('最近一次', STATUS_LABEL[record.status], record.errorCode ? (ERROR_LABEL[record.errorCode] ?? html(record.errorCode)) : '')}${stat('技術', String(record.detections.length))}${stat('結果時間', record.observedAt ? twDate(record.observedAt) : '', record.origin === 'blog' ? '來自 blog.observe.tw' : '')}${stat('最近嘗試', twDate(record.lastAttemptAt), record.httpStatus ? `HTTP ${record.httpStatus}` : '')}</div>
 ${section(
   '偵測到的技術',
-  `${record.observedAt === null ? '<p class="note">還沒有成功讀到首頁。</p>' : `<p class="note">${record.sourceUrl ? `讀的是 <a href="${html(record.sourceUrl)}" rel="noopener nofollow">${html(record.sourceUrl)}</a>，` : ''}${tw(record.observedAt)}。${record.status === 'failed' || record.status === 'blocked' ? '之後的檢查沒有成功，這是上一次成功的結果。' : ''}「依據」是哪一類規則比對到，不是頁面內容。</p>`}${table(
+  `${record.observedAt === null ? '<p class="note">還沒有成功讀到首頁。</p>' : `<p class="note">${record.sourceUrl ? `讀的是 <a href="${html(record.sourceUrl)}" rel="noopener nofollow">${html(record.sourceUrl)}</a>，` : ''}${tw(record.observedAt)}。${record.status === 'failed' || record.status === 'blocked' ? '之後的檢查沒有成功，這是上一次成功的結果。' : ''}</p>`}${table(
     '<th class="l">技術</th><th class="l" aria-sort="ascending">類別</th><th class="l">版本</th><th class="num">信心</th><th class="l">依據</th>',
     detectionRows(record),
     record.observedAt === null ? '沒有結果。' : '首頁沒有清單內任何技術的痕跡（未辨識，不代表沒有技術）。',
@@ -279,7 +279,10 @@ ${section(
       actions: `${check}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
     },
     `${flash}${body}`,
-    { nav: 'tech', method: techMethod(PRODUCTS.size) },
+    {
+      nav: 'tech',
+      method: `${techMethod(PRODUCTS.size)}${record ? methodPart('偵測到的技術', '<p>「依據」是哪一類規則比對到，不是頁面內容。</p>') : ''}`,
+    },
   );
 }
 

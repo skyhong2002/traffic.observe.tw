@@ -173,7 +173,7 @@ export function siteHeader(nav: Nav) {
   ).join('')}</nav><div class="site-tools"><span class="who"><!--who--></span></div></div></header>`;
 }
 
-const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
+export const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
 <p>Similarweb 沒有的月份以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。Similarweb 回傳 0 代表那個月沒有估算（小網站，或它不單獨計算的子網域如 tw.news.yahoo.com），視同沒有資料，不當成 0 次造訪。搜尋與 AI 占比只提供抓取時最新一個月，缺少的月份不推算；試算表中的 Ahrefs 搜尋數字與 A/S 比值不在本站資料範圍內。</p>
 <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
 `;
@@ -529,7 +529,7 @@ export function topicsPage(data: TopicOverview, topic?: string) {
     ? `${monthLong(data.months[0])} 至 ${monthLong(data.months.at(-1) as string)}，共 ${data.months.length} 個有流量資料的月份`
     : '尚無流量資料';
   const topicHref = (t: string) => `/tag/?topic=${encodeURIComponent(t)}`;
-  const method = `${TRAFFIC_METHOD}${methodPart(
+  const tagMethod = `${TRAFFIC_METHOD}${methodPart(
     '標籤如何計算',
     '<p>以網站目前的標籤彙整全部歷史流量。每個標籤內，同一網域只計為一個網站，尚無流量資料的網站也列入。累計造訪量加總各網站所有已知月份；各站資料月數可能不同，缺少的月份不補零。搜尋與 AI 占比分別以有該項資料的網站月份加權計算。多標籤網站會計入各個標籤，標籤之間的流量不可直接相加。資料月數不同的網站可用「月平均」比較。標籤雲依累計造訪量或網站數的排名決定字級；「前 5 大網站占比」是這 5 個網站的累計造訪量占標籤總量的比例。</p>',
   )}`;
@@ -564,9 +564,7 @@ ${
   pairs.length
     ? section(
         '常一起出現的標籤',
-        `<p class="note">這個標籤的網站同時掛著哪些標籤；數字是網站數。</p><div class="chips">${pairs
-          .map(([t, n]) => `<a href="${topicHref(t)}">${html(t)}<small>${n}</small></a>`)
-          .join('')}</div>`,
+        `<div class="chips">${pairs.map(([t, n]) => `<a href="${topicHref(t)}">${html(t)}<small>${n}</small></a>`).join('')}</div>`,
       )
     : ''
 }
@@ -577,7 +575,10 @@ ${
         8,
         'members',
       )}</section>`,
-      { nav: 'topics', method },
+      {
+        nav: 'topics',
+        method: `${tagMethod}${pairs.length ? methodPart('常一起出現的標籤', '<p>這個標籤的網站同時掛著哪些標籤；數字是網站數。</p>') : ''}`,
+      },
     );
   }
 
@@ -619,7 +620,7 @@ ${
     },
     `<div class="stats">${statCard('標籤', String(data.topics.length))}${statCard('有標籤的網站', tagged.length.toLocaleString('en-US'), `共 ${data.sites.length.toLocaleString('en-US')} 個網站`)}${statCard('每站平均標籤', tagged.length ? (tagged.reduce((a, s) => a + s.topics.length, 0) / tagged.length).toFixed(1) : '', '一個網站可掛多個標籤')}${statCard('統計月份', String(data.months.length), data.months.length ? `${monthLabel(data.months[0])}–${monthLabel(data.months.at(-1) as string)}` : '尚無流量資料')}</div>
 <section class="block"><header><h2>標籤雲</h2><span class="seg" role="group" aria-label="字的大小依據"><button type="button" data-cloud="visits" aria-pressed="true">累計造訪</button><button type="button" data-cloud="sites" aria-pressed="false">網站數</button></span></header>
-<p class="note">字愈大、顏色愈亮，排名愈前面；右上的小數字是網站數。</p><div class="cloud" data-by="visits">${cloud}</div></section>
+<div class="cloud" data-by="visits">${cloud}</div></section>
 <section class="block"><h2>全部標籤</h2><div class="toolbar">${tableSearch('topics', '搜尋標籤')}</div><p class="results-line" data-table-count="topics" data-total="${data.topics.length}">${data.topics.length} 個標籤</p>${table(
       '<th class="l">標籤</th><th class="num">網站數</th><th class="num">有流量資料</th><th class="num" aria-sort="descending">累計造訪量</th><th class="num" title="累計造訪量除以有流量資料的網站數">每站平均</th><th class="num">搜尋占比</th><th class="num">AI 占比</th><th class="l" data-nosort>流量最大的網站</th>',
       rowsHtml,
@@ -627,7 +628,7 @@ ${
       8,
       'topics',
     )}</section>${CLOUD_SCRIPT}`,
-    { nav: 'topics', method },
+    { nav: 'topics', method: `${tagMethod}${methodPart('標籤雲', '<p>字愈大、顏色愈亮，排名愈前面；右上的小數字是網站數。</p>')}` },
   );
 }
 
@@ -906,7 +907,7 @@ export function similarwebSection(
     : '';
   return section(
     `流量組成 <small>Similarweb${p.source === 'manual' ? ' 平台補登' : ''}・${monthLong(p.month)}</small>`,
-    `<p class="note">${p.source === 'manual' ? '以下為編輯者從 Similarweb 平台補登的資料，未填欄位不代表 0。資料月份：' : 'Similarweb 每次只提供最新一個月的組成，這裡顯示：'}${monthLong(p.month)}${visits === null ? '' : `（當月造訪 ${volText(visits)}）`}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</p>${cards}
+    `${cards}
 <div class="charts"><div class="chart-box"><h3>訪客從哪裡來</h3>${shareRows(channels, visits)}</div><div class="chart-box"><h3>訪客在哪個國家</h3>${shareRows(countries, visits)}</div></div>${similar}`,
   );
 }
@@ -925,6 +926,7 @@ function similarwebMethod(site: Pick<SitePage, 'profile' | 'category' | 'similar
   return methodPart(
     '流量組成',
     `<ul>
+<li>${p.source === 'manual' ? '編輯者從 Similarweb 平台補登的資料，未填欄位不代表 0' : 'Similarweb 每次只提供最新一個月的組成'}，這裡顯示 ${monthLong(p.month)}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</li>
 <li>${p.source === 'manual' ? '來源是編輯者從 Similarweb 平台手動補登，保留每次修改紀錄' : '來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存'}；Similarweb 的數字是估算，小網站誤差較大。</li>
 <li>排名：全球與國家排名依 Similarweb 估算的造訪量；類別排名只和同一類別（${category ? html(categoryLabel(category)) : 'Similarweb 的分類'}）的網站比較。</li>
 <li>平均停留、每次造訪頁數、跳出率都是所有造訪的平均；跳出率是只看一頁就離開的造訪比例。</li>
@@ -1101,7 +1103,7 @@ export function platformBreakdownsSection(profiles: TrafficProfile[]) {
   if (!available.length) return '';
   return section(
     '平台詳細分布',
-    `<p class="note">各表分母不同，不能直接加總。變化保留平台顯示值；未列出的項目不推定為零。</p>${available
+    `${available
       .map((profile, i) => {
         const data = profile.breakdowns!;
         const totals = breakdownTotals
@@ -1177,6 +1179,7 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
   const watchers = site.watchers.length
     ? site.watchers.map((w) => `${requesterLabel(w.requester)}・${KIND_LABEL[w.kind] ?? html(w.kind)}`).join('、')
     : '沒有服務追蹤這個網域。';
+  const breakdowns = platformBreakdownsSection(site.manualProfiles ?? site.profiles);
   return layout(
     site.name,
     {
@@ -1187,12 +1190,9 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
     },
     `${stats}
 ${viewer ? tagPanel(site.domain, site.tags, viewer) : ''}
-${section(
-  '每月造訪',
-  `<p class="note">Similarweb 每月造訪估算；空心點是試算表或從 Similarweb 平台手動補登的月份，斷開處是沒有資料的月份。</p><div class="chart-box">${visitsChart}</div>`,
-)}
+${section('每月造訪', `<div class="chart-box">${visitsChart}</div>`)}
 ${similarwebSection(site)}
-${platformBreakdownsSection(site.manualProfiles ?? site.profiles)}
+${breakdowns}
 ${site.profiles.length ? section('導流來源走勢', channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels, source: p.source })))) : ''}
 ${section(
   '導流占比',
@@ -1223,7 +1223,12 @@ ${tech}
 ${section('追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${fetchState}</p>`)}`,
     {
       tips: true,
-      method: `${TRAFFIC_METHOD}${similarwebMethod(site)}${
+      method: `${TRAFFIC_METHOD}${methodPart(
+        '每月造訪',
+        '<p>Similarweb 每月造訪估算；空心點是試算表或從 Similarweb 平台手動補登的月份，斷開處是沒有資料的月份。</p>',
+      )}${similarwebMethod(site)}${
+        breakdowns ? methodPart('平台詳細分布', '<p>各表分母不同，不能直接加總。變化保留平台顯示值；未列出的項目不推定為零。</p>') : ''
+      }${
         site.profiles.length
           ? methodPart(
               '導流來源走勢',
@@ -1253,7 +1258,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   const manualSection = manualRows
     ? section(
         '需要從 Similarweb 平台補登',
-        `<p class="note">這些網站在 Similarweb 免費資料裡沒有估算（最近一次抓取每個月都回傳 0），但試算表曾記錄到百萬次以上的造訪，登入 Similarweb 平台後可能查得到。登入編輯後，每月打開平台頁面把數字補登進來；免費帳號只看得到最近一個月。</p>${table(
+        `${table(
           '<th class="l">網域</th><th class="num">試算表最新</th><th class="l" aria-sort="descending">最新補登</th><th class="l" data-nosort>操作</th>',
           manualRows,
           '',
@@ -1314,7 +1319,7 @@ ${section(status.budget ? '下一輪抓取' : '等候抓取', table(queueHead, q
 ${manualSection}
 ${section(
   '排程方式與追蹤來源',
-  `<p class="note">優先序：${priority.map(requesterLabel).join(' → ')}。每小時一輪；預計時間假設中途沒有被 Similarweb 擋，也沒有新網域插隊。</p>${table(
+  `${table(
     '<th class="l">來源</th><th class="l">類型</th><th class="num">網域</th>',
     watchers
       .map(
@@ -1335,7 +1340,20 @@ ${section(
     6,
   ),
 )}`,
-    { nav: 'status', method: `${TRAFFIC_METHOD}${methodPart(status.budget ? '下一輪抓取' : '等候抓取', queueNote)}` },
+    {
+      nav: 'status',
+      method: `${TRAFFIC_METHOD}${methodPart(status.budget ? '下一輪抓取' : '等候抓取', queueNote)}${
+        manualRows
+          ? methodPart(
+              '需要從 Similarweb 平台補登',
+              '<p>這些網站在 Similarweb 免費資料裡沒有估算（最近一次抓取每個月都回傳 0），但試算表曾記錄到百萬次以上的造訪，登入 Similarweb 平台後可能查得到。登入編輯後，每月打開平台頁面把數字補登進來；免費帳號只看得到最近一個月。</p>',
+            )
+          : ''
+      }${methodPart(
+        '排程方式與追蹤來源',
+        `<p>優先序：${priority.map(requesterLabel).join(' → ')}。每小時一輪；預計時間假設中途沒有被 Similarweb 擋，也沒有新網域插隊。</p>`,
+      )}`,
+    },
   );
 }
 
@@ -1575,11 +1593,13 @@ ${sortCell('l', c.clue ? 1 : 0, clueBadge(c.clue))}<td class="l">${c.category ? 
     },
     `${addedFlash(added)}${editor || !loginEnabled ? '' : '<p class="flash"><a href="/auth/google?next=/discover/">登入</a>後可以直接加入追蹤。</p>'}
 <section class="block"><h2>候選名單<small>${found.length} 個</small></h2>
-<p class="note">已向 similarsites.com 查過 ${fetched.answered.toLocaleString('en-US')} 個追蹤中的網站（共 ${fetched.tracked.toLocaleString('en-US')} 個）。被越多追蹤中的站同時列為相似，越可能是同一個圈子的網站；相似度是 similarsites.com 給的 0–100%。候選不分國家，加入追蹤後才會有台灣占比，可再決定要不要留。</p>
 ${table(head, found.map(row).join(''), '還沒有候選。先執行 tools/similarsites.ts 抓取資料。', 8)}</section>${ADD_WATCH_SCRIPT}`,
     {
       nav: 'discover',
-      method: `<p>相似網站來自 similarsites.com 每個網站頁面列出的 20 個相似網站與相似度，每個追蹤中的網站約每月查一次。候選是這些相似網站中本站還沒有流量資料的網域；不會自動加入。「月造訪」是 similarsites.com 的估算，與本站 Similarweb 數字來源相近但不保證相同。</p>`,
+      method: `<p>相似網站來自 similarsites.com 每個網站頁面列出的 20 個相似網站與相似度，每個追蹤中的網站約每月查一次。候選是這些相似網站中本站還沒有流量資料的網域；不會自動加入。「月造訪」是 similarsites.com 的估算，與本站 Similarweb 數字來源相近但不保證相同。</p>${methodPart(
+        '候選名單',
+        `<p>已向 similarsites.com 查過 ${fetched.answered.toLocaleString('en-US')} 個追蹤中的網站（共 ${fetched.tracked.toLocaleString('en-US')} 個）。被越多追蹤中的站同時列為相似，越可能是同一個圈子的網站；相似度是 similarsites.com 給的 0–100%。候選不分國家，加入追蹤後才會有台灣占比，可再決定要不要留。</p>`,
+      )}`,
     },
   );
 }
@@ -1634,7 +1654,7 @@ export function similarPage({
   const reverse = listing.listedBy.length
     ? section(
         `也把 ${html(site.domain)} 列為相似的網站<small>${listing.listedBy.length} 個</small>`,
-        `<p class="note">這些追蹤中的網站，相似網站名單裡有它；排在前面的相似度最高。</p><p class="logos">${listing.listedBy
+        `<p class="logos">${listing.listedBy
           .map((l) => logoChip(l.domain, { note: `相似度 ${Math.round(l.grade * 100)}%`, tracked: tracked.has(l.domain) }))
           .join('')}</p>`,
       )
@@ -1648,18 +1668,24 @@ export function similarPage({
     },
     `${addedFlash(added)}${section(
       `相似網站<small>${listing.similar.length} 個${untracked ? `，${untracked} 個尚未追蹤` : ''}</small>`,
-      `<p class="note">similarsites.com 依瀏覽行為與內容認定與 ${html(site.domain)} 相似的網站，${
-        fetched ? `${twDate(new Date(fetched).toISOString())} 取得，` : ''
-      }相似度 0–100%。${
+      `${
         editor || !loginEnabled || !untracked
           ? ''
-          : '<a href="/auth/google?next=/site/' + html(site.domain) + '/similar/">登入</a>後可以把尚未追蹤的加入追蹤。'
-      }</p>${table(head, listing.similar.map(row).join(''), '還沒有取得這個網站的相似網站，similarsites.com 可能沒有收錄它。', 9)}`,
+          : `<p class="note"><a href="/auth/google?next=/site/${html(site.domain)}/similar/">登入</a>後可以把尚未追蹤的加入追蹤。</p>`
+      }${table(head, listing.similar.map(row).join(''), '還沒有取得這個網站的相似網站，similarsites.com 可能沒有收錄它。', 9)}`,
     )}${reverse}${ADD_WATCH_SCRIPT}`,
     {
       nav: null,
-      method:
-        '<p>相似網站名單來自 similarsites.com（Similarweb 旗下），每個網站最多 20 個。簡介、類別、月造訪與國內排名都是 similarsites.com 的估算，與本站 Similarweb 數字來源相近，但不保證相同。加入追蹤前，這些網站沒有本站的流量資料。</p>',
+      method: `<p>相似網站名單來自 similarsites.com（Similarweb 旗下），每個網站最多 20 個。簡介、類別、月造訪與國內排名都是 similarsites.com 的估算，與本站 Similarweb 數字來源相近，但不保證相同。加入追蹤前，這些網站沒有本站的流量資料。</p>${methodPart(
+        '相似網站',
+        `<p>similarsites.com 依瀏覽行為與內容認定與 ${html(site.domain)} 相似的網站，${
+          fetched ? `${twDate(new Date(fetched).toISOString())} 取得，` : ''
+        }相似度 0–100%。</p>`,
+      )}${
+        listing.listedBy.length
+          ? methodPart(`也把 ${html(site.domain)} 列為相似的網站`, '<p>這些追蹤中的網站，相似網站名單裡有它；排在前面的相似度最高。</p>')
+          : ''
+      }`,
     },
   );
 }
