@@ -2,8 +2,10 @@ import { loadCrowd, shownTags } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { loadManualMonths } from './manual.ts';
 import { loadMetadata } from './metadata.ts';
+import { divisorOf, siteName } from './sheet.ts';
 import { aiShare, estimated, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { latestTopics } from './tags.ts';
+import { estimateTaiwanShare, type TaiwanBasis, taiwanVisits } from './taiwan-estimate.ts';
 
 // The sheet's monthly view, computed from stored data: visits, growth, last
 // month's rank, search visits (搜尋S = visits × search share) and AI visits
@@ -24,13 +26,22 @@ export interface SiteMonth {
   visitsSource: 'similarweb' | 'manual' | 'sheet' | null;
   searchShare: number | null;
   aiShare: number | null;
+  /** Similarweb's (or the sheet's) Taiwan share; null when it has none. */
   taiwanShare: number | null;
+  /** The share the ranking uses: taiwanShare, else an estimate (see taiwan-estimate.ts). */
+  taiwanShareUsed: number | null;
+  taiwanBasis: TaiwanBasis | null;
+  /** The most Taiwan can have, from Similarweb's other top countries. */
+  taiwanShareMax: number | null;
+  /** A manual or earlier share was above taiwanShareMax and was replaced by it. */
+  taiwanCapped: boolean;
   prevSearchShare: number | null;
   prevAiShare: number | null;
   /** Every Similarweb channel's share this month; null without a Similarweb estimate (no sheet fallback). */
   channels: Partial<Record<TrafficChannel, number>> | null;
   /** The comparison month's 台灣 share and channels, set by the rankings when a month is compared. */
   prevTaiwanShare?: number | null;
+  prevTaiwanShareUsed?: number | null;
   prevChannels?: Partial<Record<TrafficChannel, number>> | null;
 }
 
@@ -55,7 +66,7 @@ interface SheetRow {
 
 export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]> {
   const prev = shiftMonth(month, -1);
-  const [months, profiles, sheet, metadata, manualRows, crowd] = await Promise.all([
+  const [months, profiles, sheet, metadata, manualRows, crowd, adjusted] = await Promise.all([
     rows<{ domain: string; month: string; visits: number }>(
       pool,
       'SELECT domain, month, visits FROM traffic_months WHERE month IN (?, ?)',
@@ -75,6 +86,11 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     loadMetadata(pool),
     loadManualMonths(pool, { months: [month, prev] }),
     loadCrowd(pool),
+    rows<{ domain: string; name: string; raw: unknown }>(
+      pool,
+      'SELECT domain, name, raw FROM sheet_rows WHERE adjusted = 1 AND domain IS NOT NULL AND month <= ? ORDER BY month, row_no',
+      [month],
+    ),
   ]);
   const manual = new Map(manualRows.map((r) => [`${r.domain} ${r.month}`, r]));
   // A month Similarweb has no estimate for falls back to the sheet, like a month it was never asked about.
@@ -93,6 +109,16 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     const key = `${r.domain} ${r.month}`;
     if ((!sheetRow.has(key) || sheetRow.get(key)?.visits == null) && !r.adjusted) sheetRow.set(key, r);
   }
+  // The editors' 「/N」 guesses (1/N of the visits are Taiwan's), the latest per domain, and the latest share the sheet printed before this month.
+  const divisor = new Map<string, number>();
+  for (const r of adjusted) {
+    const raw = (typeof r.raw === 'string' ? JSON.parse(r.raw) : r.raw) as Record<string, string | number>;
+    const cell = Object.values(raw).find((v): v is string => typeof v === 'string' && divisorOf(v) !== null && siteName(v) === r.name);
+    const n = cell ? divisorOf(cell) : null;
+    if (n !== null) divisor.set(r.domain, n);
+  }
+  const sheetShare = new Map<string, number>();
+  for (const r of sheet) if (r.month < month && r.taiwan_share != null) sheetShare.set(r.domain, r.taiwan_share);
   const domains = new Set([
     ...label.keys(),
     ...months.filter((r) => r.month === month).map((r) => r.domain),
@@ -116,6 +142,7 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
       search: p ? searchShare(p) : fallback.search,
       ai: p ? aiShare(p) : fallback.ai,
       taiwan: p ? taiwanShare(p) : fallback.taiwan,
+      countries: p ? p.countries : null,
     };
   };
   const out: SiteMonth[] = [];
@@ -123,6 +150,12 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     const now = pick(domain, month);
     if (now.visits === null) continue;
     const before = pick(domain, prev);
+    const taiwan = estimateTaiwanShare({
+      measured: now.taiwan,
+      countries: now.countries,
+      divisor: divisor.get(domain) ?? null,
+      earlier: before.taiwan ?? sheetShare.get(domain) ?? null,
+    });
     const l = label.get(domain);
     out.push({
       domain,
@@ -138,6 +171,10 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
       searchShare: now.search,
       aiShare: now.ai,
       taiwanShare: now.taiwan,
+      taiwanShareUsed: taiwan?.share ?? null,
+      taiwanBasis: taiwan?.basis ?? null,
+      taiwanShareMax: taiwan?.max ?? null,
+      taiwanCapped: taiwan?.capped ?? false,
       prevSearchShare: before.search,
       prevAiShare: before.ai,
       channels: now.channels,
@@ -145,10 +182,6 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
   }
   return out.sort((a, b) => (b.visits ?? 0) - (a.visits ?? 0));
 }
-
-/** 台灣造訪量 in millions: visits × Taiwan share; null when either is unknown. */
-export const taiwanVisits = (visits: number | null, share: number | null | undefined) =>
-  visits !== null && share != null ? visits * share : null;
 
 /** Larger 台灣造訪量 first; sites without a Taiwan share follow, among themselves by plain visits. */
 const byTaiwanVisits = (a: { tw: number | null; visits: number | null }, b: { tw: number | null; visits: number | null }) =>
@@ -162,15 +195,15 @@ const byTaiwanVisits = (a: { tw: number | null; visits: number | null }, b: { tw
 
 /** Rows of one topic, ranked by 台灣造訪量 (visits × Taiwan share), with last month's rank in the same topic. */
 export function ranking<T extends SiteMonth>(view: T[], topic: string | null) {
-  const now = (s: T) => ({ tw: taiwanVisits(s.visits, s.taiwanShare), visits: s.visits });
+  const now = (s: T) => ({ tw: taiwanVisits(s.visits, s.taiwanShareUsed), visits: s.visits });
   const inTopic = (topic ? view.filter((s) => s.topics.includes(topic)) : [...view]).sort((a, b) => byTaiwanVisits(now(a), now(b)));
   const places = (list: T[]) => new Map(list.map((s, i) => [s.domain, i + 1]));
   const rank = places(inTopic);
-  const prev = (s: T) => ({ tw: taiwanVisits(s.prevVisits, s.prevTaiwanShare), visits: s.prevVisits });
+  const prev = (s: T) => ({ tw: taiwanVisits(s.prevVisits, s.prevTaiwanShareUsed), visits: s.prevVisits });
   const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => byTaiwanVisits(prev(a), prev(b))));
   return inTopic.map((s) => ({
     ...s,
-    taiwanVisits: taiwanVisits(s.visits, s.taiwanShare),
+    taiwanVisits: taiwanVisits(s.visits, s.taiwanShareUsed),
     rank: rank.get(s.domain) ?? null,
     prevRank: prevRank.get(s.domain) ?? null,
     growth: s.prevVisits ? (s.visits ?? 0) / s.prevVisits - 1 : null,

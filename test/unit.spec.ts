@@ -10,6 +10,7 @@ import { type Candidate, catchUpQuota, dueDomains, previousMonth, runConfig } fr
 import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
 import { publicDomain, searchShare } from '../src/similarweb.ts';
 import { fetchQueue } from '../src/status.ts';
+import { estimateTaiwanShare, taiwanCeiling } from '../src/taiwan-estimate.ts';
 
 const now = new Date('2026-10-21T10:00:00Z');
 const DAY = 86_400_000;
@@ -349,6 +350,10 @@ describe('ranking and topicSummary', () => {
     searchShare: search,
     aiShare: ai,
     taiwanShare: null,
+    taiwanShareUsed: null,
+    taiwanBasis: null,
+    taiwanShareMax: null,
+    taiwanCapped: false,
     prevSearchShare: search,
     prevAiShare: ai,
     channels: null,
@@ -378,8 +383,8 @@ describe('ranking and topicSummary', () => {
   });
 
   it('ranks by visits × Taiwan share, with sites lacking a share last', () => {
-    const big = { ...site('big.com', 20, 20, []), taiwanShare: 0.1, prevTaiwanShare: 0.1 };
-    const local = { ...site('local.tw', 5, 5, []), taiwanShare: 0.9, prevTaiwanShare: 0.1 };
+    const big = { ...site('big.com', 20, 20, []), taiwanShareUsed: 0.1, prevTaiwanShareUsed: 0.1 };
+    const local = { ...site('local.tw', 5, 5, []), taiwanShareUsed: 0.9, prevTaiwanShareUsed: 0.1 };
     const unknown = site('unknown.com', 50, 50, []);
     const list = ranking([unknown, big, local], null);
     expect(list.map((s) => [s.domain, s.rank, s.prevRank, s.taiwanVisits])).toEqual([
@@ -390,7 +395,7 @@ describe('ranking and topicSummary', () => {
   });
 
   it('ranks sites without geographic labels', () => {
-    const unknown = { ...site('unknown.tw', 100, 90, ['新聞']), taiwanShare: 0.99 };
+    const unknown = { ...site('unknown.tw', 100, 90, ['新聞']), taiwanShareUsed: 0.99 };
     expect(ranking([unknown], null)[0]).toMatchObject({ rank: 1, prevRank: 1 });
   });
 
@@ -549,5 +554,40 @@ describe('watchPage', () => {
     expect(page(null)).toContain('ambassador-hotels.com');
     expect(page(null)).not.toContain('editor@example.com');
     expect(page({ email: 'editor@example.com' })).toContain('editor@example.com');
+  });
+});
+
+describe('Taiwan share estimates', () => {
+  const top5 = (...shares: number[]) => shares.map((share, i) => ({ code: ['US', 'GB', 'CA', 'AU', 'DE'][i], share }));
+  const none = { measured: null, countries: null, divisor: null, earlier: null };
+
+  it('bounds Taiwan by the fifth country and by what the five leave', () => {
+    // bbc.com: the five leave 54%, but Taiwan ranks below the fifth (3.4%).
+    expect(taiwanCeiling(top5(0.297, 0.113, 0.064, 0.035, 0.034))).toBeCloseTo(0.034);
+    // Few countries listed: the whole remainder.
+    expect(taiwanCeiling(top5(0.9, 0.05))).toBeCloseTo(0.05);
+    expect(taiwanCeiling([{ code: 'TW', share: 0.4 }])).toBeNull();
+    expect(taiwanCeiling([])).toBeNull();
+  });
+
+  it('prefers the measured share, then the editors’ 1/N, then an earlier share, then the bound', () => {
+    const countries = top5(0.3, 0.2, 0.1, 0.05, 0.04);
+    expect(estimateTaiwanShare({ ...none, measured: 0.7, divisor: 5, earlier: 0.6, countries })).toMatchObject({
+      share: 0.7,
+      basis: 'measured',
+    });
+    expect(estimateTaiwanShare({ ...none, divisor: 100, earlier: 0.6, countries })).toMatchObject({ share: 0.01, basis: 'manual' });
+    expect(estimateTaiwanShare({ ...none, earlier: 0.02, countries })).toMatchObject({ share: 0.02, basis: 'history' });
+    expect(estimateTaiwanShare({ ...none, countries })).toMatchObject({ share: 0.04, basis: 'bound', capped: false });
+    expect(estimateTaiwanShare(none)).toBeNull();
+    expect(estimateTaiwanShare({ ...none, divisor: 5 })).toMatchObject({ share: 0.2, basis: 'manual', max: null });
+  });
+
+  it('replaces a manual or earlier share that contradicts the bound, with a little slack', () => {
+    const countries = top5(0.3, 0.2, 0.1, 0.05, 0.04);
+    expect(estimateTaiwanShare({ ...none, divisor: 20, countries })).toMatchObject({ share: 0.04, basis: 'bound', capped: true });
+    expect(estimateTaiwanShare({ ...none, earlier: 0.5, countries })).toMatchObject({ share: 0.04, basis: 'bound', capped: true });
+    // 4.2% against a 4% bound is within the slack: kept.
+    expect(estimateTaiwanShare({ ...none, earlier: 0.042, countries })).toMatchObject({ share: 0.042, basis: 'history', capped: false });
   });
 });

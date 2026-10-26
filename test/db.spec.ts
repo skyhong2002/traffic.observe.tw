@@ -559,7 +559,10 @@ describe.skipIf(!url)('with a database', () => {
     const history = (await server.inject('/api/v1/history')).json();
     expect(history.months).toEqual(['202607', '202608', '202609']);
     expect(history.sources).toEqual([{ source: 'tag', domains: 1 }]);
-    expect(history.sites['a.com.tw']).toMatchObject({ src: ['tag'], m: { '202609': [1.2, 1.2 * 0.3, 1.2 * 0.01, 0.9, 0] } });
+    expect(history.sites['a.com.tw']).toMatchObject({
+      src: ['tag'],
+      m: { '202609': [1.2, 1.2 * 0.3, 1.2 * 0.01, 0.9, 0, 0.9, 0, null, 0] },
+    });
     expect(history.radar).toEqual({});
     expect((await server.inject('/api/v1/rankings.csv?month=202609')).body).toContain('a.com.tw');
 

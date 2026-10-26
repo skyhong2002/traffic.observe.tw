@@ -79,7 +79,9 @@ function radarText(r) {
 
 // ---------- data helpers ----------
 // Per month: visits, search, AI, Taiwan share, and where the visits came from.
-const V = 0, S = 1, A = 2, T = 3, ORIGIN = 4;
+const V = 0, S = 1, A = 2, T = 3, ORIGIN = 4, USED = 5, BASIS = 6, CAPPED = 8;
+/** How the Taiwan share in use was found (BASIS): not measured by Similarweb, so shown with ≈ or <. */
+const BASIS_NOTE = { 1: '編輯者在試算表以 1/N 估算的台灣占比', 2: '沿用這個網站較早月份的台灣占比', 3: 'Similarweb 前 5 大國家沒有台灣：台灣占比不會超過第 5 名，也不會超過 100% 減前 5 名，這是上限' };
 const ORIGIN_NOTE = { 1: '試算表', 2: 'Similarweb 平台補登' };
 function calendar(first, last) {
   const out = [];
@@ -106,7 +108,8 @@ const favicon = (domain, name) =>
 const numberRanks = (rows) => rows.map((r, i) => ({ ...r, rank: i + 1 }));
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
 /** 台灣造訪量: visits × Taiwan share, null without a share. */
-const twVisits = (m) => (m && m[V] != null && m[T] != null ? m[V] * m[T] : null);
+const twShare = (m) => (m ? m[USED] ?? m[T] : null);
+const twVisits = (m) => (m && m[V] != null && twShare(m) != null ? m[V] * twShare(m) : null);
 /** Larger 台灣造訪量 first; sites without a Taiwan share follow, among themselves by visits. */
 const byTaiwan = (a, b) => (a.tw != null && b.tw != null && a.tw !== b.tw ? b.tw - a.tw : (a.tw == null) !== (b.tw == null) ? (a.tw == null ? 1 : -1) : (b.visits ?? 0) - (a.visits ?? 0));
 const byRow = (a, b) => byTaiwan({ tw: a.twVisits, visits: a.visits }, { tw: b.twVisits, visits: b.visits });
@@ -117,7 +120,7 @@ function row(domain, s) {
   const change = state.from === state.to ? null : before?.[V] ? now[V] / before[V] - 1 : before ? null : 'new';
   const radar = (state.data.radar[domain] || []).at(-1) || null;
   return {
-    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], twVisits: twVisits(now), prev: before ? before[V] : null,
+    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], twVisits: twVisits(now), twBasis: now[BASIS] || 0, twShare: twShare(now), twCapped: now[CAPPED] === 1, prev: before ? before[V] : null,
     change, search: now[S], ai: now[A], taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
@@ -405,6 +408,13 @@ const millions = (n) => {
   const [v, unit] = visitParts(n);
   return unit ? `${v}<span class="unit">${unit}</span>` : v;
 };
+/** 台灣造訪量 with ≈ (an estimate) or < (a ceiling) where Similarweb did not measure the share; the title says how. */
+function twCell(r) {
+  if (!r.twBasis || r.twVisits == null) return millions(r.twVisits);
+  const pct = r.twShare < 0.1 ? (r.twShare * 100).toFixed(2) : (r.twShare * 100).toFixed(1);
+  const note = `${BASIS_NOTE[r.twBasis]}（占比 ${pct}%）${r.twCapped ? '；原本的估算超過這個上限，已改用上限' : ''}`;
+  return `<span class="estimate" title="${esc(note)}">${r.twBasis === 3 ? '&lt;' : '≈'}${millions(r.twVisits)}</span>`;
+}
 function rankingRow(r, cal) {
   const tr = document.createElement('tr');
   tr.dataset.site = r.domain;
@@ -413,7 +423,7 @@ function rankingRow(r, cal) {
     rank: r.rank ?? '—',
     name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</a>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台（Pro）補登的數字">Pro</span>' : ''}</span>`,
     topics: `<span class="tags" title="${esc(r.topics.join('、'))}">${r.topics.map((t) => `<a class="tag" href="${tagHref(t)}">${esc(t)}</a>`).join('')}</span>`,
-    twVisits: millions(r.twVisits),
+    twVisits: twCell(r),
     visits: millions(r.visits),
     change: `<span class="trend-cell"><span class="spark-cell" title="近一年造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
     search: millions(r.search), ai: millions(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',

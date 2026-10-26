@@ -200,6 +200,7 @@ export function buildApp(
         prevSearchShare: b?.searchShare ?? null,
         prevAiShare: b?.aiShare ?? null,
         prevTaiwanShare: b?.taiwanShare ?? null,
+        prevTaiwanShareUsed: b?.taiwanShareUsed ?? null,
         prevChannels: b?.channels ?? null,
       };
     });
@@ -714,6 +715,8 @@ export function buildApp(
       '標籤',
       '流量(百萬)',
       '台灣造訪(百萬)',
+      '台灣占比採用',
+      '台灣占比依據(measured/manual/history/bound)',
       '成長',
       '上月名次',
       '搜尋S',
@@ -735,6 +738,8 @@ export function buildApp(
         s.topics.join(', '),
         s.visits,
         s.taiwanVisits,
+        s.taiwanShareUsed,
+        s.taiwanBasis,
         s.growth,
         s.prevRank,
         s.searchVisits,

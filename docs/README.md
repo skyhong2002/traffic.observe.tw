@@ -221,3 +221,5 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 2026-10-26 15:38（台北時間）依使用者選定的 C 版再次上線：橫式字標移除網址，中文為 30px、依實際字形垂直置中，整組約 274×54px；320px 手機自動縮至 244px 寬。直式同步移除網址並放大中文，深淺底及單色 SVG、透明 PNG、離線展示與 ZIP 全部更新。最終橫式 PNG 與選定的 C 預覽逐像素一致。原 A／B／C 預覽存於 `docs/brand/previews/` 作為設計紀錄。
 
 型別、lint 與 81 項測試通過；320px、390px、1024px（含登入列）及 1280px 版面無溢出，正式站頁首頁尾載入新的 Logo 與 CSS 雜湊。備份與發布核對在 `data/brand-c-release-20261026-153633/`；還原其 `before/` 內檔案並重啟 web 可回復前一版。
+
+2026-10-26 台灣占比估算（`src/taiwan-estimate.ts`）：Similarweb 沒有台灣占比的網站，名次與排序依序採用 ①編輯者在試算表名稱尾巴寫的「/N」（1/N，取最近一個月；這些列的流量仍不當造訪量）②該站較早月份的占比 ③Similarweb 前 5 大國家推出的上限（台灣不在前 5 名，所以不超過第 5 名，也不超過 100% 減前 5 名）。①②若高於上限（含 10% 容許）視為與 Similarweb 自己的國家資料矛盾，改用上限並標 `taiwanCapped`。表格以「≈」標估算、「<」標上限，游標停上去看依據；API／CSV 有 `taiwanShareUsed`、`taiwanBasis`（measured／manual／history／bound）、`taiwanShareMax`，`/api/v1/history` 每月陣列增為九格。Similarweb 的國家資料目前只存在最新一個月，所以上限只有該月算得出來。以上限排序是刻意的保守選擇：它不低估台灣流量，但外國大站（msn.com、bbc.com）會比實際高。九月結果：實測 1,379、上限 84、較早月份 28、編輯者 1/N 7、都沒有 43（合計造訪量 0.6m，排最後）；有兩個編輯者估算被上限蓋掉（news.yahoo.co.jp、xinhuanet.com）。

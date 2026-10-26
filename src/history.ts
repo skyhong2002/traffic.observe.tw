@@ -6,7 +6,9 @@ import { loadRadar } from './radar.ts';
 // Every month's view in one payload for the report page (/), which compares
 // any two months and draws rank trajectories client-side. Per site and month:
 // [visits (millions), search visits, AI visits, Taiwan share, origin of the
-// visits: 0 Similarweb, 1 the sheet, 2 entered by hand from Similarweb's platform]. `src` lists the requesters with a standing watch on
+// visits: 0 Similarweb, 1 the sheet, 2 entered by hand from Similarweb's platform,
+// Taiwan share in use (the measured one, else an estimate), its basis: 0 measured, 1 the editors' 「/N」 guess,
+// 2 an earlier month's, 3 the ceiling Similarweb's other top countries leave; that ceiling; 1 if it replaced a contradicting guess]. `src` lists the requesters with a standing watch on
 // the domain (raw: tag, blog, sheet, manual). `sources` counts distinct domains
 // per source as the pages show it: tag, blog and 手動 (the sheet + /watch/).
 
@@ -24,13 +26,27 @@ export interface History {
       group: string | null;
       topics: string[];
       src: string[];
-      m: Record<string, [number | null, number | null, number | null, number | null, 0 | 1 | 2]>;
+      m: Record<
+        string,
+        [
+          number | null,
+          number | null,
+          number | null,
+          number | null,
+          0 | 1 | 2,
+          (number | null)?,
+          (0 | 1 | 2 | 3 | null)?,
+          (number | null)?,
+          (0 | 1)?,
+        ]
+      >;
     }
   >;
   /** Cloudflare Radar periods, oldest first: rank (top 100 place), bucket (top N) or gt (not in the top N). */
   radar: Record<string, Array<{ date: string; rank: number | null; bucket: number | null; gt: number | null }>>;
 }
 
+const BASIS_CODE = { measured: 0, manual: 1, history: 2, bound: 3 } as const;
 const SOURCE_ORDER = ['tag', 'blog', 'sheet', 'manual'];
 const GROUP_ORDER = ['tag', 'blog', 'manual'];
 
@@ -62,6 +78,10 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
         s.aiShare !== null ? s.visits * s.aiShare : null,
         s.taiwanShare,
         s.visitsSource === 'sheet' ? 1 : s.visitsSource === 'manual' ? 2 : 0,
+        s.taiwanShareUsed,
+        s.taiwanBasis === null ? null : BASIS_CODE[s.taiwanBasis],
+        s.taiwanShareMax,
+        s.taiwanCapped ? 1 : 0,
       ];
       sites[s.domain] = entry;
     }
@@ -70,7 +90,17 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
   return {
     generatedAt: now.toISOString(),
     months,
-    fields: ['visits(M)', 'search(M)', 'ai(M)', 'taiwanShare', 'origin(0 similarweb, 1 sheet, 2 platform by hand)'],
+    fields: [
+      'visits(M)',
+      'search(M)',
+      'ai(M)',
+      'taiwanShare',
+      'origin(0 similarweb, 1 sheet, 2 platform by hand)',
+      'taiwanShareUsed',
+      'taiwanBasis(0 measured, 1 editors /N, 2 earlier month, 3 ceiling)',
+      'taiwanShareMax',
+      'taiwanCapped(1 a guess above the ceiling was replaced)',
+    ],
     topics: [...new Set(Object.values(sites).flatMap((s) => s.topics))],
     sources: [...groups]
       .map(([source, domains]) => ({ source, domains: domains.size }))

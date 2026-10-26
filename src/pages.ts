@@ -46,6 +46,32 @@ export const vol = (millions: number | null) => {
 };
 /** Visits as plain text, for titles, tooltips and form values. */
 export const volText = (millions: number | null) => (millions === null ? '' : visitParts(millions).join(''));
+/**
+ * 台灣造訪量, marked where it is not Similarweb's own figure: 「≈」 an estimate (the editors' 1/N or an earlier
+ * month's share), 「<」 a ceiling from Similarweb's other top countries.
+ */
+const TAIWAN_BASIS: Record<string, string> = {
+  manual: '編輯者在試算表以 1/N 估算的台灣占比',
+  history: '沿用這個網站較早月份的台灣占比',
+  bound: 'Similarweb 前 5 大國家沒有台灣：台灣占比不會超過第 5 名，也不會超過 100% 減前 5 名，這是上限',
+};
+export const taiwanVisitsCell = (s: {
+  taiwanVisits: number | null;
+  taiwanShareUsed: number | null;
+  taiwanBasis: string | null;
+  taiwanCapped: boolean;
+}) => {
+  if (s.taiwanVisits === null) return sortCell('num', null, '');
+  const basis = s.taiwanBasis ? TAIWAN_BASIS[s.taiwanBasis] : undefined;
+  if (!basis) return volCell(s.taiwanVisits);
+  const share = s.taiwanShareUsed === null ? '' : `（占比 ${(s.taiwanShareUsed * 100).toFixed(s.taiwanShareUsed < 0.1 ? 2 : 1)}%）`;
+  const note = `${basis}${share}${s.taiwanCapped ? '；原本的估算超過這個上限，已改用上限' : ''}`;
+  return sortCell(
+    'num',
+    s.taiwanVisits,
+    `<span class="estimate" title="${html(note)}">${s.taiwanBasis === 'bound' ? '&lt;' : '≈'}${vol(s.taiwanVisits)}</span>`,
+  );
+};
 /** A visits cell, sorted by the number rather than its text. */
 const volCell = (millions: number | null, empty = '') => sortCell('num', millions, vol(millions) || empty);
 export const tw = (iso: string | null) =>
@@ -403,7 +429,7 @@ export function rankingPage(
           s.topics.join('、'),
           tagLinks(s.topics, (t) => `/#topic=${encodeURIComponent(t)}`),
         )}
-${volCell(s.taiwanVisits)}${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
+${taiwanVisitsCell(s)}${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
 ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     )
     .join('');

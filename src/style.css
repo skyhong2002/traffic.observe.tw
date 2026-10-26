@@ -647,6 +647,11 @@ button.site-name {
 .ranking-table {
   min-width: 640px;
 }
+.estimate {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
 .ranking-table .traffic-cell {
   font-weight: 500;
 }
