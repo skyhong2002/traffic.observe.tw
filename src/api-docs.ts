@@ -86,6 +86,7 @@ const SITE_ROW: Field[] = [
   { name: 'sites[].prevChannels', type: 'object | null', desc: '比較月份的各導流來源占比' },
 ];
 const RANKING_PARAMS: Param[] = [
+  { name: 'q', in: 'query', type: 'string', desc: '搜尋網站名稱或網域；先搜尋再套用筆數上限' },
   MONTH,
   { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，需同時有這些標籤（AND）' },
   {
@@ -121,7 +122,7 @@ export const ENDPOINTS: Endpoint[] = [
     path: '/api/v1/rankings',
     summary: '單一月份的網站排行',
     detail:
-      '依台灣造訪量（造訪量 × 台灣占比）由大到小。Similarweb 沒有台灣占比的網站依序用編輯者的 1/N、較早月份的占比、前 5 大國家推出的上限估算（taiwanBasis 註明），都沒有的排在最後。topic、exclude、source 可同時使用；名次在篩選後剩下的網站之間重新計算。沒有 Similarweb 估算的月份用 Pro 補登或試算表數字，visitsSource 會註明。',
+      '依台灣造訪量（造訪量 × 台灣占比）由大到小。Similarweb 沒有台灣占比的網站依序用編輯者的 1/N、較早月份的占比、前 5 大國家推出的上限估算（taiwanBasis 註明），都沒有的排在最後。topic、exclude、source 可同時使用；名次在篩選後剩下的網站之間重新計算。沒有 Similarweb 估算的月份用 人工補登或試算表數字，visitsSource 會註明。',
     params: RANKING_PARAMS,
     example: `/api/v1/rankings?month=202609&exclude=${encodeURIComponent('非台灣')}`,
     type: 'application/json',
@@ -153,9 +154,10 @@ export const ENDPOINTS: Endpoint[] = [
     id: 'history',
     group: '歷史與網站',
     path: '/api/v1/history',
-    summary: '所有月份、所有網站的造訪量，一次取得',
-    detail: '首頁就是讀這一份資料。每個網站、每個月是一個九格陣列，欄位意義見 fields。回應約數 MB，快取 5 分鐘。',
-    params: [],
+    summary: '網站的歷史造訪量',
+    detail:
+      '首頁就是讀這一份資料。每個網站、每個月是一個九格陣列，欄位意義見 fields。非管理員依 month、topic、exclude、source、q 選取最多 30 個網站，回傳這些網站的歷史資料。已登入管理員則回傳所有網站；回應不可共用快取。',
+    params: RANKING_PARAMS,
     example: '/api/v1/history',
     type: 'application/json',
     fields: [
@@ -214,7 +216,12 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'profile',
         type: 'object | null',
-        desc: 'Similarweb 最新一個有估算的月份的組成：month、countries（前 5 名 code、share）、channels（Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate 的占比）、bounceRate、pagesPerVisit、timeOnSite（秒）、globalRank、countryRank、categoryRank',
+        desc: '最新月份組成（免費估算優先，否則平台補登，source=manual）：month、countries（前 5 名 code、share）、channels（Direct、SearchOrganic、SearchPaid、SocialOrganic、SocialPaid、Referrals、Mail、DisplayAds、GenAi、Affiliate 的占比）、bounceRate、pagesPerVisit、timeOnSite（秒）、globalRank、countryRank、categoryRank',
+      },
+      {
+        name: 'manualProfiles',
+        type: 'object[]',
+        desc: '僅管理員：所有手動補登月份的完整 profile，免費估算存在時仍保留。breakdowns 含 Social、Referral 來源網站/產業、連出目的地/廣告主、Display 刊登網站及各渠道總占比。明細 share 為 {value: 0–1, bound: lt | gt | null}，name=null 表示未公開名稱，change 保留平台字串（如 >5000%、New）；各表分母不同。',
       },
       { name: 'category', type: 'string | null', desc: 'Similarweb 的網站類別，例如 Finance/Investing' },
       { name: 'similarSites', type: 'string[]', desc: 'Similarweb 列出的相似網站' },
@@ -319,7 +326,8 @@ export const ENDPOINTS: Endpoint[] = [
     group: '標籤',
     path: '/api/v1/topics/all',
     summary: '跨月份的標籤彙整',
-    detail: '以網站目前的標籤彙整所有已知月份；同一網域在一個標籤內只算一次。指定 topic 時另附該標籤的完整網站清單；不存在的標籤回 404。',
+    detail:
+      '以網站目前的標籤彙整所有已知月份；同一網域在一個標籤內只算一次。指定 topic 時另附該標籤的網站清單（非管理員最多 30 筆）；不存在的標籤回 404。',
     params: [{ name: 'topic', in: 'query', type: 'string', desc: '加上這個標籤的網站清單' }],
     example: `/api/v1/topics/all?topic=${encodeURIComponent('新聞')}`,
     type: 'application/json',
@@ -554,6 +562,8 @@ r = requests.get("${origin}/api/v1/topics/all", params={"topic": "新聞"})
 for s in r.json()["sites"][:10]:
     print(s["name"], s["visits"])`;
   const rules = [
+    '未登入或已登入的非管理員，流量數值只提供兩位有效數字、國家只提供台灣，導流來源只提供自然搜尋、直接、連入、社群與 AI。',
+    '非管理員的網站清單在任何篩選條件下最多回傳 30 筆，不提供載入更多；CSV 也適用。只有登入的管理員可查看完整資料與全部筆數。',
     `基底網址 ${code(origin)}，全部是 ${code('GET')}，回傳 UTF-8 JSON（CSV 與圖示除外）。不需要 API 金鑰。`,
     `允許跨網域（CORS ${code('Access-Control-Allow-Origin: *')}），瀏覽器前端可直接呼叫。`,
     `造訪量單位是<b>百萬次</b>（${code('757.3')} ＝ 757.3m）；占比與成長率是 0–1 的小數（${code('0.36')} ＝ 36%）；月份寫成 ${code('YYYYMM')}；時間一律是 UTC 的 ISO 8601。`,

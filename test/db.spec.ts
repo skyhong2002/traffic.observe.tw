@@ -416,7 +416,7 @@ describe.skipIf(!url)('with a database', () => {
     expect(members[0]).toMatchObject({ name: '最新名稱', visits: 40, months: 2 });
     for (const path of ['/tag/', '/tag/?month=202608']) {
       const page = (await server.inject(path)).body;
-      expect(page).toContain('60.00');
+      expect(page).toContain('60<span class="unit">m</span>');
       expect(page).toContain(`/tag/?topic=${encodeURIComponent('新標籤')}`);
       expect(page).not.toMatch(/name="month"|流量成長|AI 成長|搜尋成長/);
     }
@@ -453,7 +453,7 @@ describe.skipIf(!url)('with a database', () => {
     const server = app();
     const page = (await server.inject('/site/news.example.tw/')).body;
     expect(page).toContain('無估算');
-    expect(page).toContain('60.10<span class="unit">m</span>');
+    expect(page).toContain('60<span class="unit">m</span>');
     await server.close();
   });
 
@@ -482,7 +482,33 @@ describe.skipIf(!url)('with a database', () => {
         headers: { ...headers, 'content-type': 'application/x-www-form-urlencoded' },
         payload: new URLSearchParams(payload).toString(),
       });
-    const entry = { month, visits: '60.10M', search: '36.45', ai: '0.37%', taiwan: '' };
+    const entry = {
+      month,
+      visits: '60.10M',
+      search: '36.45',
+      ai: '0.37%',
+      taiwan: '',
+      Direct: '40%',
+      Referrals: '12.5',
+      SocialOrganic: '0',
+      bounce: '42.5',
+      pages: '3.25',
+      duration: '00:02:05',
+      globalRank: '1,234',
+      countryCode: 'US',
+      countryRank: '23',
+      category: 'News_and_Media',
+      categoryRank: '45',
+      countries: 'US 12.34',
+      socialTotal: '3.8',
+      social: 'Facebook | 76.23%\nYouTube | 14.05%',
+      referringSites: 'yahoo.com | 92.41% | -13.99%\n? | 0.64% | -8.07%',
+      referringIndustries: 'Social Networks and Online Communities | 82.28%',
+      outgoingLinks: 'ftnn.com.tw | 6.72% | >5,000%',
+      outgoingAdvertisers: 'worldlifestyle.com | 15.17% | +210.72%',
+      displayTotal: '<1%',
+      displayPublishers: 'zh.wikipedia.org | <0.01% | New',
+    };
     // The status page lists the domain until it is filled in, and links to the form.
     expect((await server.inject('/status/')).body).toContain('/site/news.example.tw/manual/');
     expect((await server.inject('/site/news.example.tw/manual/')).statusCode).toBe(303);
@@ -493,6 +519,7 @@ describe.skipIf(!url)('with a database', () => {
     expect((await post(entry, { cookie: '', origin })).statusCode).toBe(303);
     expect((await post(entry, { cookie, origin: 'https://evil.example' })).statusCode).toBe(403);
     expect((await post({ ...entry, visits: '60.1' })).body).toContain('單位');
+    expect((await post({ ...entry, Direct: '101' })).statusCode).toBe(400);
     expect((await post({ ...entry, month: '201901' })).statusCode).toBe(400);
     expect(await rows(pool, 'SELECT * FROM manual_months')).toHaveLength(0);
     const saved = await post(entry);
@@ -503,10 +530,54 @@ describe.skipIf(!url)('with a database', () => {
       visits: 60.1,
       visitsSource: 'manual',
       searchShare: expect.closeTo(0.3645, 10),
+      channels: { Direct: 0.4, Referrals: 0.125, SocialOrganic: 0, SearchOrganic: expect.closeTo(0.3645, 10), GenAi: 0.0037 },
       taiwanShare: null,
     });
     expect((await server.inject('/api/v1/history')).json().sites['news.example.tw'].m[month][4]).toBe(2);
-    expect((await server.inject('/site/news.example.tw/')).body).toContain('Pro 補登');
+    expect((await server.inject('/site/news.example.tw/')).body).toContain('人工補登');
+    // Missing channels remain unknown, and saved fields survive the reload/month switch.
+    const view = (await monthView(pool, month)).find((s) => s.domain === 'news.example.tw');
+    expect(view?.channels?.Mail).toBeUndefined();
+    const formPage = (await server.inject({ url: '/site/news.example.tw/manual/', headers: { cookie } })).body;
+    expect(formPage).toContain('name="Direct" value="40"');
+    expect(formPage).toContain('data-referrals="12.5"');
+    expect(formPage).toContain('name="duration" value="125"');
+    expect(formPage).toContain('data-categoryrank="45"');
+    const detail = (await server.inject({ url: '/api/v1/sites/news.example.tw', headers: { cookie } })).json();
+    expect(detail.profile).toMatchObject({
+      source: 'manual',
+      bounceRate: 0.425,
+      pagesPerVisit: 3.25,
+      timeOnSite: 125,
+      globalRank: 1234,
+      countryRank: { code: 'US', rank: 23 },
+      categoryRank: { category: 'News_and_Media', rank: 45 },
+      countries: [{ code: 'US', share: 0.1234 }],
+      channels: { Direct: 0.4 },
+    });
+    const detailPage = (await server.inject({ url: '/site/news.example.tw/', headers: { cookie } })).body;
+    expect(detailPage).toContain('平台補登');
+    expect(detailPage).toContain('#1,234');
+    expect(detail.manualProfiles[0].breakdowns).toMatchObject({
+      socialTotal: { value: 0.038, bound: null },
+      displayTotal: { value: 0.01, bound: 'lt' },
+      social: [
+        { name: 'Facebook', share: { value: expect.closeTo(0.7623, 10), bound: null } },
+        { name: 'YouTube', share: { value: 0.1405, bound: null } },
+      ],
+      outgoingLinks: [{ name: 'ftnn.com.tw', change: '>5000%' }],
+      displayPublishers: [{ name: 'zh.wikipedia.org', share: { value: 0.0001, bound: 'lt' }, change: 'New' }],
+    });
+    const guestDetail = (await server.inject('/api/v1/sites/news.example.tw')).json();
+    expect(guestDetail.manualProfiles).toBeUndefined();
+    expect(guestDetail.profile.breakdowns).toBeUndefined();
+    // A later free estimate still wins for visits but cannot hide platform-only details.
+    await pool.query('UPDATE traffic_months SET visits = 1000000 WHERE domain = ?', ['news.example.tw']);
+    const withFree = (await server.inject({ url: '/api/v1/sites/news.example.tw', headers: { cookie } })).json();
+    expect(withFree.manualProfiles[0].breakdowns.displayPublishers[0].change).toBe('New');
+    expect((await monthView(pool, month)).find((s) => s.domain === 'news.example.tw')?.visitsSource).toBe('similarweb');
+    await pool.query('UPDATE traffic_months SET visits = 0 WHERE domain = ?', ['news.example.tw']);
+    expect(formPage).toContain('name="SocialOrganic" value="0"');
     // The saved month comes back filled in, ready to correct.
     expect((await server.inject({ url: '/site/news.example.tw/manual/', headers: { cookie } })).body).toContain('value="60.10m"');
     expect((await post({ month, action: 'delete' })).statusCode).toBe(303);
@@ -520,6 +591,70 @@ describe.skipIf(!url)('with a database', () => {
       ['editor@example.com', true, false],
     ]);
     await server.close();
+  });
+
+  it('caps anonymous and signed-in non-admin results after every filter across rankings, history, topics and CSV', async () => {
+    await saveSheet(
+      pool,
+      Array.from({ length: 65 }, (_, i) => ({
+        rowNo: i + 2,
+        month: '202609',
+        group: null,
+        topics: i < 35 ? '新聞' : '科技',
+        url: null,
+        adjusted: false,
+        aiShare: 0.0012345,
+        taiwanShare: 0.87654,
+        raw: {},
+        domain: `site${i}.tw`,
+        name: `Site ${i}`,
+        visits: i + 0.123456,
+        searchShare: 0.34567,
+      })),
+    );
+    const server = buildApp(pool, {
+      logger: false,
+      login: {
+        clientId: 'cid',
+        clientSecret: 'secret',
+        origin: 'https://traffic.example',
+        admins: new Set(['sky9109@gmail.com', 'genehong@gmail.com']),
+      },
+    });
+    for (const name of ['member', 'sky9109', 'genehong']) {
+      await pool.query(
+        'INSERT INTO sessions (token_hash, email, created_at, expires_at) VALUES (?, ?, NOW(), DATE_ADD(NOW(), INTERVAL 1 DAY))',
+        [createHash('sha256').update(name).digest('hex'), `${name}@gmail.com`],
+      );
+    }
+    try {
+      for (const cookie of ['', 'traffic_session=member']) {
+        for (const query of ['', '?topic=新聞', '?topic=科技', '?exclude=科技', '?month=202609', '?q=Site']) {
+          const rankings = (await server.inject({ url: `/api/v1/rankings${query}`, headers: { cookie } })).json();
+          expect(rankings.sites).toHaveLength(30);
+          const history = (await server.inject({ url: `/api/v1/history${query}`, headers: { cookie } })).json();
+          expect(Object.keys(history.sites)).toHaveLength(30);
+          expect(new Set(Object.keys(history.sites))).toEqual(new Set(rankings.sites.map((site: { domain: string }) => site.domain)));
+          const csv = (await server.inject({ url: `/api/v1/rankings.csv${query}`, headers: { cookie } })).body.trim().split('\n');
+          expect(csv).toHaveLength(31);
+        }
+      }
+      for (const name of ['sky9109', 'genehong']) {
+        const headers = { cookie: `traffic_session=${name}` };
+        expect((await server.inject({ url: '/api/v1/rankings', headers })).json().sites).toHaveLength(65);
+        expect(Object.keys((await server.inject({ url: '/api/v1/history', headers })).json().sites)).toHaveLength(65);
+        expect((await server.inject({ url: '/api/v1/rankings.csv', headers })).body.trim().split('\n')).toHaveLength(66);
+      }
+      expect((await server.inject('/api/v1/rankings?q=Site%2064')).json().sites).toHaveLength(1);
+      expect((await server.inject('/api/v1/topics/all?topic=新聞')).json().sites).toHaveLength(30);
+      expect(
+        (await server.inject('/api/v1/rankings?topic=科技'))
+          .json()
+          .sites.every((site: { topics: string[] }) => site.topics.includes('科技')),
+      ).toBe(true);
+    } finally {
+      await server.close();
+    }
   });
 
   it('serves pages and the public API', async () => {
@@ -568,21 +703,21 @@ describe.skipIf(!url)('with a database', () => {
 
     const compared = (await server.inject('/api/v1/rankings?month=202609')).json();
     expect(compared.from).toBe('202608');
-    expect(compared.sites[0]).toMatchObject({ channels: { SearchOrganic: 0.3 }, prevChannels: { SearchOrganic: 0.2, Mail: 0.05 } });
+    expect(compared.sites[0]).toMatchObject({ channels: { SearchOrganic: 0.3 }, prevChannels: { SearchOrganic: 0.2 } });
     const shares = (await server.inject('/table/?month=202609')).body;
-    expect(shares).toContain('>郵件 %</th>');
+    expect(shares).not.toContain('>郵件 %</th>');
     expect(shares).toContain('aria-label="數值"');
     expect(shares.indexOf('</table>')).toBeLessThan(shares.indexOf('table-note'));
-    expect(shares).toContain('30.0%');
+    expect(shares).toContain('30%');
     const changes = (await server.inject('/table/?month=202609&from=202608&show=change')).body;
-    expect(changes).toContain('郵件 % ±');
-    expect(changes).toContain('>▲10.0</span>');
-    expect(changes).toContain('>▼5.0</span>');
+    expect(changes).not.toContain('郵件 % ±');
+    expect(changes).toContain('>▲10</span>');
+    expect(changes).not.toContain('>▼5.0</span>');
     // 次數: visits × share (search 1.2m × 30%), and its change from 202608 (1.1m × 20%).
-    expect((await server.inject('/table/?month=202609&unit=count')).body).toContain('360.0<span class="unit">k</span>');
-    expect((await server.inject('/table/?month=202609&unit=count&show=change')).body).toContain('▲140.0<span class="unit">k</span>');
+    expect((await server.inject('/table/?month=202609&unit=count')).body).toContain('360<span class="unit">k</span>');
+    expect((await server.inject('/table/?month=202609&unit=count&show=change')).body).toContain('▲140<span class="unit">k</span>');
     const csv = (await server.inject('/api/v1/rankings.csv?month=202609')).body.split('\n');
-    expect(csv[0]).toContain('電子郵件占比差距');
+    expect(csv[0]).not.toContain('電子郵件占比差距');
     expect(csv[1]).toContain('202608');
     await server.close();
   });
@@ -665,7 +800,7 @@ describe.skipIf(!url)('with a database', () => {
     await run(pool, request, 3);
     expect(sent[0]).toBe('a.com.tw');
     expect(sent.slice(1).sort()).toEqual(['x.com.tw', 'y.com.tw']);
-    expect((await server.inject({ url: '/watch/', headers: { cookie } })).body).toContain('1.200');
+    expect((await server.inject({ url: '/watch/', headers: { cookie } })).body).toContain('1.200<span class="unit">m</span>');
 
     expect((await form(cookie, '/watch/remove', { domain: 'x.com.tw' })).headers.location).toBe('/watch/?removed=x.com.tw');
     expect(await rows(pool, "SELECT domain FROM watches WHERE requester = 'manual'")).toEqual([{ domain: 'y.com.tw' }]);
@@ -674,6 +809,25 @@ describe.skipIf(!url)('with a database', () => {
       'add:manual',
       'del:manual',
     ]);
+
+    // The add buttons on the discover and similar-sites pages: a background request gets JSON and no redirect; the same
+    // form without JavaScript comes back to its own page, and only to a path on this site.
+    const post = (body: Record<string, string>, headers: Record<string, string> = {}) =>
+      server.inject({
+        method: 'POST',
+        url: '/watch/',
+        headers: { cookie, origin, 'content-type': 'application/x-www-form-urlencoded', ...headers },
+        payload: new URLSearchParams(body).toString(),
+      });
+    const background = await post({ domains: 'w.com.tw', back: '/discover/?min=2' }, { accept: 'application/json' });
+    expect(background.statusCode).toBe(200);
+    expect(background.json()).toEqual({ added: 1 });
+    expect((await post({ domains: 'not a domain' }, { accept: 'application/json' })).statusCode).toBe(400);
+    expect((await post({ domains: 'v.com.tw', back: '/site/a.com.tw/similar/' })).headers.location).toBe('/site/a.com.tw/similar/?added=1');
+    expect((await post({ domains: 'u.com.tw', back: '/discover/?min=2' })).headers.location).toBe('/discover/?min=2&added=1');
+    expect((await post({ domains: 't.com.tw', back: '//evil.example/x' })).headers.location).toBe('/watch/?added=1&refused=0');
+    expect((await server.inject({ url: '/discover/?min=2&added=1', headers: { cookie } })).body).toContain('已加入 1 個網域');
+    for (const d of ['w.com.tw', 'v.com.tw', 'u.com.tw', 't.com.tw']) await form(cookie, '/watch/remove', { domain: d });
 
     // Removed from TRAFFIC_ADMIN_EMAILS: editing stops at once.
     login.admins.delete('sky9109@gmail.com');
@@ -827,12 +981,12 @@ describe.skipIf(!url)('with a database', () => {
         headers: { cookie, origin: from, 'content-type': 'application/x-www-form-urlencoded' },
         payload: new URLSearchParams(body).toString(),
       });
-    expect((await server.inject('/site/food.blog/')).body).toContain('用 Google 帳號登入</a>後可以同意');
+    expect((await server.inject('/site/food.blog/')).body).toContain('登入參與標籤投票 →</a>');
     expect((await send({ kind: 'vote', tag: '美食', value: '1' }, 'https://evil.example')).statusCode).toBe(403);
     expect((await send({ kind: 'vote', tag: '美食', value: '1' })).headers.location).toBe('/site/food.blog/?tags=done#tags');
     expect((await send({ kind: 'admin', tag: '美食', value: 'hide' })).headers.location).toBe('/site/food.blog/?tags=not_admin#tags');
     const page = (await server.inject({ url: '/site/food.blog/?tags=done', headers: { cookie } })).body;
-    expect(page).toContain('已同意（收回）');
+    expect(page).toContain('aria-pressed="true" title="再次點選收回同意"');
     expect(page).toContain('已更新標籤。');
     expect(page).not.toContain('解除覆寫');
     expect(await rows(pool, "SELECT voter, vote, via FROM tag_votes WHERE domain = 'food.blog' AND tag = '美食'")).toEqual([

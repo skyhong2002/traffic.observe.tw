@@ -517,6 +517,28 @@ describe('Similarweb composition', () => {
       expect(html).toContain(text);
     expect(similarwebSection({ domain: 'x.tw', category: null, similarSites: [], months: [], profile: null })).toBe('');
   });
+
+  it('shows similar sites as logos: linked when tracked, dashed and unlinked when only candidates', () => {
+    const profile = {
+      month: '202609',
+      countries: [{ code: 'TW', share: 0.9 }],
+      channels: { Direct: 0.5 },
+      bounceRate: 0.5,
+      pagesPerVisit: 2,
+      timeOnSite: 125,
+      globalRank: 1000,
+      countryRank: null,
+      categoryRank: null,
+    };
+    const base = { domain: 'x.tw', category: null, similarSites: ['a.tw', 'b.com'], months: [], profile };
+    const mixed = similarwebSection({ ...base, trackedSimilar: ['a.tw'], similarGrades: { 'a.tw': 0.654 } });
+    expect(mixed).toMatch(
+      /<a class="logo-chip" href="\/site\/a\.tw\/" title="a\.tw・相似度 65%"[^>]*><span class="favicon"[^>]*><img src="\/icon\/a\.tw"/,
+    );
+    expect(mixed).toMatch(/<span class="logo-chip untracked" title="b\.com（本站尚未追蹤）"/);
+    expect(mixed).not.toContain('/site/b.com/');
+    expect(similarwebSection({ ...base, trackedSimilar: ['a.tw', 'b.com'] })).not.toContain('untracked');
+  });
 });
 
 describe('channel tiles', () => {

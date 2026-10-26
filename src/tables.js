@@ -56,6 +56,12 @@
     }
   }
   function refresh() {
+    for (const tags of document.querySelectorAll('td .tags:not([tabindex])')) {
+      if (tags.closest('.tech-list, #tech-sites')) continue;
+      tags.tabIndex = 0;
+      tags.setAttribute('role', 'group');
+      tags.setAttribute('aria-label', '標籤，可左右捲動');
+    }
     for (const table of document.querySelectorAll('.scroll > table')) {
       if (!table.tHead) continue;
       if (tables.has(table)) {
@@ -253,6 +259,48 @@
     if (location.hash === '#method') openMethod();
   });
   if (location.hash === '#method') openMethod();
+  // Update only the tag panel after a vote; plain form posts remain the no-JS fallback.
+  document.addEventListener('submit', async (event) => {
+    const form = event.target;
+    const panel = form.closest?.('#tags');
+    if (!panel || !(form instanceof HTMLFormElement)) return;
+    event.preventDefault();
+    if (panel.getAttribute('aria-busy') === 'true') return;
+    const submitter = event.submitter;
+    const tag = form.elements.namedItem('tag')?.value;
+    const choice = submitter?.dataset.choice;
+    const body = new URLSearchParams(new FormData(form));
+    if (submitter?.name) body.set(submitter.name, submitter.value);
+    panel.setAttribute('aria-busy', 'true');
+    const feedback = panel.querySelector('.tag-feedback');
+    feedback.setAttribute('role', 'status');
+    feedback.textContent = '儲存中…';
+    panel.querySelectorAll('button').forEach((button) => {
+      button.disabled = true;
+    });
+    try {
+      const response = await fetch(form.action, { method: 'POST', body, credentials: 'same-origin' });
+      const page = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const updated = page.querySelector('#tags');
+      if (!response.ok || !updated) throw Error('無法確認是否儲存，請重新整理查看。');
+      const top = panel.getBoundingClientRect().top;
+      panel.replaceChildren(...updated.childNodes);
+      window.scrollBy(0, panel.getBoundingClientRect().top - top);
+      const nextForm = [...panel.querySelectorAll('form')].find((item) => item.elements.namedItem('tag')?.value === tag);
+      const next = choice
+        ? [...(nextForm?.querySelectorAll('button') || [])].find((button) => button.dataset.choice === choice)
+        : panel.querySelector('.tag-propose input');
+      next?.focus({ preventScroll: true });
+    } catch {
+      feedback.setAttribute('role', 'alert');
+      feedback.textContent = '無法確認是否儲存，請重新整理查看。';
+    } finally {
+      panel.removeAttribute('aria-busy');
+      panel.querySelectorAll('button').forEach((button) => {
+        button.disabled = false;
+      });
+    }
+  });
   refresh();
   filters();
 })();

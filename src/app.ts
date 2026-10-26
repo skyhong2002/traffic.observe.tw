@@ -20,11 +20,22 @@ import { type Pool, rows } from './db.ts';
 import { buildHistory, type History } from './history.ts';
 import { iconStore } from './icons.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
-import { loadManualMonths, manualCandidates, parseShare, parseVisits, recentMonths, setManualMonth } from './manual.ts';
+import {
+  loadManualMonths,
+  manualCandidates,
+  manualProfile,
+  parseManualChannels,
+  parseManualDetails,
+  parseShare,
+  parseVisits,
+  recentMonths,
+  setManualMonth,
+} from './manual.ts';
 import { EditError, editSites, loadMetadata, type ManagedSite, managedSites } from './metadata.ts';
 import { editSitePage, type ManualForm, manageSitesPage, manualPage, tagsByUse } from './metadata-pages.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
 import {
+  discoverPage,
   JS_FLAG,
   loginPage,
   METHOD_LINK,
@@ -32,6 +43,7 @@ import {
   rankingPage,
   type SitePage,
   sectionTabs,
+  similarPage,
   siteFooter,
   siteHeader,
   sitePage,
@@ -45,6 +57,7 @@ import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { runConfig } from './scheduler.ts';
 import { registerSeo } from './seo.ts';
+import { candidates, similarListing } from './similarsites.ts';
 import { aiShare, estimated, publicDomain, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
 import { loadQueue, serviceStatus } from './status.ts';
 import { loadTraffic } from './store.ts';
@@ -55,6 +68,7 @@ import { browserFetcher } from './tech-browser.ts';
 import { techDomainPage, techOverview, techPage, techSection } from './tech-pages.ts';
 import { checkNow, knownTechDomains, lastTechRun, loadTech, type TechRecord } from './tech-scan.ts';
 import { aggregateTopics } from './topics.ts';
+import { limitedTraffic, limitRows, publicTraffic, trafficAccess, twoDigits, visibleChannel } from './traffic-access.ts';
 
 const CACHE_MS = 60_000;
 /** /api/v1/history reads every month; it changes at most hourly (a Similarweb batch). */
@@ -116,6 +130,14 @@ export function buildApp(
     done(null, Object.fromEntries(new URLSearchParams(body as string))),
   );
   const editors = registerLogin(app, pool, login, { exchange });
+  app.addHook('preHandler', (request, reply, done) => {
+    if (request.url.startsWith('/internal/')) return done();
+    editors.currentUser(request).then((user) => {
+      reply.header('cache-control', 'private, no-store').header('vary', 'Cookie');
+      trafficAccess.run(Boolean(user && editors.isEditor(user.email)), done);
+    }, done);
+  });
+  app.addHook('preSerialization', async (_request, _reply, payload) => publicTraffic(payload));
   // Every page's header shows the sign-in state; pages themselves stay unaware of it.
   app.addHook('onSend', async (request, reply, payload) => {
     if (typeof payload !== 'string' || !payload.includes('<!--who-->')) return payload;
@@ -204,13 +226,25 @@ export function buildApp(
         prevChannels: b?.channels ?? null,
       };
     });
-    const placed = ranking(compared, topic);
+    const queryText = (query.q ?? '').trim().toLowerCase();
+    const placed = limitRows(
+      ranking(compared, topic).filter((s) => !queryText || `${s.name} ${s.domain}`.toLowerCase().includes(queryText)),
+    );
     const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
     const unit: 'share' | 'count' = query.unit === 'count' ? 'count' : 'share';
     return { months, month, from, show, unit, topics, topic, exclude, source, sources, list: placed };
   };
 
-  type RankingQuery = { month?: string; from?: string; show?: string; unit?: string; topic?: string; exclude?: string; source?: string };
+  type RankingQuery = {
+    q?: string;
+    month?: string;
+    from?: string;
+    show?: string;
+    unit?: string;
+    topic?: string;
+    exclude?: string;
+    source?: string;
+  };
   let historyCache: { at: number; data: Promise<History> } | null = null;
   const history = () => {
     if (historyCache && Date.now() - historyCache.at < HISTORY_MS) return historyCache.data;
@@ -329,16 +363,18 @@ export function buildApp(
   });
   app.get<{ Params: { domain: string }; Querystring: { done?: string } }>('/site/:domain/manual/', async (request, reply) => {
     if (!(await requireEditor(request, reply, request.url))) return reply;
+    if (!trafficAccess.getStore()) return reply.code(403).send({ error: 'full traffic access required' });
     const page = await manualFor(request.params.domain, { message: DONE[request.query.done ?? ''] });
     if (!page) return reply.code(404).send({ error: 'not found' });
     return reply.type('text/html').send(page);
   });
   app.post<{
     Params: { domain: string };
-    Body: { month?: string; visits?: string; search?: string; ai?: string; taiwan?: string; action?: string };
+    Body: Record<string, string | undefined>;
   }>('/site/:domain/manual/', async (request, reply) => {
     const editor = await requireEditor(request, reply, `/site/${request.params.domain}/manual/`);
     if (!editor) return reply;
+    if (!trafficAccess.getStore()) return reply.code(403).send({ error: 'full traffic access required' });
     const site = (await managedSites(pool)).find((s) => s.domain === publicDomain(request.params.domain));
     if (!site) return reply.code(404).send({ error: 'not found' });
     const body = request.body ?? {};
@@ -346,6 +382,7 @@ export function buildApp(
     try {
       const remove = body.action === 'delete';
       if (!remove && !recentMonths().includes(month)) throw new EditError('只能補登最近三個月。');
+      const details = remove ? null : parseManualDetails(body);
       await setManualMonth(
         pool,
         editor.email,
@@ -357,9 +394,11 @@ export function buildApp(
               domain: site.domain,
               month,
               visits: parseVisits(body.visits),
+              channels: parseManualChannels(body),
+              details,
               searchShare: parseShare(body.search, '自然搜尋占比'),
               aiShare: parseShare(body.ai, 'Gen AI 占比'),
-              taiwanShare: parseShare(body.taiwan, '台灣占比'),
+              taiwanShare: parseShare(body.taiwan, '台灣占比') ?? details?.countries.find((c) => c.code === 'TW')?.share ?? null,
             },
       );
       request.log.info({ by: editor.email, domain: site.domain, month, remove }, 'manual month saved');
@@ -438,7 +477,11 @@ export function buildApp(
   let known: { at: number; domains: Promise<Set<string>> } | null = null;
   const knownDomains = () => {
     if (!known || Date.now() - known.at > CACHE_MS * 10) {
-      const domains = managedSites(pool).then((sites) => new Set(sites.map((s) => s.domain)));
+      // Sites similarsites.com lists as similar are shown as candidates, so they get icons too.
+      const domains = Promise.all([
+        managedSites(pool),
+        rows<{ similar: string }>(pool, 'SELECT DISTINCT similar FROM similarsites_edges'),
+      ]).then(([sites, similar]) => new Set([...sites.map((s) => s.domain), ...similar.map((r) => r.similar)]));
       domains.catch(() => {
         known = null;
       });
@@ -467,12 +510,15 @@ export function buildApp(
   // The report: any two months compared, sources and topics filtered, rank trajectories per topic.
   app.get('/', async (_request, reply) => {
     reply.type('text/html; charset=utf-8');
-    return REPORT;
+    return REPORT.replace('/*traffic-digits*/4', trafficAccess.getStore() ? '4' : '2').replace(
+      '/*limited-traffic*/false',
+      String(limitedTraffic()),
+    );
   });
   // The same month as a plain server-rendered table (works without JavaScript).
   app.get<{ Querystring: RankingQuery }>('/table/', async (request, reply) => {
     // The page leaves out 非台灣 sites unless the address says otherwise (exclude= keeps them); the API does not.
-    const r = await rankingFor({ ...request.query, exclude: request.query.exclude ?? DEFAULT_EXCLUDE.join(',') });
+    const r = publicTraffic(await rankingFor({ ...request.query, exclude: request.query.exclude ?? DEFAULT_EXCLUDE.join(',') }));
     reply.type('text/html; charset=utf-8');
     return r
       ? rankingPage(r.month, r.months, r.topics, r.topic, r.list, r.source, r.sources, r.exclude, {
@@ -484,12 +530,35 @@ export function buildApp(
   });
   app.get<{ Querystring: { topic?: string } }>('/tag/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
-    return topicsPage(await allTopics(), request.query.topic);
+    return topicsPage(publicTraffic(await allTopics()), request.query.topic);
   });
   // /sources/ charted channels across sites for an hour on 2026-10-24; that comparison is the full table's now.
   app.get('/sources/', async (_request, reply) => reply.redirect('/table/', 301));
   // The tags page used to live at /topics/; old links and bookmarks keep working.
   app.get('/topics/', async (request, reply) => reply.redirect(`/tag/${request.url.slice('/topics/'.length)}`, 301));
+  // All of one site's similar sites (similarsites.com), public; editors can add the untracked ones.
+  app.get<{ Params: { domain: string }; Querystring: { added?: string } }>('/site/:domain/similar/', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    const [site, editor, listing] = await Promise.all([
+      domain ? siteData(pool, domain) : null,
+      editors.currentEditor(request),
+      domain ? similarListing(pool, domain) : null,
+    ]);
+    reply.type('text/html; charset=utf-8');
+    if (!site || !listing) return reply.code(404).send(notFoundPage(request.params.domain));
+    const shown = [...new Set([...listing.similar.map((e) => e.similar), ...listing.listedBy.map((l) => l.domain)])];
+    const tracked = new Set((await loadTraffic(pool, shown)).keys());
+    const names = new Map((await managedSites(pool)).filter((s) => tracked.has(s.domain)).map((s) => [s.domain, s.name]));
+    return similarPage({
+      added: Number(request.query.added) || 0,
+      site: { domain: site.domain, name: site.name },
+      editor,
+      loginEnabled: editors.enabled,
+      listing,
+      tracked,
+      names,
+    });
+  });
   app.get<{ Params: { domain: string }; Querystring: { tags?: string } }>('/site/:domain/', async (request, reply) => {
     const domain = publicDomain(request.params.domain);
     const site = domain ? await siteData(pool, domain) : null;
@@ -499,7 +568,7 @@ export function buildApp(
     const editor = user && editors.isEditor(user.email);
     const tech = (await loadTech(pool, [site.domain])).get(site.domain) ?? null;
     return sitePage(
-      site,
+      publicTraffic(site),
       !!editor,
       {
         loginEnabled: editors.enabled,
@@ -633,14 +702,41 @@ export function buildApp(
       return watchPage({
         editor,
         loginEnabled: editors.enabled,
-        manual,
+        manual: publicTraffic(limitRows(manual)),
         others: others.map((o) => ({ ...o, domains: Number(o.domains) })),
         flash,
-        list: listOf ? { requester: listOf, rows: await watchList(pool, listOf) } : null,
+        list: listOf ? { requester: listOf, rows: publicTraffic(limitRows(await watchList(pool, listOf))) } : null,
         queue,
       });
     },
   );
+  // Similar sites (similarsites.com) of tracked sites that are not tracked yet; the add button posts to /watch/.
+  app.get<{ Querystring: { min?: string; added?: string; tw?: string } }>('/discover/', async (request, reply) => {
+    const minVotes = [1, 2, 3, 5].includes(Number(request.query.min)) ? Number(request.query.min) : 2;
+    const taiwanOnly = request.query.tw === '1';
+    const [editor, found, [counts]] = await Promise.all([
+      editors.currentEditor(request),
+      candidates(pool, { minVotes, limit: 200, taiwanOnly }),
+      rows<{ answered: number; tracked: number }>(
+        pool,
+        `SELECT (SELECT COUNT(*) FROM similarsites_state WHERE status = 'ok') AS answered,
+                (SELECT COUNT(DISTINCT domain) FROM traffic_months) AS tracked`,
+      ),
+    ]);
+    const listers = [...new Set(found.flatMap((c) => c.listedBy))];
+    const tracked = new Set((await loadTraffic(pool, listers)).keys());
+    reply.type('text/html; charset=utf-8');
+    return discoverPage({
+      added: Number(request.query.added) || 0,
+      editor,
+      loginEnabled: editors.enabled,
+      found,
+      minVotes,
+      taiwanOnly,
+      fetched: { answered: Number(counts?.answered ?? 0), tracked: Number(counts?.tracked ?? 0) },
+      tracked,
+    });
+  });
   const editorPost = async (request: FastifyRequest, reply: FastifyReply) => {
     reply.header('cache-control', 'no-store');
     if (!editors.sameOrigin(request)) {
@@ -654,7 +750,7 @@ export function buildApp(
     }
     return editor;
   };
-  app.post<{ Body: { domains?: string; refreshDays?: string; note?: string } }>('/watch/', async (request, reply) => {
+  app.post<{ Body: { domains?: string; refreshDays?: string; note?: string; back?: string } }>('/watch/', async (request, reply) => {
     const editor = await editorPost(request, reply);
     if (!editor) return reply;
     const lines = String(request.body?.domains ?? '')
@@ -666,9 +762,20 @@ export function buildApp(
           note: request.body?.note ?? null,
         })
       : { error: 'invalid_domains' as const };
-    if ('error' in r || !r.added.length) return reply.redirect('/watch/?error=invalid', 303);
+    // The add buttons on the discover and similar-sites pages send JSON requests and stay on their page; the same forms
+    // without JavaScript come back to `back` (a path on this site) with a count.
+    const asJson = String(request.headers.accept ?? '').includes('application/json');
+    if ('error' in r || !r.added.length)
+      return asJson ? reply.code(400).send({ error: 'invalid' }) : reply.redirect('/watch/?error=invalid', 303);
     request.log.info({ by: editor.email, added: r.added }, 'manual watch added');
-    return reply.redirect(`/watch/?added=${r.added.length}&refused=${r.refused.length}`, 303);
+    if (asJson) return { added: r.added.length };
+    const back = /^\/(?!\/)[^\s\\]*$/.test(request.body?.back ?? '') ? (request.body?.back as string) : null;
+    return reply.redirect(
+      back
+        ? `${back}${back.includes('?') ? '&' : '?'}added=${r.added.length}`
+        : `/watch/?added=${r.added.length}&refused=${r.refused.length}`,
+      303,
+    );
   });
   app.post<{ Body: { domain?: string } }>('/watch/remove', async (request, reply) => {
     const editor = await editorPost(request, reply);
@@ -693,17 +800,26 @@ export function buildApp(
   app.get('/api/v1/', async () => apiIndex(PUBLIC_ORIGIN));
   app.get('/api/v1/openapi.json', async () => openApi(PUBLIC_ORIGIN));
   app.get('/api/v1/months', async () => ({ months: await availableMonths(pool) }));
-  app.get('/api/v1/history', async (_request, reply) => {
-    reply.header('cache-control', 'public, max-age=300');
-    return history();
+  app.get<{ Querystring: RankingQuery }>('/api/v1/history', async (request, reply) => {
+    reply.header('cache-control', 'private, no-store');
+    const data = await history();
+    if (!limitedTraffic()) return data;
+    const result = await rankingFor(request.query);
+    const domains = new Set(result?.list.map((s) => s.domain) ?? []);
+    return {
+      ...data,
+      filterTopics: result?.topics ?? [],
+      sites: Object.fromEntries(Object.entries(data.sites).filter(([domain]) => domains.has(domain))),
+      radar: Object.fromEntries(Object.entries(data.radar).filter(([domain]) => domains.has(domain))),
+    };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings', async (request, reply) => {
-    const r = await rankingFor(request.query);
+    const r = publicTraffic(await rankingFor(request.query));
     if (!r) return reply.code(404).send({ error: 'no_data' });
     return { month: r.month, from: r.from, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings.csv', async (request, reply) => {
-    const r = await rankingFor(request.query);
+    const r = publicTraffic(await rankingFor(request.query));
     if (!r) return reply.code(404).send({ error: 'no_data' });
     const cell = (v: unknown) =>
       v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
@@ -725,9 +841,9 @@ export function buildApp(
       'AI占比',
       '台灣占比',
       '來源',
-      ...CSV_CHANNELS.map(([, label]) => `${label}占比`),
+      ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([, label]) => `${label}占比`),
       '比較月份',
-      ...CSV_CHANNELS.map(([, label]) => `${label}占比差距`),
+      ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([, label]) => `${label}占比差距`),
     ];
     const body = r.list.map((s) =>
       [
@@ -748,9 +864,15 @@ export function buildApp(
         s.aiShare,
         s.taiwanShare,
         s.visitsSource,
-        ...CSV_CHANNELS.map(([key]) => (s.channels ? (s.channels[key] ?? 0) : null)),
+        ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key]) => (s.channels ? (s.channels[key] ?? null) : null)),
         r.from,
-        ...CSV_CHANNELS.map(([key]) => (s.channels && s.prevChannels ? (s.channels[key] ?? 0) - (s.prevChannels[key] ?? 0) : null)),
+        ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key]) =>
+          s.channels?.[key] != null && s.prevChannels?.[key] != null
+            ? trafficAccess.getStore()
+              ? (s.channels[key] ?? 0) - (s.prevChannels[key] ?? 0)
+              : twoDigits((s.channels[key] ?? 0) - (s.prevChannels[key] ?? 0))
+            : null,
+        ),
       ]
         .map(cell)
         .join(','),
@@ -773,7 +895,7 @@ export function buildApp(
       scope: 'all',
       months: data.months,
       topics: data.topics,
-      ...(topic !== null ? { topic, sites: data.sites.filter((s) => s.topics.includes(topic)) } : {}),
+      ...(topic !== null ? { topic, sites: limitRows(data.sites.filter((s) => s.topics.includes(topic))) } : {}),
     };
   });
   app.get<{ Params: { domain: string } }>('/api/v1/sites/:domain', async (request, reply) => {
@@ -1083,9 +1205,17 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
   const profiles = (t?.profiles ?? {}) as Record<string, TrafficProfile>;
   const profiled = Object.values(profiles)
     .filter((p) => t?.monthly.some((m) => m.month === p.month && estimated(m.visits)))
+    .concat(manual.filter((m) => !t?.monthly.some((v) => v.month === m.month && estimated(v.visits))).map(manualProfile))
     .sort((a, b) => a.month.localeCompare(b.month));
   const raw = state?.result;
   const summary = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { category?: string | null; similarSites?: string[] } | null;
+  // similarsites.com's list carries a similarity grade; Similarweb's own list is the fallback for sites it has not answered for.
+  const similarEdges = await rows<{ similar: string; grade: number }>(
+    pool,
+    'SELECT similar, grade FROM similarsites_edges WHERE domain = ? ORDER BY similarity_rank',
+    [domain],
+  );
+  const similarSites = similarEdges.length ? similarEdges.map((e) => e.similar) : (summary?.similarSites ?? []);
   return {
     domain,
     name: metadata.get(domain)?.name ?? labels.at(-1)?.name ?? domain,
@@ -1120,8 +1250,11 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
     // The newest month Similarweb profiled with an estimate: rank, engagement, every channel and the top countries.
     profile: profiled.at(-1) ?? null,
     profiles: profiled,
+    manualProfiles: manual.map(manualProfile),
     category: summary?.category ?? null,
-    similarSites: summary?.similarSites ?? [],
+    similarSites,
+    similarGrades: Object.fromEntries(similarEdges.map((e) => [e.similar, Number(e.grade)])),
+    trackedSimilar: [...(await loadTraffic(pool, similarSites)).keys()],
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),
     radar: radar.get(domain) ?? [],
     state: state

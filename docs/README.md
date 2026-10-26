@@ -76,7 +76,7 @@
 - `/tag/` 使用各網站目前的名稱與標籤，按網域去重統計所有網站，包含尚無流量的網站；累計造訪量加總所有已知月份，不提供月份選單或月成長欄。搜尋與 AI 占比分別只以有該項資料的網站月份為分母加權，缺值不補零。總覽有摘要卡、標籤雲（字級依累計造訪或網站數的排名，可切換）與標籤表（含每站平均與流量最大的三個網站）。`/tag/?topic=` 顯示該標籤的摘要、流量集中度（最大網站與前 5 大占比）、常一起出現的標籤，以及完整網站清單；清單有「月平均」欄，供資料月數不同的網站比較。
 - API 說明在 `/api/`（照 tag.observe.tw/api 的格式：使用規則、快速開始、端點一覽，每個端點附參數、範例與回應欄位）。端點清單只寫在 `src/api-docs.ts` 一處，同時產生說明頁、`/api/v1/` 索引與 `/api/v1/openapi.json`（OpenAPI 3.1）。`/api/v1/*` 與 `/icon/*` 回應帶 `Access-Control-Allow-Origin: *`。
 - 有 Similarweb 數字就用 Similarweb；沒有的月份或網域用試算表數字，並標「表」。Similarweb 回傳 0 表示該月沒有估算（2026-10-24 查 238 個網域有這種月份，大多是小部落格；tw.news.yahoo.com 三個月都是 0），原值照存，但頁面與 API 視同沒有 Similarweb 數字：改用試算表，沒有就不列入該月，該月的 Similarweb 搜尋、AI、台灣占比也不採用；網站頁的 Similarweb 欄顯示「無估算」。`/internal/v1/traffic` 仍回傳原始數字。
-- 免費端點沒有估算的大網站，可以從 Similarweb 平台（pro.similarweb.com，免費帳號登入後只看得到最近一個月）手動補登（`src/manual.ts`，表 `manual_months`，每次異動寫進 `manual_months_log`）。補登數字排在 Similarweb 免費端點之後、試算表之前，頁面標「Pro」，`/api/v1/history` 的來源欄為 2。編輯在網站的「Pro 補登」分頁（`/site/<domain>/manual/`，會顯示免費資料最近三個月有沒有估算，已補登的月份會自動帶入原值）輸入月份（最近三個月）、月造訪量（可貼 `60.10M` 這種寫法）、自然搜尋、Gen AI 與台灣占比（百分比，可留空）。`/status/` 列出需要補登的網域：最近一次抓取每個月都是 0、且試算表曾記錄 100 萬次以上造訪，或已有補登紀錄。2026-10-24 確認 tw.news.yahoo.com 在平台上有資料（9 月 60.10M、自然搜尋 36.45%、Gen AI 0.37%、台灣 61.57%），與試算表數字相同；平台的內部 API 有 CloudFront 防護，直接呼叫會回 403，因此不做自動抓取。月排行的匯入標籤取試算表裡該網域截至該月最新一個月份的所有列（A、B 欄），網站資料覆寫優先；沒有標籤的網域不列入任何標籤，也不另設「未分類」。
+- 免費端點沒有估算的大網站，可以從 Similarweb 平台（pro.similarweb.com，免費帳號登入後只看得到最近一個月）手動補登（`src/manual.ts`，表 `manual_months`，每次異動寫進 `manual_months_log`）。補登數字排在 Similarweb 免費端點之後、試算表之前，頁面標「人工」，`/api/v1/history` 的來源欄為 2。編輯在網站的「人工補登」分頁（`/site/<domain>/manual/`，會顯示免費資料最近三個月有沒有估算，已補登的月份會自動帶入原值）輸入月份（最近三個月）、月造訪量（可貼 `60.10M` 這種寫法）、自然搜尋、Gen AI 與台灣占比（百分比，可留空）。`/status/` 列出需要補登的網域：最近一次抓取每個月都是 0、且試算表曾記錄 100 萬次以上造訪，或已有補登紀錄。2026-10-24 確認 tw.news.yahoo.com 在平台上有資料（9 月 60.10M、自然搜尋 36.45%、Gen AI 0.37%、台灣 61.57%），與試算表數字相同；平台的內部 API 有 CloudFront 防護，直接呼叫會回 403，因此不做自動抓取。月排行的匯入標籤取試算表裡該網域截至該月最新一個月份的所有列（A、B 欄），網站資料覆寫優先；沒有標籤的網域不列入任何標籤，也不另設「未分類」。
 
 2026-10-24 00:14（台北時間）跨月份標籤概況已重啟 web 上線。正式站列出 63 個標籤，對 1,429 個已知網域逐標籤核對成員數與累計流量一致；統計涵蓋 202412 至 202609 的 20 個有流量資料月份。舊 `/topics/?month=` 連結顯示相同的跨月份彙整；手機 390px 畫面無頁面溢出，標籤內網站數與實際清單一致。型別、lint、既有與新增測試通過。此次修改前的檔案備份與正式站核對結果在 `data/topics-aggregate-20261024/`；本次沒有改寫網站名稱、標籤或流量資料。
 
@@ -84,11 +84,11 @@
 
 網站 icon（`src/icons.ts`）：`/icon/<網域>` 只回應本站已知的網域，第一次請求時由伺服器向 Google favicon 服務（`s2/favicons?sz=64`）抓一次，存在 `data/icons/`（可用 `TRAFFIC_ICON_DIR` 改位置），30 天後更新；Google 沒有圖示的網域記為 `.none`，7 天後再試。同時最多 6 個對外請求。訪客只連本站，不直接連到 Google；沒有圖示時顯示名稱的第一個字。
 
-全站固定使用黑色主題，共用表格沿用 [tag.observe.tw/media/traffic](https://tag.observe.tw/media/traffic) 的緊湊樣式。版面參照 [tag.observe.tw/media](https://tag.observe.tw/media/)：頁首是「流量排行」「標籤概況」「抓取狀態」「追蹤網域」；流量排行的兩個檢視（流量總覽／完整數據）與網站的流量資料／名稱與標籤／Pro 補登，在標題上方以藥丸子選單切換。標題下一行是說明與「本頁的資料來源與計算方式」連結（開啟頁尾上方的收合說明），接著是摘要卡、搜尋與月份、篩選 chip 列（全部來源／各來源、全部標籤／各標籤附數量，標籤超過 15 個時其餘收在「更多」），最後是表格。網站與標籤管理、API 與資料來源放在頁尾。
+全站固定使用黑色主題，共用表格沿用 [tag.observe.tw/media/traffic](https://tag.observe.tw/media/traffic) 的緊湊樣式。版面參照 [tag.observe.tw/media](https://tag.observe.tw/media/)：頁首是「流量排行」「標籤概況」「抓取狀態」「追蹤網域」；流量排行的兩個檢視（流量總覽／完整數據）與網站的流量資料／名稱與標籤／人工補登，在標題上方以藥丸子選單切換。標題下一行是說明與「本頁的資料來源與計算方式」連結（開啟頁尾上方的收合說明），接著是摘要卡、搜尋與月份、篩選 chip 列（全部來源／各來源、全部標籤／各標籤附數量，標籤超過 15 個時其餘收在「更多」），最後是表格。網站與標籤管理、API 與資料來源放在頁尾。
 
 表格（`src/tables.js`）：每列一行，名稱與網域同列顯示，相同時省略網域；橫向捲動時固定識別欄，垂直捲動頁面時表頭保持可見。伺服器產生的表格加 `data-sortable` 即可點表頭排序（數字先由大到小、名次與文字先由小到大，空值永遠排最後；顯示值與排序值不同時用 `data-v`），搜尋框用 `data-table-filter="<table id>"`。超過 50 列的表格先顯示 50 列，按「瀏覽更多」後隨捲動自動載入；排序、搜尋或篩選改變時回到前 50 列。首頁排行用同樣的規則。
 
-2026-10-24 04:47（台北時間）重啟 web 上線介面改版：版面改照 tag.observe.tw/media（頁首兩個入口、標題上方子選單、摘要卡、篩選 chip 列，已選的 chip 再按一次即取消）、所有表格可排序並以 50 列為單位「瀏覽更多」、造訪量 k／m／b 四位有效數字、`/topics/` 改為 `/tag/`（301 轉址，sitemap 同步）、首頁點網站直接進網站頁、Similarweb 回傳 0 視為無估算、網站頁的「名稱與標籤」「Pro 補登」分頁。`0005_manual_months.sql` 已於同日先行套用（只新增兩張空表）。04:49 再上線 chip 取消選取的修正。型別、lint 與 45 項測試通過；本機與公開站的各頁、`/healthz`、`/api/v1/history`、`/sitemap.xml` 皆 200，`/topics/` 301 至 `/tag/`，HTML 引用新的 CSS 雜湊。上線前的檔案備份在 `data/ui-redesign-20261024/before/`（新增檔案列於 `NEW_FILES.txt`），chip 修正前的版本在 `before-chip-toggle/`；回復時把備份檔複製回原位、刪除新增檔案，再重啟 web 服務（兩張新表可保留，舊程式不會讀取）。上線後 202609 排行由 1,162 個網站變為約 980 個，差額是 Similarweb 回傳 0、又沒有試算表數字的網站。
+2026-10-24 04:47（台北時間）重啟 web 上線介面改版：版面改照 tag.observe.tw/media（頁首兩個入口、標題上方子選單、摘要卡、篩選 chip 列，已選的 chip 再按一次即取消）、所有表格可排序並以 50 列為單位「瀏覽更多」、造訪量 k／m／b 四位有效數字、`/topics/` 改為 `/tag/`（301 轉址，sitemap 同步）、首頁點網站直接進網站頁、Similarweb 回傳 0 視為無估算、網站頁的「名稱與標籤」「人工補登」分頁。`0005_manual_months.sql` 已於同日先行套用（只新增兩張空表）。04:49 再上線 chip 取消選取的修正。型別、lint 與 45 項測試通過；本機與公開站的各頁、`/healthz`、`/api/v1/history`、`/sitemap.xml` 皆 200，`/topics/` 301 至 `/tag/`，HTML 引用新的 CSS 雜湊。上線前的檔案備份在 `data/ui-redesign-20261024/before/`（新增檔案列於 `NEW_FILES.txt`），chip 修正前的版本在 `before-chip-toggle/`；回復時把備份檔複製回原位、刪除新增檔案，再重啟 web 服務（兩張新表可保留，舊程式不會讀取）。上線後 202609 排行由 1,162 個網站變為約 980 個，差額是 Similarweb 回傳 0、又沒有試算表數字的網站。
 
 2026-10-24 05:25（台北時間）重啟 web 上線：標籤 chip 改為「只看／排除／取消」三段、流量總覽與完整數據預設排除「非台灣」（API 不套預設）、修正排序或「瀏覽更多」時排除條件失效、網站 icon（`/icon/<網域>`，快取於 `data/icons/`）、頁首加入抓取狀態與追蹤網域、API 說明頁 `/api/` 與 `/api/v1/openapi.json`、公開 API 加 CORS。型別、lint 與 48 項測試通過；本機與公開站各頁及 API 皆 200，`/icon/` 對未追蹤網域回 404，完整數據預設為「排除 非台灣・916 個網站」，`/api/v1/rankings` 仍回 986 個網站。上線前的檔案在 `data/ui-redesign-20261024/before-exclude-icons-api/`（新增檔案列於 `NEW_FILES.txt`）；回復時把備份檔複製回原位、刪除新增檔案，再重啟 web 服務。
 
@@ -160,6 +160,10 @@
 
 2026-10-21 20:00（台北時間）已完成接手：tag `771a4ebc` 的 API、gateway、worker 都已上線，回滾腳本在 `~/tag-analysis-private/f1-release/traffic-service-771a4ebc-20261021/rollback.sh`；本服務 budget 為 15。blog worker 改為直接呼叫本服務（blog `b195eb8`，drop-in `blog-observe-worker.service.d/96-traffic-b195eb8.conf`）。blog gateway 的管理頁查詢仍經 tag 轉送，等 blog 下次發版就會改成直連。
 
+## 流量查看權限
+
+登入 `TRAFFIC_ADMIN_EMAILS` 名單中的管理員（sky9109@gmail.com、genehong@gmail.com）可查看完整精確度、所有國家與導流來源，筆數不受限制。其他使用者不論是否登入，均只提供兩位有效數字、台灣占比與自然搜尋／直接／連入／社群／AI 五項來源；每次篩選最多 30 個網站，不提供載入更多。頁面、JSON API、CSV 使用相同規則，回應不共用快取。
+
 ## 部署
 
 systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `systemctl --user enable --now`，2026-10-21 已啟用）。公開網址 `traffic.observe.tw` 經 Cloudflare Tunnel（observe-steamos）指到 `http://127.0.0.1:18150`；經 tunnel 進來的請求帶 `cf-connecting-ip`，所以 `/internal/*` 一律 404。
@@ -184,7 +188,7 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 
 ## 網站名稱與標籤管理
 
-登入 `TRAFFIC_ADMIN_EMAILS` 名單內帳號後，網站頁上方會出現「流量資料／名稱與標籤／Pro 補登」分頁，也可從 `/sites/` 批次管理。標籤編輯器把已選標籤列成可移除的標籤，輸入文字會列出符合的既有標籤（依使用次數排序）並可新增，下方列出最常用的標籤可一鍵加入；儲存後留在同一頁並顯示「已儲存」。單站支援名稱修改、多標籤新增與移除；管理頁可搜尋、依標籤篩選、勾選最多 200 個網域批次加減標籤。網域不在這個表單修改，以免接錯歷史流量。
+登入 `TRAFFIC_ADMIN_EMAILS` 名單內帳號後，網站頁上方會出現「流量資料／名稱與標籤／人工補登」分頁，也可從 `/sites/` 批次管理。標籤編輯器把已選標籤列成可移除的標籤，輸入文字會列出符合的既有標籤（依使用次數排序）並可新增，下方列出最常用的標籤可一鍵加入；儲存後留在同一頁並顯示「已儲存」。單站支援名稱修改、多標籤新增與移除；管理頁可搜尋、依標籤篩選、勾選最多 200 個網域批次加減標籤。網域不在這個表單修改，以免接錯歷史流量。
 
 人工值存入 `site_metadata`，原始 `sheet_rows` 保留不動。人工標籤取代該網站的匯入標籤（包含手動清空）；名稱留空時沿用表格名稱。人工值套用至網站各月份的標籤，表格原始逐月紀錄仍可查看。重新匯入不會蓋掉人工值。每次修改記錄於 `site_metadata_log`；單站儲存檢查版本，批次更新使用交易與資料列鎖，成功後清除排行及歷史 API 快取。
 
@@ -223,3 +227,15 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 型別、lint 與 81 項測試通過；320px、390px、1024px（含登入列）及 1280px 版面無溢出，正式站頁首頁尾載入新的 Logo 與 CSS 雜湊。備份與發布核對在 `data/brand-c-release-20261026-153633/`；還原其 `before/` 內檔案並重啟 web 可回復前一版。
 
 2026-10-26 台灣占比估算（`src/taiwan-estimate.ts`）：Similarweb 沒有台灣占比的網站，名次與排序依序採用 ①編輯者在試算表名稱尾巴寫的「/N」（1/N，取最近一個月；這些列的流量仍不當造訪量）②該站較早月份的占比 ③Similarweb 前 5 大國家推出的上限（台灣不在前 5 名，所以不超過第 5 名，也不超過 100% 減前 5 名）。①②若高於上限（含 10% 容許）視為與 Similarweb 自己的國家資料矛盾，改用上限並標 `taiwanCapped`。表格以「≈」標估算、「<」標上限，游標停上去看依據；API／CSV 有 `taiwanShareUsed`、`taiwanBasis`（measured／manual／history／bound）、`taiwanShareMax`，`/api/v1/history` 每月陣列增為九格。Similarweb 的國家資料目前只存在最新一個月，所以上限只有該月算得出來。以上限排序是刻意的保守選擇：它不低估台灣流量，但外國大站（msn.com、bbc.com）會比實際高。九月結果：實測 1,379、上限 84、較早月份 28、編輯者 1/N 7、都沒有 43（合計造訪量 0.6m，排最後）；有兩個編輯者估算被上限蓋掉（news.yahoo.co.jp、xinhuanet.com）。
+
+補登渠道：表單支援 Direct、Referral、Organic/Paid Social、Paid Search、Email、Display Ads、Affiliate，加上原有 Organic Search 與 Gen AI。渠道皆選填，空白是未知，0 是明確填寫的零；補登月份的渠道提供給完整數據排行、API 與 CSV，免費估算仍優先。`0008_manual_channels.sql` 新增可為 NULL 的 JSON 欄位，保留既有補登及稽核紀錄；部署前先執行 `npm run db:migrate`，再重啟 web。Redirect 不作為獨立流量渠道。
+
+平台補登亦支援跳出率、每次造訪頁數、停留秒數（或時:分:秒）、全球/國家/分類排名及國家占比；平台明細含 Social、Referral 來源網站/產業、連出目的地/廣告主、Display 刊登網站。列表每行 `名稱 | 占比 | Change（選填）`，`?` 表示平台未公開名稱；保留 `<0.01%`、`>5000%`、`New`，各列表依其分母保存，不與全站渠道比例混用。Social 總占比獨立，不推定為自然社群。明細儲存在 manual_months.details JSON，修改前後值亦留在 manual_months_log。網站 API 的 manualProfiles 保留全部補登月份，免費資料仍優先使用，但不會遮掉平台獨有明細；未授權訪客不回傳 manualProfiles/breakdowns。
+
+2026-10-26 23:02:55（台北時間）完成平台完整補登與協作標籤 UI 上線：套用 `0008_manual_channels.sql`，重啟 web（worker 不需重啟）。typecheck、lint、119 tests、diff --check 通過；1280px/390px 補登表單與平台明細無橫向溢出，全部新欄位切換月份可還原。正式及本機首頁/健康/網站頁/網站API皆200，未登入補登頁303至登入；重啟後無錯誤。正式 manual_months/log 上線前後皆0列，未代填示例資料。發布程式快照及空表備份：`data/manual-full-release-2026-10-26T15-02-31-993Z/`。
+
+2026-10-26 23:12（台北時間）人工補登版面更新：全站名稱/來源標記由 Pro 改為人工補登/人工，說明使用個人 Similarweb 帳號即可，不暗示付費方案。補登表單及狀態說明移除卡片底色/外框，表單使用全寬；桌面來源/排名4欄、平台明細2欄，手機單欄。typecheck、lint、119 tests與diff檢查通過；1440px/390px預覽無溢出，正式站健康與新CSS正常。回復檔案位於 `data/manual-flat-20261026T151030Z/before/`，還原src檔案再重啟web即可，無資料庫異動。
+
+2026-10-26 23:24:50（台北時間）可互動標籤統一膠囊樣式：單站/批次picker、投票/管理員顯示隱藏、各頁連結標籤與共現/標籤雲沿用篩選chip的灰底/橘色選取/紅色負向狀態。投票以標籤及同意/不同意票數為一組膠囊，保留AJAX與撤回；未選灰色，批次移除使用紅色及減號。typecheck、lint通過；首次全套119項中的DB初始化遇到主機負載逾時，延長hookTimeout至60秒重跑DB16項全部通過，其餘103項通過。桌面1280/手機390實測選取、批次移除、同意→不同意→撤回、admin狀態色皆正常且無溢出。正式首頁/網站頁/標籤概況/health皆200並載入新CSS；備份 `data/tag-pills-20261026T151936Z/before/`，還原src檔案並重啟web即可回復。
+
+2026-10-26 23:55（台北時間）表格標籤欄改為獨立橫向捲動，提供細捲軸、鍵盤焦點及無障礙標示；保留單列膠囊與連結。390px/1280px 驗證可捲到末端且外層表格位置不變、頁面無溢出。typecheck、lint、123 tests 與 diff 檢查通過，重啟 web 後正式站 CSS/JS 及 healthz 核對正常；未執行 migration。變更前 CSS/JS 在 data/tag-scroll-before/。

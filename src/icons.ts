@@ -6,6 +6,9 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 // the name's first letter.
 
 const SOURCE = (domain: string) => `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`;
+const FALLBACK_SOURCE = (domain: string) => `https://favicon.yandex.net/favicon/${encodeURIComponent(domain)}`;
+/** Yandex's blank placeholder is 70 bytes; a real icon is larger. */
+const FALLBACK_MIN_BYTES = 100;
 const FRESH_MS = 30 * 24 * 3600_000;
 const MISSING_RETRY_MS = 7 * 24 * 3600_000;
 const MAX_BYTES = 200_000;
@@ -46,14 +49,21 @@ export function iconStore(
     }
   };
 
+  async function fetchFrom(url: string, minBytes: number): Promise<Icon | null> {
+    const res = await request(url, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'follow' });
+    const type = res.headers.get('content-type') ?? '';
+    const body = Buffer.from(await res.arrayBuffer());
+    return res.ok && type.startsWith('image/') && body.length >= minBytes && body.length <= MAX_BYTES
+      ? { body, type: type.split(';')[0] }
+      : null;
+  }
+
   async function fetchIcon(domain: string): Promise<Icon | null> {
     await slot();
     try {
-      const res = await request(SOURCE(domain), { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'follow' });
-      const type = res.headers.get('content-type') ?? '';
-      const body = Buffer.from(await res.arrayBuffer());
-      // Google answers 404 with a generic globe for a domain it has no icon for.
-      return res.ok && type.startsWith('image/') && body.length > 0 && body.length <= MAX_BYTES ? { body, type: type.split(';')[0] } : null;
+      // Google answers 404 with a generic globe for a domain it has no icon for; Yandex then often has one, and
+      // answers 200 with its own 70-byte blank for the rest, which is not an icon.
+      return (await fetchFrom(SOURCE(domain), 1)) ?? (await fetchFrom(FALLBACK_SOURCE(domain), FALLBACK_MIN_BYTES));
     } finally {
       release();
     }

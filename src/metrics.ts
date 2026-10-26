@@ -1,9 +1,9 @@
 import { loadCrowd, shownTags } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
-import { loadManualMonths } from './manual.ts';
+import { loadManualMonths, manualProfile } from './manual.ts';
 import { loadMetadata } from './metadata.ts';
 import { divisorOf, siteName } from './sheet.ts';
-import { aiShare, estimated, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
+import { aiShare, estimated, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare, trafficChannels } from './similarweb.ts';
 import { latestTopics } from './tags.ts';
 import { estimateTaiwanShare, type TaiwanBasis, taiwanVisits } from './taiwan-estimate.ts';
 
@@ -37,7 +37,7 @@ export interface SiteMonth {
   taiwanCapped: boolean;
   prevSearchShare: number | null;
   prevAiShare: number | null;
-  /** Every Similarweb channel's share this month; null without a Similarweb estimate (no sheet fallback). */
+  /** Fetched or manually entered channel shares; omitted manual channels are unknown (no sheet fallback). */
   channels: Partial<Record<TrafficChannel, number>> | null;
   /** The comparison month's 台灣 share and channels, set by the rankings when a month is compared. */
   prevTaiwanShare?: number | null;
@@ -138,10 +138,15 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     return {
       visits: sw ?? (hand ? hand.visits / 1e6 : null) ?? sh?.visits ?? null,
       source: sw !== undefined ? ('similarweb' as const) : hand ? ('manual' as const) : sh?.visits != null ? ('sheet' as const) : null,
-      channels: p ? p.channels : null,
+      channels: p
+        ? Object.fromEntries(trafficChannels.map((key) => [key, p.channels[key] ?? 0]))
+        : hand
+          ? manualProfile(hand).channels
+          : null,
       search: p ? searchShare(p) : fallback.search,
       ai: p ? aiShare(p) : fallback.ai,
       taiwan: p ? taiwanShare(p) : fallback.taiwan,
+      // A hand-entered country list may be partial, so do not use it as a top-five bound.
       countries: p ? p.countries : null,
     };
   };

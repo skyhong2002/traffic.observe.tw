@@ -1,3 +1,5 @@
+import type { PlatformBreakdowns } from './manual-breakdowns.ts';
+
 // The Similarweb extension endpoint and its response, ported from tag
 // (app/src/media-traffic/live.ts, external.ts). Every data.similarweb.com
 // request on this machine goes through requestSimilarweb, from the worker's
@@ -24,6 +26,10 @@ export type TrafficChannel = (typeof trafficChannels)[number];
 /** What Similarweb reports for one month besides visits. Only the latest month
  *  is returned per request, so older months only exist if they were fetched then. */
 export interface TrafficProfile {
+  /** Present for months copied from the platform by an editor. */
+  source?: 'manual';
+  /** Platform-only breakdowns; each table has its own denominator. */
+  breakdowns?: PlatformBreakdowns;
   month: string;
   /** Top five countries (ISO 3166 alpha-2) and their share of visits, largest first. */
   countries: Array<{ code: string; share: number }>;

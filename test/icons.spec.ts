@@ -10,10 +10,19 @@ let dir = '';
 afterEach(async () => {
   if (dir) await rm(dir, { recursive: true, force: true });
 });
-const fakeGoogle = (answers: Record<string, number>) => {
+const real = Buffer.alloc(300, 1);
+/** Google answers per `answers`; Yandex (the second try) answers per `yandex`: a real icon, its 70-byte blank, or 404. */
+const fakeGoogle = (answers: Record<string, number>, yandex: Record<string, 'icon' | 'blank'> = {}) => {
   const asked: string[] = [];
   const request = (async (url: string) => {
-    const domain = new URL(url).searchParams.get('domain') as string;
+    const u = new URL(url);
+    if (u.hostname === 'favicon.yandex.net') {
+      const domain = decodeURIComponent(u.pathname.split('/').pop() as string);
+      asked.push(`yandex:${domain}`);
+      const kind = yandex[domain];
+      return new Response(kind === 'icon' ? real : Buffer.alloc(70, 2), { headers: { 'content-type': 'image/png' } });
+    }
+    const domain = u.searchParams.get('domain') as string;
     asked.push(domain);
     const status = answers[domain] ?? 404;
     return new Response(png, { status, headers: { 'content-type': 'image/png' } });
@@ -34,8 +43,19 @@ describe('site icons', () => {
     const later = iconStore(pathToFileURL(`${dir}/`), request);
     expect((await later('udn.com'))?.body.equals(png)).toBe(true);
     expect(await later('none.example.tw')).toBeNull();
-    expect(asked).toEqual(['udn.com', 'none.example.tw']);
+    expect(asked).toEqual(['udn.com', 'none.example.tw', 'yandex:none.example.tw']);
     expect((await readdir(dir)).sort()).toEqual(['none.example.tw.none', 'udn.com.png']);
+  });
+
+  it("falls back to Yandex when Google has no icon, and ignores Yandex's blank placeholder", async () => {
+    dir = await mkdtemp(join(tmpdir(), 'icons-'));
+    const { request } = fakeGoogle({ 'udn.com': 200 }, { 'ecpay.com.tw': 'icon', 'blank.tw': 'blank' });
+    const icons = iconStore(pathToFileURL(`${dir}/`), request);
+    expect((await icons('ecpay.com.tw'))?.body.equals(real)).toBe(true);
+    expect(await icons('blank.tw')).toBeNull();
+    // Google's answer wins when it has one.
+    expect((await icons('udn.com'))?.body.equals(png)).toBe(true);
+    expect((await readdir(dir)).sort()).toEqual(['blank.tw.none', 'ecpay.com.tw.png', 'udn.com.png']);
   });
 
   it('asks again once a stored icon is a month old', async () => {

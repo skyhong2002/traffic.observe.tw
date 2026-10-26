@@ -1,13 +1,16 @@
 import { BRAND, BRAND_HEAD } from './brand.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
 import { type manualCandidates, proUrl } from './manual.ts';
+import { breakdownFields, breakdownTotals, reportedPercentText } from './manual-breakdowns.ts';
 import { type ranking, shiftMonth } from './metrics.ts';
 import type { RadarPeriod } from './radar.ts';
 import type { WatchRow } from './requests.ts';
+import { type Candidate, type SimilarListing, taiwanClue } from './similarsites.ts';
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
 import type { TopicOverview } from './topics.ts';
+import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } from './traffic-access.ts';
 
 // Server-rendered pages in the report's design (style.css). Every page has the
 // same shape: the site header, a page head (title, one-line description, page
@@ -19,7 +22,7 @@ export const html = (value: unknown) =>
 
 const monthLabel = (m: string) => `${m.slice(0, 4)}/${m.slice(4)}`;
 const monthLong = (m: string) => `${m.slice(0, 4)} 年 ${Number(m.slice(4))} 月`;
-const pct = (n: number | null, digits = 1) => (n === null ? '' : `${(n * 100).toFixed(digits)}%`);
+const pct = (n: number | null, digits = 1) => (n === null ? '' : `${trafficNumber(n * 100, digits)}%`);
 /** Up/down carry ▲▼ as well as color. */
 const signed = (n: number | null) =>
   n === null ? '' : `<span class="delta ${n < 0 ? 'down' : 'up'}">${n < 0 ? '▼' : '▲'}${pct(Math.abs(n))}</span>`;
@@ -32,8 +35,9 @@ export const sortCell = (cls: string, value: number | string | null, shown: stri
  * 4031m, 12.34b). Takes millions, as visits are stored.
  */
 export function visitParts(millions: number): [string, string] {
-  const n = millions * 1e6;
-  const [v, unit] = n >= 1e10 ? [n / 1e9, 'b'] : n >= 1e6 ? [millions, 'm'] : n >= 1e3 ? [n / 1e3, 'k'] : [n, ''];
+  const n = limitedTraffic() ? twoDigits(millions * 1e6) : millions * 1e6;
+  const [v, unit] = n >= 1e10 ? [n / 1e9, 'b'] : n >= 1e6 ? [n / 1e6, 'm'] : n >= 1e3 ? [n / 1e3, 'k'] : [n, ''];
+  if (limitedTraffic()) return [String(twoDigits(v)), unit];
   if (!unit) return [String(Math.round(v)), ''];
   const r = Number(v.toPrecision(4));
   return [r.toFixed(r >= 1000 ? 0 : 3 - Math.floor(Math.log10(r))), unit];
@@ -64,7 +68,7 @@ export const taiwanVisitsCell = (s: {
   if (s.taiwanVisits === null) return sortCell('num', null, '');
   const basis = s.taiwanBasis ? TAIWAN_BASIS[s.taiwanBasis] : undefined;
   if (!basis) return volCell(s.taiwanVisits);
-  const share = s.taiwanShareUsed === null ? '' : `（占比 ${(s.taiwanShareUsed * 100).toFixed(s.taiwanShareUsed < 0.1 ? 2 : 1)}%）`;
+  const share = s.taiwanShareUsed === null ? '' : `（占比 ${trafficNumber(s.taiwanShareUsed * 100, s.taiwanShareUsed < 0.1 ? 2 : 1)}%）`;
   const note = `${basis}${share}${s.taiwanCapped ? '；原本的估算超過這個上限，已改用上限' : ''}`;
   return sortCell(
     'num',
@@ -78,16 +82,23 @@ export const tw = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, dateStyle: 'short', timeStyle: 'short' }) : '';
 export const twDate = (iso: string) => new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
 
-export type Nav = 'report' | 'table' | 'topics' | 'tech' | 'status' | 'watch' | 'sites' | null;
+export type Nav = 'report' | 'table' | 'topics' | 'tech' | 'status' | 'watch' | 'discover' | 'sites' | null;
 /** The header holds the main pages; the ranking's two views are tabs above its title (sectionTabs). */
 const NAV: Array<[string, string, Nav[]]> = [
   ['/', '流量排行', ['report', 'table']],
   ['/tag/', '標籤概況', ['topics']],
   ['/tech/', '網站技術', ['tech']],
   ['/status/', '抓取狀態', ['status']],
-  ['/watch/', '追蹤網域', ['watch']],
+  ['/watch/', '追蹤網域', ['watch', 'discover']],
 ];
 const SECTIONS: Array<[string, Array<[Exclude<Nav, null>, string, string]>]> = [
+  [
+    '追蹤網域',
+    [
+      ['watch', '/watch/', '追蹤名單'],
+      ['discover', '/discover/', '發掘候選'],
+    ],
+  ],
   [
     '流量排行',
     [
@@ -134,18 +145,21 @@ export interface Masthead {
   tabs?: string;
 }
 
-export type SiteTab = 'overview' | 'edit' | 'manual';
+export type SiteTab = 'overview' | 'similar' | 'edit' | 'manual';
 /** The pages of one site an editor moves between: its data, its name and tags, and months entered by hand. */
-export const siteTabs = (domain: string, current: SiteTab) =>
+export const siteTabs = (domain: string, current: SiteTab, editor = true) =>
   pills(
     '網站頁面',
     (
       [
-        ['overview', '', '流量資料'],
-        ['edit', 'edit/', '名稱與標籤'],
-        ['manual', 'manual/', 'Pro 補登'],
+        ['overview', '', '流量資料', false],
+        ['similar', 'similar/', '相似網站', false],
+        ['edit', 'edit/', '名稱與標籤', true],
+        ['manual', 'manual/', '人工補登', true],
       ] as const
-    ).map(([key, path, label]) => [`/site/${html(domain)}/${path}`, label, key === current]),
+    )
+      .filter(([, , , editorOnly]) => editor || !editorOnly)
+      .map(([key, path, label]) => [`/site/${html(domain)}/${path}`, label, key === current]),
   );
 
 const navLink = (nav: Nav, [key, href, label]: [Nav, string, string]) =>
@@ -159,7 +173,7 @@ export function siteHeader(nav: Nav) {
   ).join('')}</nav><div class="site-tools"><span class="who"><!--who--></span></div></div></header>`;
 }
 
-const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（四位有效數字）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
+const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
 <p>Similarweb 沒有的月份以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。Similarweb 回傳 0 代表那個月沒有估算（小網站，或它不單獨計算的子網域如 tw.news.yahoo.com），視同沒有資料，不當成 0 次造訪。搜尋與 AI 占比只提供抓取時最新一個月，缺少的月份不推算；試算表中的 Ahrefs 搜尋數字與 A/S 比值不在本站資料範圍內。</p>
 <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
 `;
@@ -265,12 +279,37 @@ const tagLinks = (topics: string[], href: (t: string) => string) =>
   `<span class="tags" title="${html(topics.join('、'))}">${topics.map((t) => `<a class="tag" href="${href(t)}">${html(t)}</a>`).join('')}</span>`;
 /** Name and domain on one line; the domain is left out when it is the name. */
 /** The site's icon (/icon/), or the first letter of its name where it has none. */
+/** A hue from the domain, so sites without an icon get their own colour on the letter tile rather than all looking alike. */
+const tileHue = (domain: string) => [...domain].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 export const favicon = (domain: string, name: string) =>
-  `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
-export const siteCell = (domain: string, name: string, extra = '') =>
-  `<td class="l" data-v="${html(name)}"><span class="site-identity">${favicon(domain, name)}<a class="site-name" href="/site/${html(domain)}/" title="${html(name)} · ${html(domain)}">${html(name)}</a>${
-    domain !== name ? `<span class="site-domain table-lead-extra">${html(domain)}</span>` : ''
+  `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}" aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
+/**
+ * A site shown by its logo alone, for places where its name would be too small to read: the name, the domain and
+ * any note go in the tooltip. Untracked sites have no page, so they are not links and get a dashed edge.
+ */
+export const logoChip = (domain: string, { note = '', tracked = true }: { note?: string; tracked?: boolean } = {}) => {
+  const title = `${domain}${note ? `・${note}` : ''}${tracked ? '' : '（本站尚未追蹤）'}`;
+  const inner = favicon(domain, domain);
+  return tracked
+    ? `<a class="logo-chip" href="/site/${html(domain)}/" title="${html(title)}" aria-label="${html(title)}">${inner}</a>`
+    : `<span class="logo-chip untracked" title="${html(title)}" role="img" aria-label="${html(title)}">${inner}</span>`;
+};
+/** Marks a visits figure that is not Similarweb's own: a month taken from the sheet, or entered by hand from the platform. */
+const visitsSourceCell = (source: string | null | undefined) =>
+  source === 'sheet'
+    ? sortCell('l', 1, '<span class="tag" title="Similarweb 沒有這個月份，用試算表數字">表</span>')
+    : source === 'manual'
+      ? sortCell('l', 2, '<span class="tag" title="Similarweb 免費資料沒有估算，用從 Similarweb 平台手動補登的數字">人工</span>')
+      : sortCell('l', 0, '');
+
+/** The site's logo and name; `stacked` puts the domain under the name instead of beside it. */
+export const siteCell = (domain: string, name: string, extra = '', stacked = false) => {
+  const link = `<a class="site-name" href="/site/${html(domain)}/" title="${html(name)} · ${html(domain)}">${html(name)}</a>`;
+  const domainText = domain !== name ? `<span class="site-domain table-lead-extra">${html(domain)}</span>` : '';
+  return `<td class="l" data-v="${html(name)}"><span class="site-identity${stacked ? ' stacked' : ''}">${favicon(domain, name)}${
+    stacked ? `<span class="site-lines">${link}${domainText}</span>` : `${link}${domainText}`
   }${extra}</span></td>`;
+};
 
 export function rankingPage(
   month: string,
@@ -381,15 +420,15 @@ export function rankingPage(
     { head: '搜尋', title: '自然搜尋（不含搜尋廣告）', digits: 1, now: (s) => s.searchShare, before: (s) => s.prevSearchShare },
     { head: 'AI', title: 'AI 工具導流', digits: 2, now: (s) => s.aiShare, before: (s) => s.prevAiShare },
     { head: '台灣', title: '台灣訪客', digits: 1, now: (s) => s.taiwanShare, before: (s) => s.prevTaiwanShare ?? null },
-    ...TABLE_CHANNELS.map(([key, head]) => {
+    ...TABLE_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key, head]) => {
       const [, , title] = CHANNELS.find(([k]) => k === key) as (typeof CHANNELS)[number];
       return {
         head,
         title,
         digits: 1,
-        // A channel Similarweb left out of a profile it did send is 0; without a profile it is unknown.
-        now: (s: Row) => (s.channels ? (s.channels[key] ?? 0) : null),
-        before: (s: Row) => (s.prevChannels ? (s.prevChannels[key] ?? 0) : null),
+        // Unentered manual channels stay unknown; fetched channels are normalized by monthView.
+        now: (s: Row) => (s.channels ? (s.channels[key] ?? null) : null),
+        before: (s: Row) => (s.prevChannels ? (s.prevChannels[key] ?? null) : null),
       };
     }),
   ];
@@ -416,20 +455,12 @@ export function rankingPage(
   const rowsHtml = list
     .map(
       (s) =>
-        `<tr><td class="rank">${s.rank ?? '—'}</td>${siteCell(
-          s.domain,
-          s.name,
-          s.visitsSource === 'sheet'
-            ? '<span class="tag table-lead-extra" title="Similarweb 沒有這個月份，用試算表數字">表</span>'
-            : s.visitsSource === 'manual'
-              ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，用從 Similarweb 平台（Pro）手動補登的數字">Pro</span>'
-              : '',
-        )}${sortCell(
+        `<tr><td class="rank">${s.rank ?? '—'}</td>${siteCell(s.domain, s.name, '', true)}${sortCell(
           'l',
           s.topics.join('、'),
           tagLinks(s.topics, (t) => `/#topic=${encodeURIComponent(t)}`),
         )}
-${taiwanVisitsCell(s)}${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
+${taiwanVisitsCell(s)}${volCell(s.visits)}${visitsSourceCell(s.visitsSource)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
 ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     )
     .join('');
@@ -450,7 +481,7 @@ ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     },
     `${month ? `<div class="chip-rows">${chips}</div>` : ''}<section class="block"><p class="results-line" data-table-count="ranking" data-total="${list.length}">${html(topic ?? '全部網站')}${exclude.length ? `・排除 ${html(exclude.join('、'))}` : ''}・${list.length} 個網站${sourceNote ? `・${sourceNote}` : ''}</p>
 ${table(
-  `<th class="rank" aria-sort="ascending" title="名次（依台灣造訪量）">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num" title="台灣造訪量 ＝ 流量 × 台灣占比；名次依此排序">台灣造訪</th><th class="num">流量</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
+  `<th class="rank" aria-sort="ascending" title="名次（依台灣造訪量）">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num" title="台灣造訪量 ＝ 流量 × 台灣占比；名次依此排序">台灣造訪</th><th class="num">流量</th><th class="l" title="流量數字不是 Similarweb 自己的時，標出來源">來源</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
     .map((c) => `<th class="num" title="${html(c.title)}">${c.head}${unit === 'share' ? ' %' : ''}${show === 'change' ? ' ±' : ''}</th>`)
     .join('')}`,
   rowsHtml,
@@ -503,7 +534,7 @@ export function topicsPage(data: TopicOverview, topic?: string) {
     const together = new Map<string, number>();
     for (const s of members) for (const t of s.topics) if (t !== selected.topic) together.set(t, (together.get(t) ?? 0) + 1);
     const pairs = [...together].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'zh-TW')).slice(0, 16);
-    const memberRows = members
+    const memberRows = limitRows(members)
       .map(
         (s) =>
           `<tr>${siteCell(s.domain, s.name)}${sortCell(
@@ -565,7 +596,10 @@ ${
     .map((t) => {
       const top = leaders.get(t.topic) ?? [];
       return `<tr><td class="l"><a class="site-name" href="${topicHref(t.topic)}">${html(t.topic)}</a></td><td class="num">${t.sites}</td><td class="num">${t.sitesWithData}</td>${volCell(t.visits, '—')}${volCell(t.visits !== null && t.sitesWithData ? t.visits / t.sitesWithData : null, '—')}<td class="num">${pct(t.searchShare, 2) || '—'}</td><td class="num">${pct(t.aiShare, 2) || '—'}</td><td class="l"><span class="leaders">${top
-        .map((s) => `<a href="/site/${html(s.domain)}/" title="${html(s.domain)}・累計 ${volText(s.visits)}">${html(s.name)}</a>`)
+        .map(
+          (s) =>
+            `<a class="with-logo" href="/site/${html(s.domain)}/" title="${html(s.domain)}・累計 ${volText(s.visits)}">${favicon(s.domain, s.name)}${html(s.name)}</a>`,
+        )
         .join('、')}</span></td></tr>`;
     })
     .join('');
@@ -612,9 +646,15 @@ export interface SitePage {
   profile: TrafficProfile | null;
   /** Every month Similarweb profiled with an estimate, oldest first. */
   profiles: TrafficProfile[];
+  /** Platform-only details are retained even when free traffic estimates take precedence. */
+  manualProfiles?: TrafficProfile[];
   /** Similarweb's category for the domain, from the last fetch. */
   category: string | null;
   similarSites: string[];
+  /** The similar sites this site already tracks (they have a page); the others are only candidates. Absent: all tracked. */
+  trackedSimilar?: string[];
+  /** similarsites.com's similarity grade (0..1) per similar site, when it has answered for this site. */
+  similarGrades?: Record<string, number>;
   watchers: Array<{ requester: string; kind: string; requestedAt: string }>;
   radar: RadarPeriod[];
   state: {
@@ -816,10 +856,13 @@ const shareRows = (items: Array<{ label: string; hint?: string; share: number }>
     .join('')}</ul>`;
 
 /** Everything Similarweb said about the newest profiled month: ranks, engagement, every channel, the top countries. */
-export function similarwebSection(site: Pick<SitePage, 'domain' | 'profile' | 'category' | 'similarSites' | 'months'>) {
+export function similarwebSection(
+  site: Pick<SitePage, 'domain' | 'profile' | 'category' | 'similarSites' | 'trackedSimilar' | 'similarGrades' | 'months'>,
+) {
   const p = site.profile;
   if (!p) return '';
-  const visits = site.months.find((m) => m.month === p.month)?.similarweb ?? null;
+  const month = site.months.find((m) => m.month === p.month);
+  const visits = month?.similarweb ?? month?.manual ?? null;
   const card = (label: string, value: string, sub = '') =>
     `<div><span>${label}</span><b>${value || '—'}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
   const rankText = (n: number | null | undefined) => (n ? `#${n.toLocaleString('en-US')}` : '');
@@ -830,32 +873,41 @@ export function similarwebSection(site: Pick<SitePage, 'domain' | 'profile' | 'c
     p.countryRank ? `在${html(regionName(p.countryRank.code))}所有網站中` : '',
   )}${card('類別排名', rankText(p.categoryRank?.rank), category ? html(categoryLabel(category)) : '')}${card(
     '平均停留',
-    p.timeOnSite ? duration(p.timeOnSite) : '',
+    p.timeOnSite !== null ? duration(p.timeOnSite) : '',
     '每次造訪',
-  )}${card('每次造訪頁數', p.pagesPerVisit ? p.pagesPerVisit.toFixed(2) : '', '平均看幾頁')}${card(
+  )}${card('每次造訪頁數', p.pagesPerVisit ? trafficNumber(p.pagesPerVisit, 2) : '', '平均看幾頁')}${card(
     '跳出率',
     p.bounceRate === null ? '' : pct(p.bounceRate),
     '只看一頁就離開',
   )}</div>`;
-  const channels = CHANNELS.map(([key, label, hint]) => ({ label, hint, share: p.channels[key] ?? 0 })).sort((a, b) => b.share - a.share);
+  const channels = CHANNELS.filter(([key]) => visibleChannel(key) && (p.source !== 'manual' || p.channels[key] !== undefined))
+    .map(([key, label, hint]) => ({ label, hint, share: p.channels[key] ?? 0 }))
+    .sort((a, b) => b.share - a.share);
   const countryTotal = p.countries.reduce((a, c) => a + c.share, 0);
   const countries = [
     ...p.countries.map((c) => ({ label: regionName(c.code), share: c.share })),
-    ...(countryTotal < 0.999 ? [{ label: '其他國家', share: 1 - countryTotal }] : []),
+    ...(!limitedTraffic() && p.source !== 'manual' && countryTotal < 0.999 ? [{ label: '其他國家', share: 1 - countryTotal }] : []),
   ];
+  const tracked = site.trackedSimilar ? new Set(site.trackedSimilar) : null;
+  const similarChip = (d: string) => {
+    const g = site.similarGrades?.[d];
+    return logoChip(d, { note: g === undefined ? '' : `相似度 ${Math.round(g * 100)}%`, tracked: !tracked || tracked.has(d) });
+  };
   const similar = site.similarSites.length
-    ? `<h3>相似網站</h3><p class="tags">${site.similarSites.map((d) => `<a class="tag" href="/site/${html(d)}/">${html(d)}</a>`).join('')}</p>`
+    ? `<h3>相似網站</h3><p class="logos">${site.similarSites.map(similarChip).join('')}</p><p class="note"><a href="/site/${html(site.domain)}/similar/">查看全部相似網站與簡介 →</a>　依相似程度排列，滑過 logo 看網域與相似度${
+        tracked && site.similarSites.some((d) => !tracked.has(d)) ? '；虛線外框是本站尚未追蹤的網站' : ''
+      }。</p>`
     : '';
   return section(
-    `流量組成 <small>Similarweb・${monthLong(p.month)}</small>`,
-    `<p class="note">Similarweb 每次只提供最新一個月的組成，所以這裡只有 ${monthLong(p.month)}${visits === null ? '' : `（當月造訪 ${volText(visits)}）`}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</p>${cards}
+    `流量組成 <small>Similarweb${p.source === 'manual' ? ' 平台補登' : ''}・${monthLong(p.month)}</small>`,
+    `<p class="note">${p.source === 'manual' ? '以下為編輯者從 Similarweb 平台補登的資料，未填欄位不代表 0。資料月份：' : 'Similarweb 每次只提供最新一個月的組成，這裡顯示：'}${monthLong(p.month)}${visits === null ? '' : `（當月造訪 ${volText(visits)}）`}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</p>${cards}
 <div class="charts"><div class="chart-box"><h3>訪客從哪裡來</h3>${shareRows(channels, visits)}</div><div class="chart-box"><h3>訪客在哪個國家</h3>${shareRows(countries, visits)}</div></div>${similar}
 <details class="method-note"><summary>這些數字怎麼來的</summary><ul class="body">
-<li>來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存；Similarweb 的數字是估算，小網站誤差較大。</li>
+<li>${p.source === 'manual' ? '來源是編輯者從 Similarweb 平台手動補登，保留每次修改紀錄' : '來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存'}；Similarweb 的數字是估算，小網站誤差較大。</li>
 <li>排名：全球與國家排名依 Similarweb 估算的造訪量；類別排名只和同一類別（${category ? html(categoryLabel(category)) : 'Similarweb 的分類'}）的網站比較。</li>
 <li>平均停留、每次造訪頁數、跳出率都是所有造訪的平均；跳出率是只看一頁就離開的造訪比例。</li>
 <li>導流來源的「自然搜尋」不含搜尋廣告；「AI 工具」是從 ChatGPT 等 AI 助理點進來的造訪。排行上的搜尋占比、AI 占比用的就是這兩項。</li>
-<li>國家只列前 5 名，「其他國家」是其餘合計。</li>
+<li>${limitedTraffic() ? '公開資料只列台灣占比。' : p.source === 'manual' ? '只列出已補登的國家占比。' : '國家只列前 5 名，「其他國家」是其餘合計。'}</li>
 </ul></details>`,
   );
 }
@@ -869,25 +921,31 @@ const points = (change: number | null, unit = ' 個百分點') =>
     ? ''
     : Math.abs(change) < 0.00005
       ? '<span class="shift">持平</span>'
-      : `<span class="shift">${change < 0 ? '▼' : '▲'}${Math.abs(change * 100).toFixed(Math.abs(change) < 0.001 ? 2 : 1)}${unit}</span>`;
+      : `<span class="shift">${change < 0 ? '▼' : '▲'}${trafficNumber(Math.abs(change * 100), Math.abs(change) < 0.001 ? 2 : 1)}${unit}</span>`;
 /**
  * One small line chart per traffic channel (small multiples rather than ten colors on one chart). Each has its
  * own scale from 0, so a small channel's movement shows; the head gives the latest share and the change from
  * the month before. Channels are ordered by their latest share, largest first.
  */
-export function channelTiles(months: Array<{ month: string; shares: Partial<Record<TrafficChannel, number>> }>) {
+export function channelTiles(months: Array<{ month: string; shares: Partial<Record<TrafficChannel, number>>; source?: 'manual' }>) {
   if (!months.length) return '<p class="note muted">還沒有 Similarweb 的導流來源資料。</p>';
   const last = months.at(-1) as (typeof months)[number];
   const prev = months.at(-2);
-  const tiles = CHANNELS.map(([key, label, hint]) => ({ key, label, hint, now: last.shares[key] ?? 0 }))
-    .sort((a, b) => b.now - a.now)
+  const tiles = CHANNELS.filter(([key]) => visibleChannel(key))
+    .map(([key, label, hint]) => ({ key, label, hint, now: last.shares[key] ?? (last.source === 'manual' ? null : 0) }))
+    .sort((a, b) => (b.now ?? -1) - (a.now ?? -1))
     .map(({ key, label, hint, now }) => {
-      const before = prev ? (prev.shares[key] ?? 0) : null;
+      const before = prev ? (prev.shares[key] ?? (prev.source === 'manual' ? null : 0)) : null;
       const chart = lineChart(
-        months.map((m) => ({ month: m.month, value: m.shares[key] ?? 0 })),
-        { label: `${label}占比`, fmt: (v) => `${(v * 100).toFixed(!v ? 0 : v < 0.01 ? 2 : v < 0.1 ? 1 : 0)}%`, height: 150, wide: 420 },
+        months.map((m) => ({ month: m.month, value: m.shares[key] ?? (m.source === 'manual' ? null : 0) })),
+        {
+          label: `${label}占比`,
+          fmt: (v) => `${trafficNumber(v * 100, !v ? 0 : v < 0.01 ? 2 : v < 0.1 ? 1 : 0)}%`,
+          height: 150,
+          wide: 420,
+        },
       );
-      return `<div class="chart-box channel-tile${now ? '' : ' zero'}"><h3>${html(label)} <b>${pct(now, now && now < 0.0095 ? 2 : 1)}</b>${before === null ? '' : points(now - before)}</h3><p class="note">${html(hint)}</p>${chart}</div>`;
+      return `<div class="chart-box channel-tile${now ? '' : ' zero'}"><h3>${html(label)} <b>${pct(now, now && now < 0.0095 ? 2 : 1)}</b>${before === null || now === null ? '' : points(now - before)}</h3><p class="note">${html(hint)}</p>${chart}</div>`;
     })
     .join('');
   return `<div class="channel-tiles">${tiles}</div>`;
@@ -929,42 +987,120 @@ export function tagPanel(domain: string, tags: TagItem[], viewer: TagViewer) {
   const action = `/site/${html(domain)}/tags/`;
   const form = (kind: string, tag: string, buttons: string) =>
     `<form class="inline" method="post" action="${action}"><input type="hidden" name="kind" value="${kind}"><input type="hidden" name="tag" value="${html(tag)}">${buttons}</form>`;
-  const button = (value: string | number, label: string, pressed?: boolean) =>
-    `<button type="submit" class="quiet" name="value" value="${value}"${pressed === undefined ? '' : ` aria-pressed="${pressed}"`}>${label}</button>`;
+  const button = (value: string | number, label: string, pressed: boolean, title: string, choice: string) =>
+    `<button type="submit" class="tag-text-button" name="value" value="${value}" aria-pressed="${pressed}" title="${html(title)}" data-choice="${choice}">${pressed ? '<span aria-hidden="true">✓ </span>' : ''}${label}</button>`;
   const items = tags
     .map((t) => {
       const mine = viewer.votes[t.tag] ?? 0;
-      // Admins override instead of voting (crowd.ts), so they get the override buttons only.
       const votes =
         viewer.signedIn && !viewer.admin
           ? form(
               'vote',
               t.tag,
-              `${button(mine === 1 ? 0 : 1, mine === 1 ? '已同意（收回）' : '同意', mine === 1)}${button(mine === -1 ? 0 : -1, mine === -1 ? '已不同意（收回）' : '不同意', mine === -1)}`,
+              button(
+                mine === 1 ? 0 : 1,
+                `同意 <b>${t.agrees}</b>`,
+                mine === 1,
+                mine === 1 ? '再次點選收回同意' : `同意「${t.tag}」`,
+                'agree',
+              ) +
+                button(
+                  mine === -1 ? 0 : -1,
+                  `不同意 <b>${t.disagrees}</b>`,
+                  mine === -1,
+                  mine === -1 ? '再次點選收回不同意' : `不同意「${t.tag}」`,
+                  'disagree',
+                ),
             )
-          : '';
+          : `<span class="tag-tally">同意 ${t.agrees} <span>／</span> 不同意 ${t.disagrees}</span>`;
       const admin = viewer.admin
         ? form(
             'admin',
             t.tag,
-            `${t.adminOverride === 'set' ? '' : button('set', '指定顯示')}${t.adminOverride === 'hide' ? '' : button('hide', '隱藏')}${t.adminOverride ? button('release', '解除覆寫') : ''}`,
+            button(
+              t.adminOverride === 'set' ? 'release' : 'set',
+              '顯示',
+              t.adminOverride === 'set',
+              t.adminOverride === 'set' ? '取消指定顯示' : '指定顯示',
+              'show',
+            ) +
+              button(
+                t.adminOverride === 'hide' ? 'release' : 'hide',
+                '隱藏',
+                t.adminOverride === 'hide',
+                t.adminOverride === 'hide' ? '取消指定隱藏' : '指定隱藏',
+                'hide',
+              ),
           )
         : '';
-      return `<li><a class="chip-filter${t.visible ? '' : ' muted-chip'}" href="/#topic=${encodeURIComponent(t.tag)}&hl=${encodeURIComponent(domain)}">${html(t.tag)}</a><span class="note">${TAG_SOURCE[t.source]}${t.visible ? '' : '・未顯示'}${t.adminOverride ? '（管理員覆寫）' : ''}・同意 ${t.agrees}・不同意 ${t.disagrees}</span><span class="tag-vote-actions">${votes}${admin}</span></li>`;
+      const state = viewer.admin
+        ? t.adminOverride === 'hide'
+          ? 'excluded'
+          : t.adminOverride === 'set'
+            ? 'selected'
+            : ''
+        : mine === -1
+          ? 'excluded'
+          : mine === 1
+            ? 'selected'
+            : '';
+      return `<li class="tag-vote-chip ${state}"><span class="tag-identity"><a class="tag-name" href="/#topic=${encodeURIComponent(t.tag)}&hl=${encodeURIComponent(domain)}" title="${TAG_SOURCE[t.source]}">${html(t.tag)}</a>${!t.visible ? '<small>未顯示</small>' : ''}${t.adminOverride ? '<small>管理員指定</small>' : ''}</span><span class="tag-vote-actions">${viewer.admin ? admin : votes}</span></li>`;
     })
     .join('');
   const add = viewer.signedIn
-    ? `<form class="tag-propose" method="post" action="${action}"><input type="hidden" name="kind" value="propose"><input name="tag" aria-label="新增標籤" placeholder="新增標籤，例如：咖啡" maxlength="${TAG_LIMIT * 2}" autocomplete="off" required><button type="submit" class="quiet">新增</button></form>`
+    ? `<form class="tag-propose" method="post" action="${action}"><input type="hidden" name="kind" value="propose"><input name="tag" aria-label="新增標籤" placeholder="新增標籤…" maxlength="${TAG_LIMIT * 2}" autocomplete="off" required><button type="submit" class="tag-text-button">新增 →</button></form>`
     : viewer.loginEnabled
-      ? `<p class="note"><a href="/auth/google?next=${encodeURIComponent(`/site/${domain}/#tags`)}">用 Google 帳號登入</a>後可以同意、不同意或新增標籤。</p>`
+      ? `<p class="note"><a href="/auth/google?next=${encodeURIComponent(`/site/${domain}/#tags`)}">登入參與標籤投票 →</a></p>`
       : '';
   const message = viewer.message ? TAG_MESSAGES[viewer.message] : '';
   return section(
     '標籤',
-    `${message ? `<p class="flash" role="${viewer.message === 'done' ? 'status' : 'alert'}">${html(message)}</p>` : ''}<p class="note">編輯清單的標籤一律顯示；AI 初判在不同意比同意多 2 票時隱藏；讀者新增的標籤立即顯示，不同意追上同意時隱藏。管理員不投票，直接指定單一標籤顯示或隱藏，優先於所有規則。</p>${
-      items ? `<ul class="tag-votes">${items}</ul>` : '<p class="note muted">還沒有標籤。</p>'
-    }${add}`,
+    `<p class="tag-feedback" role="${viewer.message && viewer.message !== 'done' ? 'alert' : 'status'}" aria-live="polite">${html(message)}</p>${
+      viewer.signedIn
+        ? `<p class="note tag-instruction">${viewer.admin ? '直接指定顯示或隱藏，再點一次取消指定。' : '這些標籤適合這個網站嗎？再點一次可收回。'}</p>`
+        : ''
+    }${items ? `<ul class="tag-votes">${items}</ul>` : '<p class="note muted">還沒有標籤。</p>'}${add}
+<details class="tag-help"><summary>標籤如何決定</summary><p>編輯清單的標籤固定顯示。AI 初判在不同意比同意多 2 票時隱藏；讀者新增的標籤在不同意追上同意時隱藏。管理員的指定優先於投票。</p></details>`,
     ' id="tags"',
+  );
+}
+
+/** Preserve platform bounds and section denominators; detailed lists are administrator-only. */
+export function platformBreakdownsSection(profiles: TrafficProfile[]) {
+  if (limitedTraffic()) return '';
+  const available = profiles
+    .filter(
+      (profile) =>
+        profile.breakdowns &&
+        (breakdownTotals.some(([key]) => profile.breakdowns?.[key]) || breakdownFields.some(([key]) => profile.breakdowns?.[key]?.length)),
+    )
+    .sort((a, b) => b.month.localeCompare(a.month));
+  if (!available.length) return '';
+  return section(
+    '平台詳細分布',
+    `<p class="note">各表分母不同，不能直接加總。變化保留平台顯示值；未列出的項目不推定為零。</p>${available
+      .map((profile, i) => {
+        const data = profile.breakdowns!;
+        const totals = breakdownTotals
+          .filter(([key]) => data[key])
+          .map(([key, label]) => `<span>${html(label)} <b>${html(reportedPercentText(data[key]))}</b></span>`)
+          .join('');
+        const lists = breakdownFields
+          .filter(([key]) => data[key]?.length)
+          .map(([key, label, hint]) => {
+            const denominator = hint.split('；')[1] ?? '';
+            const rows = data[key]
+              .map(
+                (row) =>
+                  `<tr><td class="l">${html(row.name ?? '未提供名稱')}</td><td class="num">${html(reportedPercentText(row.share))}</td><td class="num">${html(row.change ?? '—')}</td></tr>`,
+              )
+              .join('');
+            return `<div class="breakdown-list"><h3>${html(label)}</h3><p class="note">${html(denominator)}</p><div class="scroll"><table><thead><tr><th class="l">名稱</th><th class="num">占比</th><th class="num">平台變化</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+          })
+          .join('');
+        return `<details class="platform-month"${i === 0 ? ' open' : ''}><summary>${monthLong(profile.month)}${profile.source === 'manual' ? '・平台手動補登' : ''}</summary><div class="breakdown-totals">${totals}</div>${lists}</details>`;
+      })
+      .join('')}`,
   );
 }
 
@@ -994,20 +1130,13 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
   const shareChart = (key: 'searchShare' | 'aiShare', digits: number, label: string) =>
     lineChart(
       ordered.map((m) => ({ month: m.month, value: m[key] })),
-      { label, fmt: (v) => `${(v * 100).toFixed(digits)}%`, height: 190, wide: 440 },
+      { label, fmt: (v) => `${trafficNumber(v * 100, digits)}%`, height: 190, wide: 440 },
     );
   const monthRows = [...ordered]
     .reverse()
     .map(
       (m) =>
         `<tr><td class="l" data-v="${m.month}">${monthLabel(m.month)}</td>${sortCell('num', m.similarweb, m.noEstimate ? '<span class="muted" title="Similarweb 回傳 0，表示這個月沒有估算">無估算</span>' : vol(m.similarweb))}${hasManual ? volCell(m.manual ?? null) : ''}${volCell(m.sheet)}<td class="num">${pct(m.searchShare)}</td><td class="num">${pct(m.aiShare, 2)}</td><td class="num">${pct(m.taiwanShare)}</td></tr>`,
-    )
-    .join('');
-  const labelRows = [...site.labels]
-    .reverse()
-    .map(
-      (l) =>
-        `<tr><td class="l" data-v="${l.month}">${monthLabel(l.month)}</td><td class="l">${html(l.name)}</td><td class="l">${html(l.group)}</td><td class="l">${html(l.topics)}</td><td class="num"${l.visits === null ? '' : ` data-v="${l.visits}"`}>${vol(l.visits)}${l.adjusted ? '<span class="tag">人工調整</span>' : ''}</td></tr>`,
     )
     .join('');
   const radarRows = [...site.radar]
@@ -1031,7 +1160,7 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
       title: site.name,
       dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${html(site.domain)} ↗</a>${topics.length ? tagLinks(topics, (topic) => `/#topic=${encodeURIComponent(topic)}&hl=${encodeURIComponent(site.domain)}`) : ''}`,
       actions: `${canEdit ? '' : `<a href="/auth/google?next=${encodeURIComponent(`/site/${site.domain}/`)}">登入編輯</a>`}<a href="/api/v1/sites/${html(site.domain)}">JSON</a>`,
-      tabs: canEdit ? siteTabs(site.domain, 'overview') : '',
+      tabs: siteTabs(site.domain, 'overview', canEdit),
     },
     `${stats}
 ${viewer ? tagPanel(site.domain, site.tags, viewer) : ''}
@@ -1040,7 +1169,8 @@ ${section(
   `<p class="note">Similarweb 每月造訪估算；空心點是試算表或從 Similarweb 平台手動補登的月份，斷開處是沒有資料的月份。</p><div class="chart-box">${visitsChart}</div>`,
 )}
 ${similarwebSection(site)}
-${site.profiles.length ? section('導流來源走勢', `<p class="note">各來源占這個網站造訪的比例；各圖刻度不同，從 0 開始。${monthsNote(site.profiles.length, site.profiles[0].month)}</p>${channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels })))}`) : ''}
+${platformBreakdownsSection(site.manualProfiles ?? site.profiles)}
+${site.profiles.length ? section('導流來源走勢', `<p class="note">各來源占這個網站造訪的比例；各圖刻度不同，從 0 開始。${monthsNote(site.profiles.length, site.profiles[0].month)}</p>${channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels, source: p.source })))}`) : ''}
 ${section(
   '導流占比',
   `<p class="note">兩張圖各自的刻度：自然搜尋與 GenAI 導流占全部造訪的比例。Similarweb 只給最新一個月的占比，所以點常常不連續。</p>
@@ -1050,10 +1180,10 @@ ${section(
   '逐月數字',
   `${
     noEstimate
-      ? `<p class="note">Similarweb 的免費資料沒有這個網站的造訪量估算（回傳 0），付費平台上可能有：<a href="${html(proUrl(site.domain))}" rel="noopener">在 Similarweb 平台查看 ↗</a>${canEdit ? `・<a href="/site/${html(site.domain)}/manual/">補登數字</a>` : ''}。</p>`
+      ? `<p class="note">Similarweb 的免費資料沒有這個網站的造訪量估算（回傳 0），登入 Similarweb 平台後可能查得到：<a href="${html(proUrl(site.domain))}" rel="noopener">在 Similarweb 平台查看 ↗</a>${canEdit ? `・<a href="/site/${html(site.domain)}/manual/">補登數字</a>` : ''}。</p>`
       : ''
   }${table(
-    `<th class="l" aria-sort="descending">月份</th><th class="num">Similarweb</th>${hasManual ? '<th class="num" title="從 Similarweb 平台（Pro）手動補登">Pro 補登</th>' : ''}<th class="num">試算表</th><th class="num">搜尋占比</th><th class="num">AI 占比</th><th class="num">台灣占比</th>`,
+    `<th class="l" aria-sort="descending">月份</th><th class="num">Similarweb</th>${hasManual ? '<th class="num" title="從 Similarweb 平台手動補登">人工補登</th>' : ''}<th class="num">試算表</th><th class="num">搜尋占比</th><th class="num">AI 占比</th><th class="num">台灣占比</th>`,
     monthRows,
     '沒有月份資料。',
     hasManual ? 7 : 6,
@@ -1064,19 +1194,6 @@ ${
     ? section(
         'Cloudflare Radar 全球排名',
         `<p class="note">依 1.1.1.1 DNS 查詢的熱門程度；前 100 名才有名次，其餘只有級距。不能換算成造訪量。</p>${table('<th class="l" aria-sort="descending">資料日期</th><th class="l">排名</th><th class="l">抓取時間</th>', radarRows, '', 3)}`,
-      )
-    : ''
-}
-${
-  labelRows
-    ? section(
-        '試算表紀錄',
-        table(
-          '<th class="l" aria-sort="descending">月份</th><th class="l">名稱</th><th class="l">標籤 A</th><th class="l">標籤 B</th><th class="num">流量</th>',
-          labelRows,
-          '',
-          5,
-        ),
       )
     : ''
 }
@@ -1104,7 +1221,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   const manualSection = manualRows
     ? section(
         '需要從 Similarweb 平台補登',
-        `<p class="note">這些網站在 Similarweb 免費資料裡沒有估算（最近一次抓取每個月都回傳 0），但試算表曾記錄到百萬次以上的造訪，付費平台上通常查得到。登入編輯後，每月打開平台頁面把數字補登進來；免費帳號只看得到最近一個月。</p>${table(
+        `<p class="note">這些網站在 Similarweb 免費資料裡沒有估算（最近一次抓取每個月都回傳 0），但試算表曾記錄到百萬次以上的造訪，登入 Similarweb 平台後可能查得到。登入編輯後，每月打開平台頁面把數字補登進來；免費帳號只看得到最近一個月。</p>${table(
           '<th class="l">網域</th><th class="num">試算表最新</th><th class="l" aria-sort="descending">最新補登</th><th class="l" data-nosort>操作</th>',
           manualRows,
           '',
@@ -1273,14 +1390,13 @@ export function watchPage({
   const rowHtml = (
     w: WatchRow,
     removable: boolean,
-  ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity"><a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a>${
-    w.note && w.note !== w.domain ? `<span class="site-domain table-lead-extra">${html(w.note)}</span>` : ''
-  }</span></td>
+  ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity">${favicon(w.domain, w.domain)}<a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a></span></td>
+<td class="l">${w.note && w.note !== w.domain ? html(w.note) : ''}</td>
 ${sortCell('num', w.latestVisits, w.latestMonth ? `${vol(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : '')}
-${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-identity">${editor ? `<span class="radar">${html(w.addedBy)}</span>` : ''}<span class="site-domain">${tw(w.requestedAt.toISOString())}</span></span>`)}
+${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-domain">${tw(w.requestedAt.toISOString())}</span>`)}${editor ? `<td class="l"><span class="radar">${html(w.addedBy)}</span></td>` : ''}
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
-  const head =
-    '<th class="l">網域</th><th class="num">最新造訪量</th><th class="num">週期</th><th class="l">最近成功</th><th class="l">加入</th><th data-nosort><span class="sr-only">操作</span></th>';
+  const head = `<th class="l">網域</th><th class="l">備註</th><th class="num">最新造訪量</th><th class="num">週期</th><th class="l">最近成功</th><th class="l">加入時間</th>${editor ? '<th class="l">加入者</th>' : ''}<th data-nosort><span class="sr-only">操作</span></th>`;
+  const cols = editor ? 8 : 7;
   const services = others.filter((o) => o.requester !== 'sheet');
   const form = editor
     ? `<form class="form" method="post" action="/watch/"><label>網域或網址，一行一個（最多 200 個）
@@ -1294,7 +1410,7 @@ ${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l
         const got = list.rows.filter((w) => w.latestMonth).length;
         const none = list.rows.filter((w) => !w.latestMonth && (w.lastResponseAt || w.failures)).length;
         return `<section class="block" id="list"><h2>${requesterLabel(list.requester)}<small>${list.rows.length} 個網域</small></h2>
-<p class="note">有流量數字 ${got}、Similarweb 沒有估算或失敗 ${none}、排隊中 ${list.rows.length - got - none}。</p>${table(head, list.rows.map((w) => rowHtml(w, false)).join(''), '清單是空的。', 6)}</section>`;
+<p class="note">有流量數字 ${got}、Similarweb 沒有估算或失敗 ${none}、排隊中 ${list.rows.length - got - none}。</p>${table(head, list.rows.map((w) => rowHtml(w, false)).join(''), '清單是空的。', cols)}</section>`;
       })()
     : '';
   return layout(
@@ -1304,13 +1420,190 @@ ${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l
       dek: '加入網站並定期更新流量資料',
     },
     `${flash ? `<p class="flash">${html(flash)}</p>` : ''}${form}
-<section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', 6)}</section>
+<section class="block"><h2>手動追蹤<small>${manual.length} 個</small></h2>${table(head, manual.map((w) => rowHtml(w, !!editor)).join(''), '還沒有手動加入的網域。', cols)}</section>
 ${section(
   '更新方式與其他來源',
   `<p class="body">Similarweb 每小時依排程抓取，之後依設定的週期更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p class="body">其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`,
 )}
 ${listSection}`,
     { nav: 'watch' },
+  );
+}
+
+const discoverHref = (min: number, tw: boolean) => `/discover/?min=${min}${tw ? '&tw=1' : ''}`;
+const clueBadge = (clue: Candidate['clue']) =>
+  clue
+    ? `<span class="tag clue" title="${clue === 'tw' ? '.tw 網域' : '簡介是繁體中文'}">${clue === 'tw' ? '台灣網域' : '繁中簡介'}</span>`
+    : '';
+const addedFlash = (n: number) => (n > 0 ? `<p class="flash" role="status">已加入 ${n} 個網域，下一輪抓取會先處理。</p>` : '');
+/** Add buttons post in the background and turn into a note, so the page keeps its place; without JavaScript the form submits and returns here. */
+const ADD_WATCH_SCRIPT = `<script>
+document.addEventListener('submit', async (e) => {
+  const form = e.target.closest && e.target.closest('form.add-watch');
+  if (!form) return;
+  e.preventDefault();
+  const button = form.querySelector('button');
+  button.disabled = true;
+  button.textContent = '加入中…';
+  try {
+    const res = await fetch(form.action, { method: 'POST', headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(new FormData(form)), credentials: 'same-origin', redirect: 'manual' });
+    if (!res.ok) throw new Error(String(res.status));
+    await res.json();
+    const done = document.createElement('span');
+    done.className = 'muted';
+    done.textContent = '已加入 ✓';
+    form.replaceWith(done);
+  } catch {
+    HTMLFormElement.prototype.submit.call(form);
+  }
+});
+</script>`;
+
+/** Sites that tracked sites list as similar (similarsites.com) but that are not tracked yet; editors add them from here. */
+export function discoverPage({
+  added = 0,
+  editor,
+  loginEnabled,
+  found,
+  minVotes,
+  taiwanOnly = false,
+  fetched,
+  tracked,
+}: {
+  /** Domains just added from a form that came back to this page without JavaScript. */
+  added?: number;
+  editor: { email: string } | null;
+  loginEnabled: boolean;
+  found: Candidate[];
+  minVotes: number;
+  /** Only the candidates with a Taiwan clue (a .tw domain or a Traditional Chinese blurb). */
+  taiwanOnly?: boolean;
+  /** Tracked sites similarsites.com has answered for, of all tracked sites. */
+  fetched: { answered: number; tracked: number };
+  tracked: Set<string>;
+}) {
+  const head =
+    '<th class="l">候選網站</th><th class="l" title=".tw 網域，或簡介是繁體中文">台灣線索</th><th class="l">類別</th><th class="num" title="有幾個追蹤中的網站把它列為相似">推薦數</th><th class="num">相似度</th><th class="num">月造訪</th><th class="l">推薦它的站</th><th data-nosort><span class="sr-only">操作</span></th>';
+  const self = discoverHref(minVotes, taiwanOnly);
+  const row = (c: Candidate) => {
+    const add = editor
+      ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="${html(self)}"><input type="hidden" name="domains" value="${html(c.domain)}"><input type="hidden" name="refreshDays" value="30"><input type="hidden" name="note" value="similarsites 候選（${c.votes} 站推薦）"><button type="submit" class="quiet">加入追蹤</button></form>`
+      : '';
+    return `<tr><td class="l" data-v="${html(c.domain)}"><span class="site-identity">${favicon(c.domain, c.domain)}<span class="site-name">${html(c.domain)}</span></span></td>
+${sortCell('l', c.clue ? 1 : 0, clueBadge(c.clue))}<td class="l">${c.category ? html(categoryLabel(c.category)) : ''}</td>${sortCell('num', c.votes, `${c.votes} 個`)}${sortCell(
+      'num',
+      c.avgGrade,
+      `<span class="grade" title="平均 ${(c.avgGrade * 100).toFixed(0)}%，最高 ${(c.bestGrade * 100).toFixed(0)}%"><i style="width:${Math.round(c.avgGrade * 100)}%"></i></span> ${(c.avgGrade * 100).toFixed(0)}%`,
+    )}${volCell(c.totalVisits === null ? null : c.totalVisits / 1e6)}
+<td class="l"><span class="logos sm">${c.listedBy
+      .filter((d) => tracked.has(d))
+      .map((d) => logoChip(d))
+      .join('')}</span></td><td>${add}</td></tr>`;
+  };
+  const levels = [1, 2, 3, 5];
+  const toolbar = `<span class="muted">至少被</span>${levels
+    .map(
+      (n) =>
+        `<a class="chip-filter" href="${discoverHref(n, taiwanOnly)}"${n === minVotes ? ' aria-current="true"' : ''}>${n} 個站推薦</a>`,
+    )
+    .join(
+      '',
+    )}<span class="muted">・</span><a class="chip-filter" href="${discoverHref(minVotes, !taiwanOnly)}"${taiwanOnly ? ' aria-current="true"' : ''} title=".tw 網域，或簡介是繁體中文">只看有台灣線索的</a>`;
+  return layout(
+    '發掘候選',
+    {
+      title: '發掘候選',
+      dek: '追蹤中的網站被 similarsites.com 列為相似、但本站還沒追蹤的網站',
+      toolbar,
+    },
+    `${addedFlash(added)}${editor || !loginEnabled ? '' : '<p class="flash"><a href="/auth/google?next=/discover/">登入</a>後可以直接加入追蹤。</p>'}
+<section class="block"><h2>候選名單<small>${found.length} 個</small></h2>
+<p class="note">已向 similarsites.com 查過 ${fetched.answered.toLocaleString('en-US')} 個追蹤中的網站（共 ${fetched.tracked.toLocaleString('en-US')} 個）。被越多追蹤中的站同時列為相似，越可能是同一個圈子的網站；相似度是 similarsites.com 給的 0–100%。候選不分國家，加入追蹤後才會有台灣占比，可再決定要不要留。</p>
+${table(head, found.map(row).join(''), '還沒有候選。先執行 tools/similarsites.ts 抓取資料。', 8)}</section>${ADD_WATCH_SCRIPT}`,
+    {
+      nav: 'discover',
+      method: `<p>相似網站來自 similarsites.com 每個網站頁面列出的 20 個相似網站與相似度，每個追蹤中的網站約每月查一次。候選是這些相似網站中本站還沒有流量資料的網域；不會自動加入。「月造訪」是 similarsites.com 的估算，與本站 Similarweb 數字來源相近但不保證相同。</p>`,
+    },
+  );
+}
+
+/** One site's similar sites in full (blurb, category, similarity, visits) and the tracked sites that list it as similar. */
+export function similarPage({
+  added = 0,
+  site,
+  editor,
+  loginEnabled,
+  listing,
+  tracked,
+  names,
+}: {
+  added?: number;
+  site: { domain: string; name: string };
+  editor: { email: string } | null;
+  loginEnabled: boolean;
+  listing: SimilarListing;
+  tracked: Set<string>;
+  names: Map<string, string>;
+}) {
+  const head =
+    '<th class="l">網站</th><th class="l">網域</th><th class="l">簡介</th><th class="l">類別</th><th class="l" title=".tw 網域，或簡介是繁體中文">台灣線索</th><th class="num">相似度</th><th class="num">月造訪</th><th class="num">國內排名</th><th data-nosort><span class="sr-only">操作</span></th>';
+  const action = (d: string) =>
+    tracked.has(d)
+      ? `<a class="quiet" href="/site/${html(d)}/">查看流量</a>`
+      : editor
+        ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="/site/${html(site.domain)}/similar/"><input type="hidden" name="domains" value="${html(d)}"><input type="hidden" name="refreshDays" value="30"><input type="hidden" name="note" value="${html(`${site.domain} 的相似網站`)}"><button type="submit" class="quiet">加入追蹤</button></form>`
+        : '<span class="muted">尚未追蹤</span>';
+  const row = (e: SimilarListing['similar'][number]) => {
+    const name = names.get(e.similar);
+    const blurb = (e.description ?? '')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const clue = taiwanClue(e.similar, [blurb]);
+    return `<tr><td class="l" data-v="${html(name ?? e.similar)}"><span class="site-identity">${favicon(e.similar, name ?? e.similar)}${
+      tracked.has(e.similar)
+        ? `<a class="site-name" href="/site/${html(e.similar)}/">${html(name ?? e.similar)}</a>`
+        : `<span class="site-name">${html(name ?? e.similar)}</span>`
+    }</span></td>
+<td class="l"><span class="site-domain">${html(e.similar)}</span></td><td class="l">${blurb ? `<p class="site-blurb">${html(blurb)}</p>` : ''}</td>
+<td class="l">${e.category ? html(categoryLabel(e.category)) : ''}</td>${sortCell('l', clue ? 1 : 0, clueBadge(clue))}${sortCell(
+      'num',
+      e.grade,
+      `<span class="grade" title="相似度 ${(e.grade * 100).toFixed(0)}%"><i style="width:${Math.round(e.grade * 100)}%"></i></span> ${(e.grade * 100).toFixed(0)}%`,
+    )}${volCell(e.totalVisits === null ? null : e.totalVisits / 1e6)}${sortCell('num', e.topCountryRank, e.topCountryRank ? `#${e.topCountryRank.toLocaleString('en-US')}` : '')}<td>${action(e.similar)}</td></tr>`;
+  };
+  const fetched = listing.similar.map((e) => e.fetchedAt.getTime()).sort((a, b) => b - a)[0];
+  const untracked = listing.similar.filter((e) => !tracked.has(e.similar)).length;
+  const reverse = listing.listedBy.length
+    ? section(
+        `也把 ${html(site.domain)} 列為相似的網站<small>${listing.listedBy.length} 個</small>`,
+        `<p class="note">這些追蹤中的網站，相似網站名單裡有它；排在前面的相似度最高。</p><p class="logos">${listing.listedBy
+          .map((l) => logoChip(l.domain, { note: `相似度 ${Math.round(l.grade * 100)}%`, tracked: tracked.has(l.domain) }))
+          .join('')}</p>`,
+      )
+    : '';
+  return layout(
+    `${site.name} 的相似網站`,
+    {
+      title: site.name,
+      dek: `${favicon(site.domain, site.name)}<a href="https://${html(site.domain)}/" rel="noopener">${html(site.domain)} ↗</a>`,
+      tabs: siteTabs(site.domain, 'similar', !!editor),
+    },
+    `${addedFlash(added)}${section(
+      `相似網站<small>${listing.similar.length} 個${untracked ? `，${untracked} 個尚未追蹤` : ''}</small>`,
+      `<p class="note">similarsites.com 依瀏覽行為與內容認定與 ${html(site.domain)} 相似的網站，${
+        fetched ? `${twDate(new Date(fetched).toISOString())} 取得，` : ''
+      }相似度 0–100%。${
+        editor || !loginEnabled || !untracked
+          ? ''
+          : '<a href="/auth/google?next=/site/' + html(site.domain) + '/similar/">登入</a>後可以把尚未追蹤的加入追蹤。'
+      }</p>${table(head, listing.similar.map(row).join(''), '還沒有取得這個網站的相似網站，similarsites.com 可能沒有收錄它。', 9)}`,
+    )}${reverse}${ADD_WATCH_SCRIPT}`,
+    {
+      nav: null,
+      method:
+        '<p>相似網站名單來自 similarsites.com（Similarweb 旗下），每個網站最多 20 個。簡介、類別、月造訪與國內排名都是 similarsites.com 的估算，與本站 Similarweb 數字來源相近，但不保證相同。加入追蹤前，這些網站沒有本站的流量資料。</p>',
+    },
   );
 }
 

@@ -1,0 +1,1 @@
+ALTER TABLE manual_months ADD COLUMN channels JSON NULL, ADD COLUMN details JSON NULL;
