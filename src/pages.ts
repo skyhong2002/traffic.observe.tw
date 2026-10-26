@@ -1,3 +1,4 @@
+import { BRAND, BRAND_HEAD } from './brand.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
 import { type manualCandidates, proUrl } from './manual.ts';
 import { type ranking, shiftMonth } from './metrics.ts';
@@ -121,7 +122,6 @@ export const siteTabs = (domain: string, current: SiteTab) =>
     ).map(([key, path, label]) => [`/site/${html(domain)}/${path}`, label, key === current]),
   );
 
-const BRAND = '<span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>流量觀察';
 const navLink = (nav: Nav, [key, href, label]: [Nav, string, string]) =>
   `<a href="${href}"${key && key === nav ? ' class="on" aria-current="page"' : ''}>${label}</a>`;
 /** The note under every page title, pointing at the method note above the footer. */
@@ -146,7 +146,7 @@ ${method || TRAFFIC_METHOD}
     ([title, links]) => `<div><h2>${title}</h2>${links.map((n) => navLink(nav, n)).join('')}</div>`,
   ).join(
     '',
-  )}<div><h2>資料來源</h2><a href="${SHEET_URL}" rel="noopener">GeneHong 試算表 ↗</a><a href="https://radar.cloudflare.com/" rel="noopener">Cloudflare Radar ↗</a></div></nav></div><div class="footer-bottom"><span>流量觀察 · 數字為估算值，僅供比較參考</span><a href="#">回到頂端 ↑</a></div></div></footer>`;
+  )}<div><h2>資料來源</h2><a href="${SHEET_URL}" rel="noopener">GeneHong 試算表 ↗</a><a href="https://radar.cloudflare.com/" rel="noopener">Cloudflare Radar ↗</a></div></nav></div><div class="footer-bottom"><span>臺灣流量觀察站 · 數字為估算值，僅供比較參考</span><a href="#">回到頂端 ↑</a></div></div></footer>`;
 }
 
 const TIP_SCRIPT = `<script>
@@ -178,7 +178,7 @@ export function layout(
   { nav = null, tips = false, method = '' }: { nav?: Nav; tips?: boolean; method?: string } = {},
 ) {
   return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>${html(title)}｜流量觀察</title><link rel="stylesheet" href="${STYLE_HREF}">${JS_FLAG}<script src="${TABLES_HREF}" defer></script></head><body>
+<title>${html(title)}｜臺灣流量觀察站</title>${BRAND_HEAD}<link rel="stylesheet" href="${STYLE_HREF}">${JS_FLAG}<script src="${TABLES_HREF}" defer></script></head><body>
 ${siteHeader(nav)}
 <main class="wrap" id="main">${head.tabs ?? sectionTabs(nav)}<div class="page-head"><div><h1>${html(head.title)}</h1><p class="dek">${head.dek ? `${head.dek.replace(/。$/, '')}<span class="sep" aria-hidden="true">·</span>` : ''}${METHOD_LINK}</p></div>${
     head.actions ? `<div class="page-actions">${head.actions}</div>` : ''

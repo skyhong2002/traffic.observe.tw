@@ -197,35 +197,15 @@ p.body {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 11px;
-  font-size: 19px;
-  font-weight: 750;
-  letter-spacing: -0.025em;
   color: var(--ink);
 }
 .brand:hover {
   text-decoration: none;
 }
-.brand-mark {
-  display: inline-flex;
-  gap: 3px;
-  align-items: flex-end;
-  width: 26px;
-  height: 26px;
-  padding: 3px 0;
-}
-.brand-mark i {
-  width: 6px;
-  border-radius: 2px;
-  background: var(--accent);
-  height: 55%;
-}
-.brand-mark i:nth-child(2) {
-  height: 100%;
-}
-.brand-mark i:nth-child(3) {
-  height: 75%;
-  opacity: 0.55;
+.brand-logo {
+  display: block;
+  width: 219px;
+  height: 54px;
 }
 .site-nav {
   display: flex;
@@ -1498,18 +1478,12 @@ svg .cross {
     gap: 18px;
   }
 }
-@media (max-width: 640px) {
-  .wrap {
-    padding-inline: 16px;
-  }
+@media (max-width: 960px) {
   .site-inner {
     flex-wrap: wrap;
     min-height: auto;
     gap: 0;
     padding-top: 10px;
-  }
-  .brand {
-    font-size: 18px;
   }
   .site-tools {
     order: 1;
@@ -1521,12 +1495,24 @@ svg .cross {
     gap: 26px;
     height: 42px;
     margin-top: 4px;
+    overflow-x: auto;
+    scrollbar-width: thin;
   }
   .site-nav a {
+    flex: none;
     font-size: 13px;
   }
   .site-tools .who small {
     max-width: 100px;
+  }
+}
+@media (max-width: 640px) {
+  .wrap {
+    padding-inline: 16px;
+  }
+  .brand-logo {
+    width: 204px;
+    height: auto;
   }
   h1 {
     font-size: 28px;

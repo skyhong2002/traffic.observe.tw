@@ -453,7 +453,7 @@ const schemaType = (type: string) =>
 export const openApi = (origin: string) => ({
   openapi: '3.1.0',
   info: {
-    title: '流量觀察 API',
+    title: '臺灣流量觀察站 API',
     version: '1',
     description: '台灣網站每月的 Similarweb 造訪估算、搜尋與 AI 導流、Cloudflare Radar 排名與標籤彙整。造訪量單位為百萬次，占比為 0–1。',
   },
@@ -547,7 +547,7 @@ for s in r.json()["sites"][:10]:
     `錯誤回 ${code('{"error": "..."}')} 加上 HTTP 狀態碼，例如 ${code('404')} 找不到網域或標籤。`,
     `路徑與參數中的網域、標籤請 URL 編碼。網頁上的排行預設排除「非台灣」，API 不會，需要時請自行傳 ${code('exclude')}。`,
     `${code('v1')} 只做向後相容的變更（新增欄位、新增端點）；移除或改名會先在這份文件公告。`,
-    `使用資料請註明「資料來源：流量觀察 traffic.observe.tw（Similarweb 估算）」。`,
+    `使用資料請註明「資料來源：臺灣流量觀察站 traffic.observe.tw（Similarweb 估算）」。`,
   ];
   const toc = `<nav class="doc-toc" aria-label="本頁大綱"><p>本頁大綱</p><a href="#rules">使用規則</a><a href="#quick">快速開始</a><a href="#list">端點一覽</a>${groups
     .map(
@@ -560,7 +560,7 @@ for s in r.json()["sites"][:10]:
   return layout(
     'API',
     {
-      title: '流量觀察 API',
+      title: '臺灣流量觀察站 API',
       dek: '公開取用台灣網站每月的造訪估算、搜尋與 AI 導流、Radar 排名與標籤彙整',
     },
     `<div class="doc-links"><a href="/api/v1/openapi.json">OpenAPI 3.1 規格</a><a href="/api/v1/">端點索引 JSON</a></div>

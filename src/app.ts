@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
+import { BRAND_HEAD, registerBrand } from './brand.ts';
 import {
   cleanTag,
   loadCrowd,
@@ -60,6 +61,7 @@ const CACHE_MS = 60_000;
 const HISTORY_MS = 10 * 60_000;
 // The report page (/): static HTML that reads /api/v1/history and draws everything client-side.
 const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
+  .replace('<!--brand-head-->', BRAND_HEAD)
   .replace('<!--style-->', STYLE_HREF)
   .replace('<!--tables-->', TABLES_HREF)
   .replace('<!--js-->', JS_FLAG)
@@ -456,6 +458,7 @@ export function buildApp(
   app.get('/tables.js', async (_request, reply) =>
     reply.type('text/javascript; charset=utf-8').header('cache-control', 'public, max-age=86400').send(TABLES_SCRIPT),
   );
+  registerBrand(app);
   // robots.txt, the sitemap, canonical links, and noindex on everything that is not a public entry page.
   registerSeo(app);
 
