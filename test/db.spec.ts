@@ -346,6 +346,9 @@ describe.skipIf(!url)('with a database', () => {
     });
     expect((await server.inject('/api/v1/rankings?month=202609')).json().sites).toHaveLength(2);
     expect((await server.inject('/api/v1/rankings?month=202609&topic=%E9%9D%9E%E5%8F%B0%E7%81%A3')).json().sites).toHaveLength(2);
+    // Several tags in topic are ANDed: only a.com.tw carries 新聞 as well as 部落格.
+    const both = (await server.inject(`/api/v1/rankings?month=202609&topic=${encodeURIComponent('新聞,部落格')}`)).json();
+    expect(both.sites.map((s: { domain: string; rank: number }) => [s.domain, s.rank])).toEqual([['a.com.tw', 1]]);
     expect((await form('/sites/', { domains: 'missing.tw', add: '新聞', remove: '' })).statusCode).toBe(400);
     expect(await rows(pool, 'SELECT * FROM site_metadata_log')).toHaveLength(3);
     // Independent batches must merge against the latest committed tags.

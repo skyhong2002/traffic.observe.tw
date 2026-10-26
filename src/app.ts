@@ -179,9 +179,13 @@ export function buildApp(
     const list = only ? all.filter((s) => only.has(s.domain)) : all;
     // Tag chips count before exclusion, so an excluded tag stays on the page to bring back.
     const topics = topicList(list);
-    const topic = topics.some((t) => t.topic === query.topic) ? (query.topic as string) : null;
-    const exclude = [...new Set(String(query.exclude ?? '').split(','))].filter((t) => t !== topic && topics.some((x) => x.topic === t));
-    const kept = exclude.length ? list.filter((s) => !s.topics.some((t) => exclude.includes(t))) : list;
+    // topic may list several tags (comma-separated); a site must carry all of them.
+    const wanted = [...new Set(String(query.topic ?? '').split(','))].filter((t) => topics.some((x) => x.topic === t));
+    const topic = wanted.length === 1 ? wanted[0] : null;
+    const exclude = [...new Set(String(query.exclude ?? '').split(','))].filter(
+      (t) => !wanted.includes(t) && topics.some((x) => x.topic === t),
+    );
+    const kept = list.filter((s) => wanted.every((t) => s.topics.includes(t)) && !s.topics.some((t) => exclude.includes(t)));
     // The comparison month (the nearest earlier month by default): growth, the earlier rank and every share's change are against it.
     const older = months.filter((m) => m < month);
     const from = typeof query.from === 'string' && older.includes(query.from) ? query.from : (older[0] ?? null);

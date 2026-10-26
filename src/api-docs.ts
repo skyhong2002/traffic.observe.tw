@@ -70,7 +70,7 @@ const SITE_ROW: Field[] = [
 ];
 const RANKING_PARAMS: Param[] = [
   MONTH,
-  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站' },
+  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，需同時有這些標籤（AND）' },
   {
     name: 'exclude',
     in: 'query',
