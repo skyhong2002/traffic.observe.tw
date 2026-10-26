@@ -645,9 +645,9 @@ export function buildApp(
     checks.set(email, [...recent, now]);
     return true;
   };
-  app.get<{ Querystring: TechQuery }>('/tech/', async (request, reply) => {
+  app.get<{ Querystring: TechQuery & { view?: string } }>('/tech/', async (request, reply) => {
     reply.type('text/html; charset=utf-8');
-    return techPage(await overview(request.query));
+    return techPage(await overview(request.query), request.query.view);
   });
   app.get<{ Querystring: { domain?: string } }>('/tech/lookup', async (request, reply) => {
     const domain = publicDomain(request.query.domain);

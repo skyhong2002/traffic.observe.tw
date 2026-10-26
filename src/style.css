@@ -2425,3 +2425,130 @@ a.tag:hover,
   color: var(--accent);
   border-color: var(--series-1-wash);
 }
+
+/* Technology exploration: a catalog and a separate, immediately visible result page. */
+.tech-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin: 24px 0 12px;
+  color: var(--muted);
+}
+.tech-filters {
+  display: grid;
+  gap: 16px;
+  padding: 20px 0;
+  border-block: 1px solid var(--grid);
+}
+.tech-filter-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.tech-filters .chip-row {
+  margin: 0;
+}
+.tech-filters summary,
+.tech-lookup summary,
+.tech-coverage summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.tech-results {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tech-results p {
+  margin: 0;
+  color: var(--muted);
+}
+.tech-search {
+  flex: 0 1 360px;
+  width: 100%;
+}
+.tech-search input {
+  width: 100%;
+}
+.tech-category {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tech-name {
+  font-weight: 600;
+}
+.tech-open {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 1px solid var(--axis);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.tech-open:hover {
+  background: var(--sel-row);
+  border-color: var(--accent);
+}
+.tech-selection {
+  border-left: 3px solid var(--accent);
+  padding: 4px 20px;
+  margin-bottom: 24px;
+}
+.tech-selection > span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+}
+.tech-selection strong {
+  display: block;
+  font-size: 26px;
+  overflow-wrap: anywhere;
+}
+.tech-selection p {
+  margin: 8px 0;
+}
+.tech-selected {
+  color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+.tech-lookup,
+.tech-coverage {
+  padding: 20px 0;
+  border-top: 1px solid var(--grid);
+}
+.tech-coverage .stats {
+  margin-top: 16px;
+}
+#tech-catalog .table-lead-box {
+  width: auto;
+  max-width: none;
+  white-space: normal;
+}
+@media (max-width: 600px) {
+  .tech-search {
+    flex-basis: 100%;
+  }
+  .tech-selection {
+    padding-left: 14px;
+  }
+  #tech-catalog .tech-open {
+    padding: 6px;
+    font-size: 12px;
+  }
+}
+.tech-refine {
+  padding: 12px 0;
+  border-block: 1px solid var(--grid);
+}
+.tech-refine > summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.tech-refine .tech-filters {
+  border: 0;
+}
