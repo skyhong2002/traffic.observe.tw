@@ -211,6 +211,84 @@ const TIP_SCRIPT = `<script>
 })();
 </script>`;
 
+/**
+ * The site card, ported from tag.observe.tw's MediaHoverLink: hovering or focusing a [data-card] opens a card under
+ * it (above it when there is no room) with the site's name and domain, and leaving closes it. On touch the first tap
+ * opens the card with a link to the site's page and a second tap follows the element's own link, so a reader never
+ * has to guess. Escape, scrolling, resizing or tapping elsewhere close it.
+ */
+export const SITE_CARD_SCRIPT = `<script>
+(() => {
+  const card = document.createElement('div');
+  card.className = 'site-card';
+  card.id = 'site-card';
+  card.hidden = true;
+  document.body.append(card);
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  let anchor = null;
+  let touch = false;
+  const place = () => {
+    if (!anchor) return;
+    const trigger = anchor.getBoundingClientRect();
+    const bounds = card.getBoundingClientRect();
+    card.style.left = Math.max(12, Math.min(trigger.left + (trigger.width - bounds.width) / 2, innerWidth - bounds.width - 12)) + 'px';
+    card.style.top = Math.max(12, trigger.bottom + bounds.height + 12 <= innerHeight ? trigger.bottom + 6 : trigger.top - bounds.height - 6) + 'px';
+  };
+  const open = (el, tapped) => {
+    const d = el.dataset;
+    const name = d.cardName || d.card;
+    card.innerHTML = '<strong>' + esc(name) + '</strong>' + (d.cardName ? '<span class="muted">' + esc(d.card) + '</span>' : '') +
+      (d.cardNote ? '<span class="note">' + esc(d.cardNote) + '</span>' : '') +
+      (tapped && d.cardHref ? '<a class="go" href="' + esc(d.cardHref) + '">前往' + esc(name) + '網站頁 →</a>' : '');
+    card.setAttribute('role', tapped ? 'dialog' : 'tooltip');
+    card.classList.toggle('tapped', tapped);
+    if (anchor && anchor !== el) anchor.removeAttribute('aria-describedby');
+    anchor = el;
+    el.setAttribute('aria-describedby', 'site-card');
+    card.hidden = false;
+    place();
+  };
+  const close = () => {
+    if (anchor) anchor.removeAttribute('aria-describedby');
+    anchor = null;
+    card.hidden = true;
+  };
+  const target = (e) => e.target instanceof Element && e.target.closest('[data-card]');
+  document.addEventListener('pointerover', (e) => {
+    const el = e.pointerType !== 'touch' && target(e);
+    if (el && el !== anchor) open(el, false);
+  });
+  document.addEventListener('pointerout', (e) => {
+    if (e.pointerType !== 'touch' && anchor && !anchor.contains(e.relatedTarget)) close();
+  });
+  document.addEventListener('focusin', (e) => {
+    const el = !touch && target(e);
+    if (el) open(el, false);
+    else if (!card.contains(e.target)) close();
+  });
+  document.addEventListener('pointerdown', (e) => {
+    touch = e.pointerType === 'touch';
+    if (anchor && !anchor.contains(e.target) && !card.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    touch = false;
+    if (e.key === 'Escape') close();
+  });
+  // On touch the first tap shows the card and a second tap follows the link.
+  document.addEventListener('click', (e) => {
+    if (card.contains(e.target)) return close();
+    const el = target(e);
+    if (!el) return;
+    if (touch && anchor !== el && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey) {
+      e.preventDefault();
+      open(el, true);
+    } else close();
+  });
+  addEventListener('scroll', (e) => card.contains(e.target) || close(), true);
+  addEventListener('resize', close);
+})();
+</script>`;
+
 /** Lets the stylesheet collapse long chip rows only when the script that expands them will run. */
 export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>";
 
@@ -228,7 +306,7 @@ ${siteHeader(nav)}
   }</div>${head.toolbar ? `<div class="toolbar">${head.toolbar}</div>` : ''}
 ${body}</main>
 ${siteFooter(nav, method)}
-${tips ? TIP_SCRIPT : ''}</body></html>`;
+${tips ? TIP_SCRIPT : ''}${SITE_CARD_SCRIPT}</body></html>`;
 }
 
 export const section = (title: string, inner: string, extra = '') => `<section class="block"${extra}><h2>${title}</h2>${inner}</section>`;
@@ -283,13 +361,18 @@ const tagLinks = (topics: string[], href: (t: string) => string) =>
 /** Name and domain on one line; the domain is left out when it is the name. */
 /** A hue from the domain, so sites without an icon get their own colour on the letter tile rather than all looking alike. */
 const tileHue = (domain: string) => [...domain].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+/** What the site card (SITE_CARD_SCRIPT) shows for a site: its name, its domain, a note and where its page is. */
+const cardData = (domain: string, name = domain, { note = '', href = `/site/${domain}/` }: { note?: string; href?: string } = {}) =>
+  ` data-card="${html(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${html(name.trim())}"` : ''}${
+    note ? ` data-card-note="${html(note)}"` : ''
+  }${href ? ` data-card-href="${html(href)}"` : ''}`;
 /**
- * The site's icon (/icon/), or the first letter of its name where it has none. Hovering it shows the name and domain;
- * pass `titled: false` where the surrounding element already has its own tooltip.
+ * The site's icon (/icon/), or the first letter of its name where it has none. Hovering it opens the site card with
+ * the name and domain; pass `titled: false` where the surrounding element already has its own card or tooltip.
  */
 export const favicon = (domain: string, name: string, { titled = true }: { titled?: boolean } = {}) =>
   `<span class="favicon" data-letter="${html([...name.trim()][0]?.toUpperCase() ?? '')}" style="--hue:${tileHue(domain)}"${
-    titled ? ` title="${html(name.trim() && name.trim() !== domain ? `${name.trim()} · ${domain}` : domain)}"` : ''
+    titled ? cardData(domain, name) : ''
   } aria-hidden="true"><img src="/icon/${html(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
 /**
  * A site shown by its logo alone, for places where its name would be too small to read: the name, the domain and
@@ -297,10 +380,14 @@ export const favicon = (domain: string, name: string, { titled = true }: { title
  */
 export const logoChip = (domain: string, { note = '', tracked = true }: { note?: string; tracked?: boolean } = {}) => {
   const title = `${domain}${note ? `・${note}` : ''}${tracked ? '' : '（本站尚未追蹤）'}`;
+  const card = cardData(domain, domain, {
+    note: `${note}${note && !tracked ? '・' : ''}${tracked ? '' : '本站尚未追蹤'}`,
+    href: tracked ? undefined : '',
+  });
   const inner = favicon(domain, domain, { titled: false });
   return tracked
-    ? `<a class="logo-chip" href="/site/${html(domain)}/" title="${html(title)}" aria-label="${html(title)}">${inner}</a>`
-    : `<span class="logo-chip untracked" title="${html(title)}" role="img" aria-label="${html(title)}">${inner}</span>`;
+    ? `<a class="logo-chip" href="/site/${html(domain)}/"${card} aria-label="${html(title)}">${inner}</a>`
+    : `<span class="logo-chip untracked"${card} role="img" aria-label="${html(title)}">${inner}</span>`;
 };
 /** Marks a visits figure that is not Similarweb's own: a month taken from the sheet, or entered by hand from the platform. */
 const visitsSourceCell = (source: string | null | undefined) =>

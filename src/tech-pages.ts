@@ -167,7 +167,7 @@ export function techPage(o: TechOverview, view?: unknown) {
   const siteRows = o.sites
     .map(
       (s) =>
-        `<tr>${siteCell(s.domain, s.name).replace(`href="/site/${html(s.domain)}/"`, `href="/tech/${html(s.domain)}/"`)}<td class="l"><span class="tags">${s.detections
+        `<tr>${siteCell(s.domain, s.name).replace(` href="/site/${html(s.domain)}/"`, ` href="/tech/${html(s.domain)}/"`)}<td class="l"><span class="tags">${s.detections
           .filter((d) => !f.category || d.category === f.category)
           .sort((a, b) => Number(b.id === f.technology) - Number(a.id === f.technology))
           .map((d) =>

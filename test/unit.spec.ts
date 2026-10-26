@@ -546,9 +546,9 @@ describe('Similarweb composition', () => {
     const base = { domain: 'x.tw', category: null, similarSites: ['a.tw', 'b.com'], months: [], profile };
     const mixed = similarwebSection({ ...base, trackedSimilar: ['a.tw'], similarGrades: { 'a.tw': 0.654 } });
     expect(mixed).toMatch(
-      /<a class="logo-chip" href="\/site\/a\.tw\/" title="a\.tw・相似度 65%"[^>]*><span class="favicon"[^>]*><img src="\/icon\/a\.tw"/,
+      /<a class="logo-chip" href="\/site\/a\.tw\/" data-card="a\.tw" data-card-note="相似度 65%"[^>]*><span class="favicon"[^>]*><img src="\/icon\/a\.tw"/,
     );
-    expect(mixed).toMatch(/<span class="logo-chip untracked" title="b\.com（本站尚未追蹤）"/);
+    expect(mixed).toMatch(/<span class="logo-chip untracked" data-card="b\.com" data-card-note="本站尚未追蹤"/);
     expect(mixed).not.toContain('/site/b.com/');
     expect(similarwebSection({ ...base, trackedSimilar: ['a.tw', 'b.com'] })).not.toContain('untracked');
   });

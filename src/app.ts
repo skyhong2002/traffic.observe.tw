@@ -43,6 +43,7 @@ import {
   methodPart,
   notFoundPage,
   rankingPage,
+  SITE_CARD_SCRIPT,
   type SitePage,
   sectionTabs,
   similarPage,
@@ -85,6 +86,7 @@ const REPORT = readFileSync(new URL('./report.html', import.meta.url), 'utf8')
   .replace('<!--tabs-->', sectionTabs('report'))
   .replace('<!--method-->', METHOD_LINK)
   .replace('<!--header-->', siteHeader('report'))
+  .replace('</body>', `${SITE_CARD_SCRIPT}</body>`)
   .replace(
     '<!--footer-->',
     siteFooter(

@@ -101,9 +101,9 @@ const tagHref = (topic) => {
 };
 const topicsOf = (s) => s.topics || [];
 const siteHref = (domain) => `/site/${encodeURIComponent(domain)}/`;
-/** The site's icon (/icon/, cached on the server), or the first letter of its name where it has none; hovering it shows the name and domain. */
+/** The site's icon (/icon/, cached on the server), or the first letter of its name where it has none; hovering it opens the site card (SITE_CARD_SCRIPT). */
 const favicon = (domain, name) =>
-  `<span class="favicon" data-letter="${esc([...name.trim()][0]?.toUpperCase() ?? '')}" title="${esc(name.trim() && name.trim() !== domain ? `${name.trim()} · ${domain}` : domain)}" aria-hidden="true"><img src="/icon/${encodeURIComponent(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
+  `<span class="favicon" data-letter="${esc([...name.trim()][0]?.toUpperCase() ?? '')}" data-card="${esc(domain)}"${name.trim() && name.trim() !== domain ? ` data-card-name="${esc(name.trim())}"` : ''} data-card-href="${siteHref(domain)}" aria-hidden="true"><img src="/icon/${encodeURIComponent(domain)}" alt="" width="16" height="16" loading="lazy" onerror="this.remove()"></span>`;
 // Every matching site participates in the same ranking.
 const numberRanks = (rows) => rows.map((r, i) => ({ ...r, rank: i + 1 }));
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
