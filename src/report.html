@@ -104,6 +104,11 @@ const favicon = (domain, name) =>
 // Every matching site participates in the same ranking.
 const numberRanks = (rows) => rows.map((r, i) => ({ ...r, rank: i + 1 }));
 const inSource = (s) => !state.source || (s.src || []).some((r) => (SOURCE_OF[r] ?? r) === state.source);
+/** 台灣造訪量: visits × Taiwan share, null without a share. */
+const twVisits = (m) => (m && m[V] != null && m[T] != null ? m[V] * m[T] : null);
+/** Larger 台灣造訪量 first; sites without a Taiwan share follow, among themselves by visits. */
+const byTaiwan = (a, b) => (a.tw != null && b.tw != null && a.tw !== b.tw ? b.tw - a.tw : (a.tw == null) !== (b.tw == null) ? (a.tw == null ? 1 : -1) : (b.visits ?? 0) - (a.visits ?? 0));
+const byRow = (a, b) => byTaiwan({ tw: a.twVisits, visits: a.visits }, { tw: b.twVisits, visits: b.visits });
 function row(domain, s) {
   const now = s.m[state.to];
   if (!now || now[V] == null) return null;
@@ -111,7 +116,7 @@ function row(domain, s) {
   const change = state.from === state.to ? null : before?.[V] ? now[V] / before[V] - 1 : before ? null : 'new';
   const radar = (state.data.radar[domain] || []).at(-1) || null;
   return {
-    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], prev: before ? before[V] : null,
+    domain, name: s.name || domain, group: s.group, topics: topicsOf(s), visits: now[V], twVisits: twVisits(now), prev: before ? before[V] : null,
     change, search: now[S], ai: now[A], taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
@@ -124,7 +129,7 @@ function rowsFor(topic) {
     const r = row(d, s);
     if (r) out.push(r);
   }
-  out.sort((a, b) => b.visits - a.visits);
+  out.sort(byRow);
   return numberRanks(out);
 }
 /**
@@ -365,9 +370,10 @@ function render() {
 }
 
 const COLS = [
-  { key: 'rank', label: '#', cls: 'rank', sort: (r) => -r.visits, dir: 1, title: '排名（依造訪量）' },
+  { key: 'rank', label: '#', cls: 'rank', sort: (r) => r.rank, dir: 1, title: '排名（依台灣造訪量）' },
   { key: 'name', label: '網站', cls: 'l name-cell', sort: (r) => r.name, dir: 1 },
   { key: 'topics', label: '標籤', cls: 'l tags-cell', sort: (r) => (r.topics.length ? r.topics.join('、') : null), dir: 1 },
+  { key: 'twVisits', label: '台灣造訪量', cls: 'num traffic-cell', sort: (r) => r.twVisits, dir: -1, title: '台灣造訪量 ＝ 造訪量 × 台灣占比；排名依此排序' },
   { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算' },
   { key: 'change', label: '區間變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '與所選比較月份相比' },
   { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪' },
@@ -406,6 +412,7 @@ function rankingRow(r, cal) {
     rank: r.rank ?? '—',
     name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.domain)}">${esc(r.name)}</a>${r.name !== r.domain ? `<span class="site-domain table-lead-extra" title="${esc(r.domain)}">${esc(r.domain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台（Pro）補登的數字">Pro</span>' : ''}</span>`,
     topics: `<span class="tags" title="${esc(r.topics.join('、'))}">${r.topics.map((t) => `<a class="tag" href="${tagHref(t)}">${esc(t)}</a>`).join('')}</span>`,
+    twVisits: millions(r.twVisits),
     visits: millions(r.visits),
     change: `<span class="trend-cell"><span class="spark-cell" title="近一年造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
     search: millions(r.search), ai: millions(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
@@ -430,10 +437,10 @@ function section(label, topic, rows) {
   const col = cols.find((c) => c.key === sort.key);
   const sorted = [...rows].sort((a, b) => {
     const va = col.sort(a), vb = col.sort(b);
-    if (va == null && vb == null) return b.visits - a.visits;
+    if (va == null && vb == null) return byRow(a, b);
     if (va == null) return 1;
     if (vb == null) return -1;
-    return (typeof va === 'string' ? va.localeCompare(vb, 'zh-TW') : va - vb) * sort.dir || b.visits - a.visits;
+    return (typeof va === 'string' ? va.localeCompare(vb, 'zh-TW') : va - vb) * sort.dir || byRow(a, b);
   });
   el.querySelector('thead tr').innerHTML = cols.map((c) => {
     const on = c.key === sort.key;
@@ -485,7 +492,7 @@ function topicRanks(topic, month) {
   if (!topicRankCache.has(key)) {
     const list = Object.entries(state.data.sites)
       .filter(([, s]) => inSource(s) && topicsOf(s).includes(topic) && s.m[month]?.[V] != null)
-      .sort((a, b) => b[1].m[month][V] - a[1].m[month][V]);
+      .sort(([, a], [, b]) => byTaiwan({ tw: twVisits(a.m[month]), visits: a.m[month][V] }, { tw: twVisits(b.m[month]), visits: b.m[month][V] }));
     topicRankCache.set(key, new Map(list.map(([d], i) => [d, i + 1])));
   }
   return topicRankCache.get(key);

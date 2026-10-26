@@ -403,7 +403,7 @@ export function rankingPage(
           s.topics.join('、'),
           tagLinks(s.topics, (t) => `/#topic=${encodeURIComponent(t)}`),
         )}
-${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
+${volCell(s.taiwanVisits)}${volCell(s.visits)}${sortCell('num', s.growth, signed(s.growth))}<td class="num">${s.prevRank ?? ''}</td>
 ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     )
     .join('');
@@ -424,7 +424,7 @@ ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
     },
     `${month ? `<div class="chip-rows">${chips}</div>` : ''}<section class="block"><p class="results-line" data-table-count="ranking" data-total="${list.length}">${html(topic ?? '全部網站')}${exclude.length ? `・排除 ${html(exclude.join('、'))}` : ''}・${list.length} 個網站${sourceNote ? `・${sourceNote}` : ''}</p>
 ${table(
-  `<th class="rank" aria-sort="ascending" title="名次">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num">流量</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
+  `<th class="rank" aria-sort="ascending" title="名次（依台灣造訪量）">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num" title="台灣造訪量 ＝ 流量 × 台灣占比；名次依此排序">台灣造訪</th><th class="num">流量</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
     .map((c) => `<th class="num" title="${html(c.title)}">${c.head}${unit === 'share' ? ' %' : ''}${show === 'change' ? ' ±' : ''}</th>`)
     .join('')}`,
   rowsHtml,
@@ -432,7 +432,7 @@ ${table(
   6 + shareCols.length,
   'ranking',
 )}
-<p class="note table-note">流量與「次數」是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「%」是占全部造訪的比例，「次數」是流量 × 比例換算的造訪次數（搜尋次數即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
+<p class="note table-note">名次依「台灣造訪」（流量 × 台灣占比；沒有台灣占比的網站排在最後）。台灣造訪、流量與「次數」是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「%」是占全部造訪的比例，「次數」是流量 × 比例換算的造訪次數（搜尋次數即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
     { nav: 'table' },
   );
 }

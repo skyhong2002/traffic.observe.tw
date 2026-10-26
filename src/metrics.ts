@@ -146,14 +146,31 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
   return out.sort((a, b) => (b.visits ?? 0) - (a.visits ?? 0));
 }
 
-/** Rows of one topic, ranked by visits, with last month's rank in the same topic. */
+/** 台灣造訪量 in millions: visits × Taiwan share; null when either is unknown. */
+export const taiwanVisits = (visits: number | null, share: number | null | undefined) =>
+  visits !== null && share != null ? visits * share : null;
+
+/** Larger 台灣造訪量 first; sites without a Taiwan share follow, among themselves by plain visits. */
+const byTaiwanVisits = (a: { tw: number | null; visits: number | null }, b: { tw: number | null; visits: number | null }) =>
+  a.tw !== null && b.tw !== null && a.tw !== b.tw
+    ? b.tw - a.tw
+    : (a.tw === null) !== (b.tw === null)
+      ? a.tw === null
+        ? 1
+        : -1
+      : (b.visits ?? 0) - (a.visits ?? 0);
+
+/** Rows of one topic, ranked by 台灣造訪量 (visits × Taiwan share), with last month's rank in the same topic. */
 export function ranking<T extends SiteMonth>(view: T[], topic: string | null) {
-  const inTopic = topic ? view.filter((s) => s.topics.includes(topic)) : view;
+  const now = (s: T) => ({ tw: taiwanVisits(s.visits, s.taiwanShare), visits: s.visits });
+  const inTopic = (topic ? view.filter((s) => s.topics.includes(topic)) : [...view]).sort((a, b) => byTaiwanVisits(now(a), now(b)));
   const places = (list: T[]) => new Map(list.map((s, i) => [s.domain, i + 1]));
   const rank = places(inTopic);
-  const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => (b.prevVisits ?? 0) - (a.prevVisits ?? 0)));
+  const prev = (s: T) => ({ tw: taiwanVisits(s.prevVisits, s.prevTaiwanShare), visits: s.prevVisits });
+  const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => byTaiwanVisits(prev(a), prev(b))));
   return inTopic.map((s) => ({
     ...s,
+    taiwanVisits: taiwanVisits(s.visits, s.taiwanShare),
     rank: rank.get(s.domain) ?? null,
     prevRank: prevRank.get(s.domain) ?? null,
     growth: s.prevVisits ? (s.visits ?? 0) / s.prevVisits - 1 : null,

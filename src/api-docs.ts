@@ -39,7 +39,7 @@ const MONTH: Param = {
   default: '最新月份',
 };
 const SITE_ROW: Field[] = [
-  { name: 'sites[].rank', type: 'integer', desc: '依造訪量的名次，只在篩選後的網站之間計算' },
+  { name: 'sites[].rank', type: 'integer', desc: '依台灣造訪量（taiwanVisits）的名次，只在篩選後的網站之間計算' },
   { name: 'sites[].domain', type: 'string', desc: '網域' },
   { name: 'sites[].name', type: 'string', desc: '網站名稱（人工值優先，其次試算表）' },
   { name: 'sites[].group', type: 'string | null', desc: '試算表 A 欄（原表標籤 A）' },
@@ -56,6 +56,11 @@ const SITE_ROW: Field[] = [
   { name: 'sites[].searchShare', type: 'number | null', desc: '自然搜尋占造訪的比例（0–1，不含付費搜尋）' },
   { name: 'sites[].aiShare', type: 'number | null', desc: 'GenAI 導流占比（0–1）' },
   { name: 'sites[].taiwanShare', type: 'number | null', desc: '台灣訪客占比（0–1）' },
+  {
+    name: 'sites[].taiwanVisits',
+    type: 'number | null',
+    desc: '台灣造訪量 ＝ visits × taiwanShare，百萬次；名次（rank）依此排序，沒有台灣占比的網站排在最後',
+  },
   { name: 'sites[].searchVisits', type: 'number | null', desc: '搜尋S：造訪量 × 自然搜尋占比，百萬次' },
   { name: 'sites[].aiVisits', type: 'number | null', desc: 'AI：造訪量 × GenAI 占比，百萬次' },
   { name: 'sites[].prevSearchShare', type: 'number | null', desc: '比較月份的自然搜尋占比' },
@@ -104,7 +109,7 @@ export const ENDPOINTS: Endpoint[] = [
     path: '/api/v1/rankings',
     summary: '單一月份的網站排行',
     detail:
-      '依造訪量由大到小。topic、exclude、source 可同時使用；名次在篩選後剩下的網站之間重新計算。沒有 Similarweb 估算的月份用 Pro 補登或試算表數字，visitsSource 會註明。',
+      '依台灣造訪量（造訪量 × 台灣占比）由大到小，沒有台灣占比的網站排在最後。topic、exclude、source 可同時使用；名次在篩選後剩下的網站之間重新計算。沒有 Similarweb 估算的月份用 Pro 補登或試算表數字，visitsSource 會註明。',
     params: RANKING_PARAMS,
     example: `/api/v1/rankings?month=202609&exclude=${encodeURIComponent('非台灣')}`,
     type: 'application/json',

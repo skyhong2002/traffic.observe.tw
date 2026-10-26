@@ -377,6 +377,18 @@ describe('ranking and topicSummary', () => {
     expect(ranking([foreign, ...view], '台灣').map((s) => s.domain)).toEqual(['a.tw', 'b.tw']);
   });
 
+  it('ranks by visits × Taiwan share, with sites lacking a share last', () => {
+    const big = { ...site('big.com', 20, 20, []), taiwanShare: 0.1, prevTaiwanShare: 0.1 };
+    const local = { ...site('local.tw', 5, 5, []), taiwanShare: 0.9, prevTaiwanShare: 0.1 };
+    const unknown = site('unknown.com', 50, 50, []);
+    const list = ranking([unknown, big, local], null);
+    expect(list.map((s) => [s.domain, s.rank, s.prevRank, s.taiwanVisits])).toEqual([
+      ['local.tw', 1, 2, 4.5],
+      ['big.com', 2, 1, 2],
+      ['unknown.com', 3, 3, null],
+    ]);
+  });
+
   it('ranks sites without geographic labels', () => {
     const unknown = { ...site('unknown.tw', 100, 90, ['新聞']), taiwanShare: 0.99 };
     expect(ranking([unknown], null)[0]).toMatchObject({ rank: 1, prevRank: 1 });
