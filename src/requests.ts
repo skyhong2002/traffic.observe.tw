@@ -4,7 +4,7 @@ import { type FetchSummary, publicDomain, type TrafficProfile } from './similarw
 import { loadTraffic } from './store.ts';
 
 // What services ask for. A standing list (`watch`, e.g. tag's outlets) is
-// refreshed on its interval; a one-off lookup (`traffic`, `similar_sites`, as
+// refreshed every month; a one-off lookup (`traffic`, `similar_sites`, as
 // blog submits them) is fetched once and again only when resubmitted after 30
 // days; a domain answered in the 30 days before it was asked is not fetched again. The request/result shape is the one tag served at /internal/similarweb
 // (docs/api.md), so blog keeps working unchanged.
@@ -131,9 +131,8 @@ export async function lookupResults(pool: Pool, requester: string, domain: strin
  * Replaces a requester's standing list: domains not in `domains` stop being
  * watched for it (their history stays). Returns the accepted and refused names.
  */
-export async function setWatchList(pool: Pool, requester: string, rawDomains: unknown, refreshDays: number, now = new Date()) {
+export async function setWatchList(pool: Pool, requester: string, rawDomains: unknown, now = new Date()) {
   if (!Array.isArray(rawDomains) || rawDomains.length > MAX_WATCH) return { error: 'invalid_domains' as const };
-  if (!Number.isInteger(refreshDays) || refreshDays < 1 || refreshDays > 90) return { error: 'invalid_refresh_days' as const };
   const accepted = [...new Set(rawDomains.map(publicDomain).filter((d): d is string => !!d))];
   const refused = rawDomains.filter((d) => !publicDomain(d)).map(String);
   const conn = await pool.getConnection();
@@ -141,9 +140,8 @@ export async function setWatchList(pool: Pool, requester: string, rawDomains: un
     await conn.beginTransaction();
     if (accepted.length)
       await conn.query(
-        `INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?
-         ON DUPLICATE KEY UPDATE refresh_days = VALUES(refresh_days)`,
-        [accepted.map((d) => [requester, d, 'watch', now, refreshDays])],
+        'INSERT INTO watches (requester, domain, kind, requested_at) VALUES ? ON DUPLICATE KEY UPDATE requested_at = requested_at',
+        [accepted.map((d) => [requester, d, 'watch', now])],
       );
     await conn.query(
       `DELETE FROM watches WHERE requester = ? AND kind = 'watch'${accepted.length ? ' AND domain NOT IN (?)' : ''}`,
@@ -173,28 +171,26 @@ const MAX_ADD = 200;
 /**
  * Adds domains to a requester's standing list without touching the rest (an
  * editor on /watch/, or a service adding one domain at a time). Re-adding
- * updates the interval and note. `by` is the editor's email or the service.
+ * updates the note. `by` is the editor's email or the service.
  */
 export async function addWatches(
   pool: Pool,
   requester: string,
   rawDomains: unknown,
-  refreshDays: number,
   { by, note = null, now = new Date() }: { by: string; note?: string | null; now?: Date },
 ) {
   if (!Array.isArray(rawDomains) || !rawDomains.length || rawDomains.length > MAX_ADD) return { error: 'invalid_domains' as const };
-  if (!Number.isInteger(refreshDays) || refreshDays < 1 || refreshDays > 90) return { error: 'invalid_refresh_days' as const };
   const accepted = [...new Set(rawDomains.map(publicDomain).filter((d): d is string => !!d))];
   const refused = rawDomains.filter((d) => !publicDomain(d)).map(String);
   const clean = note?.trim().slice(0, 255) || null;
   if (accepted.length) {
     await pool.query(
-      `INSERT INTO watches (requester, domain, kind, requested_at, refresh_days, added_by, note) VALUES ?
-       ON DUPLICATE KEY UPDATE refresh_days = VALUES(refresh_days), note = COALESCE(VALUES(note), note)`,
-      [accepted.map((d) => [requester, d, 'watch', now, refreshDays, by, clean])],
+      `INSERT INTO watches (requester, domain, kind, requested_at, added_by, note) VALUES ?
+       ON DUPLICATE KEY UPDATE note = COALESCE(VALUES(note), note)`,
+      [accepted.map((d) => [requester, d, 'watch', now, by, clean])],
     );
-    await pool.query('INSERT INTO watch_log (at, email, action, domain, refresh_days, note) VALUES ?', [
-      accepted.map((d) => [now, by, `add:${requester}`.slice(0, 16), d, refreshDays, clean]),
+    await pool.query('INSERT INTO watch_log (at, email, action, domain, note) VALUES ?', [
+      accepted.map((d) => [now, by, `add:${requester}`.slice(0, 16), d, clean]),
     ]);
   }
   return { added: accepted, refused };
@@ -221,7 +217,6 @@ export async function removeWatch(pool: Pool, requester: string, rawDomain: unkn
 export interface WatchRow {
   domain: string;
   requester: string;
-  refreshDays: number | null;
   addedBy: string | null;
   note: string | null;
   requestedAt: Date;
@@ -239,7 +234,6 @@ export interface WatchRow {
 export async function watchList(pool: Pool, requester: string): Promise<WatchRow[]> {
   const list = await rows<{
     domain: string;
-    refresh_days: number | null;
     added_by: string | null;
     note: string | null;
     requested_at: Date;
@@ -252,7 +246,7 @@ export async function watchList(pool: Pool, requester: string): Promise<WatchRow
     visits: number | null;
   }>(
     pool,
-    `SELECT w.domain, w.refresh_days, w.added_by, w.note, w.requested_at,
+    `SELECT w.domain, w.added_by, w.note, w.requested_at,
        s.last_success_at, s.last_attempt_at, s.last_response_at, s.failures, s.last_error, m.month, m.visits
      FROM watches w
      LEFT JOIN fetch_state s ON s.domain = w.domain
@@ -264,7 +258,6 @@ export async function watchList(pool: Pool, requester: string): Promise<WatchRow
   return list.map((r) => ({
     domain: r.domain,
     requester,
-    refreshDays: r.refresh_days,
     addedBy: r.added_by,
     note: r.note,
     requestedAt: r.requested_at,

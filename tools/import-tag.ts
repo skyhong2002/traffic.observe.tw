@@ -45,7 +45,7 @@ try {
       [domain, at, at, at],
     );
   console.log('fetch state', last.size);
-  console.log('watch tag', await setWatchList(pool, 'tag', [...last.keys()], 7));
+  console.log('watch tag', await setWatchList(pool, 'tag', [...last.keys()]));
 
   const lookups = await rows<{
     requester: string;

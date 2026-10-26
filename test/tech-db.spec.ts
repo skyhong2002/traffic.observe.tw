@@ -48,11 +48,11 @@ describe.skipIf(!url)('technology scans with a database', () => {
     const tables = await rows<{ t: string }>(pool, 'SELECT table_name AS t FROM information_schema.tables WHERE table_schema = DATABASE()');
     for (const { t } of tables) await pool.query(`DROP TABLE \`${t}\``);
     await migrate(pool);
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
-        ['tag', 'news.com.tw', 'watch', NOW, 7],
-        ['blog', 'me.blog.tw', 'watch', NOW, 30],
-        ['blog', 'once.com.tw', 'traffic', NOW, null],
+        ['tag', 'news.com.tw', 'watch', NOW],
+        ['blog', 'me.blog.tw', 'watch', NOW],
+        ['blog', 'once.com.tw', 'traffic', NOW],
       ],
     ]);
   });

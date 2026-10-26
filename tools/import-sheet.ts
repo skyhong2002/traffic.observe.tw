@@ -35,7 +35,7 @@ if (process.argv.includes('--dry-run')) process.exit(0);
 const pool = createPool();
 try {
   console.log('saved', await saveSheet(pool, list));
-  console.log('watch', await setWatchList(pool, 'sheet', domainsInLatest, 30));
+  console.log('watch', await setWatchList(pool, 'sheet', domainsInLatest));
 } finally {
   await pool.end();
 }

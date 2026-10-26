@@ -18,7 +18,7 @@ const DAY = 86_400_000;
 const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => ({
   domain,
   tier: 0,
-  refreshDays: 7,
+  watched: true,
   pendingSince: null,
   lastAttempt: 0,
   lastSuccess: 0,
@@ -33,18 +33,17 @@ describe('dueDomains', () => {
     const month = previousMonth(now);
     const due = dueDomains(
       [
-        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, lastAttempt: t - 40 * DAY, refreshDays: 30, latestProfile: month }),
+        candidate('sheet-old.tw', { tier: 2, lastSuccess: t - 40 * DAY, lastAttempt: t - 40 * DAY, latestProfile: month }),
         candidate('sheet-behind.tw', {
           tier: 2,
           lastSuccess: t - 5 * DAY,
           lastAttempt: t - 5 * DAY,
-          refreshDays: 30,
           latestProfile: '202608',
         }),
-        candidate('sheet-new.tw', { tier: 2, refreshDays: 30 }),
-        candidate('tag-old.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY, latestProfile: month }),
+        candidate('sheet-new.tw', { tier: 2 }),
+        candidate('tag-old.tw', { lastSuccess: t - 25 * DAY, lastAttempt: t - 25 * DAY, latestProfile: month }),
         candidate('tag-new.tw'),
-        candidate('blog.tw', { tier: 1, refreshDays: null, pendingSince: t - DAY }),
+        candidate('blog.tw', { tier: 1, watched: false, pendingSince: t - DAY }),
       ],
       now,
     );
@@ -56,12 +55,25 @@ describe('dueDomains', () => {
     const due = dueDomains(
       [
         candidate('fresh.tw', { lastSuccess: t - DAY, lastAttempt: t - DAY, latestProfile: previousMonth(now) }),
+        // Fetched on the 1st: not due again until next month, however long ago that was.
+        candidate('this-month.tw', { lastSuccess: t - 20 * DAY, lastAttempt: t - 20 * DAY, latestProfile: previousMonth(now) }),
         candidate('backoff.tw', { nextAttempt: t + DAY }),
-        candidate('answered.tw', { refreshDays: null, pendingSince: null }),
+        candidate('answered.tw', { watched: false, pendingSince: null }),
       ],
       now,
     );
     expect(due).toEqual([]);
+  });
+
+  it('brings every watched domain due together on the 1st of the month', () => {
+    const first = new Date('2026-11-01T00:35:00Z');
+    const t = first.getTime();
+    const late = { lastSuccess: t - DAY, lastAttempt: t - DAY, latestProfile: previousMonth(now) };
+    const due = dueDomains(
+      [candidate('a.tw', late), candidate('b.tw', { ...late, lastSuccess: t - 25 * DAY, lastAttempt: t - 25 * DAY, tier: 1 })],
+      first,
+    );
+    expect(due).toEqual(['a.tw', 'b.tw']);
   });
 
   it('keeps only the catch-up quota of the domains missing last month', () => {
@@ -94,7 +106,7 @@ describe('dueDomains', () => {
       [
         candidate('a.tw'),
         candidate('b.tw'),
-        candidate('c.tw', { lastSuccess: t - 9 * DAY, lastAttempt: t - 9 * DAY, latestProfile: previousMonth(now) }),
+        candidate('c.tw', { lastSuccess: t - 25 * DAY, lastAttempt: t - 25 * DAY, latestProfile: previousMonth(now) }),
       ],
       config,
       null,
@@ -561,7 +573,6 @@ describe('watchPage', () => {
     const row = {
       domain: 'ambassador-hotels.com',
       requester: 'manual',
-      refreshDays: 30,
       addedBy: 'editor@example.com',
       note: '國賓飯店',
       requestedAt: now,

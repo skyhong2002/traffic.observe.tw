@@ -30,12 +30,12 @@
 - 用 MariaDB 的 `GET_LOCK('traffic-similarweb')` 保證同一時間只有一輪在跑。
 - 哪些網域到期：
   1. 一次性查詢（blog）在提交後還沒得到回應；
-  2. 定期清單（tag 每 7 天、試算表每 30 天）距上次成功超過週期；
+  2. 定期清單（tag、試算表、手動等所有來源）本月 1 日（UTC，台北 08:00）之後還沒成功抓過：每個月初全部一起到期、一起排隊，沒有各自的週期；
   3. 定期清單裡還缺上個月 profile 的網域，每 3 天重試一次，直到 Similarweb 給出上個月的資料。
 - 順序依 `TRAFFIC_PRIORITY`（預設 `tag,blog,sheet,manual`；`manual` 是編輯在 `/watch/` 手動加入的），抓過但還缺上個月資料的最優先（Similarweb 只給最新一個月的管道與國家，過了就抓不到），再來是從沒抓過的，最後是其他到期的；每組內依來源排序，再依最舊的成功時間。Similarweb 不一定同時給出每個網站的新月份，所以缺上個月的網域每輪只補抓「每輪上限 × 近一天（本月內）有流量回應的網域中已有上個月的比例」個，至少 1 個：月初還沒給出時每輪只抽查 1 個，給出的網站越多補抓越多，剩下還沒給出的網站不會佔滿額度。單次查詢的網域若 30 天內已抓過，直接以現有資料回覆，不再重抓。
-- 失敗（沒有資料、錯誤）隔天重試；累積三次後改成每 30 天一次。
+- 失敗（沒有資料、錯誤）隔天重試；累積三次後等到下個月 1 日跟大家一起重抓。
 
-容量估算：每小時 15 筆 × 24 = 360 筆／天。tag 約 300 個網域每週一次，加上試算表約 670 個網域每月一次，大約 75 筆／天，餘裕足夠。
+容量估算：每小時 15 筆 × 24 = 360 筆／天。所有定期清單約 2,000 個網域每月各一次，月初一起排隊，大約 6 天排完；Similarweb 還沒給出上個月的網站會先少量抽查，給出後才加速。
 
 ## Cloudflare Radar（`src/radar.ts`）
 
@@ -117,7 +117,7 @@
 | `TRAFFIC_PUBLIC_ORIGIN` | 預設 `https://site.observe.tw`。callback `$TRAFFIC_PUBLIC_ORIGIN/auth/google/callback` 必須登記在 OAuth client 的「已授權的重新導向 URI」。 |
 | `TRAFFIC_ADMIN_EMAILS` | 逗號分隔，可以手動加入或移除網域的編輯。 |
 
-`/watch/` 可以一次貼多行網域或網址，設定每 7 或 30 天更新一次，並附上備註。這些網域以請求者 `manual` 存進 `watches`，記下 `added_by`，每次加入或移除都寫進 `watch_log`。表單只接受本站 `Origin` 送出的 POST。移除只會停止抓取，已經抓到的資料會保留。
+`/watch/` 可以一次貼多行網域或網址，並附上備註；和其他定期清單一樣每月更新。這些網域以請求者 `manual` 存進 `watches`，記下 `added_by`，每次加入或移除都寫進 `watch_log`。表單只接受本站 `Origin` 送出的 POST。移除只會停止抓取，已經抓到的資料會保留。
 
 ## 網站技術（`/tech/`）
 
@@ -139,8 +139,8 @@
 | 路由 | 用途 |
 | --- | --- |
 | `POST /internal/similarweb/requests`、`GET /internal/similarweb/results?domain=` | 一次性查詢。與 tag 原本提供給 blog 的格式相同（tag `docs/similarweb-requests.md`），blog 不用改程式 |
-| `PUT /internal/v1/watch` | `{ domains: [...], refreshDays }`：用這份清單**取代**該請求者原本的定期清單 |
-| `POST /internal/v1/watch/add` | `{ domains: [...], refreshDays, note? }`：把網域**加進**該請求者的定期清單，最多 200 個，清單其他部分不變 |
+| `PUT /internal/v1/watch` | `{ domains: [...] }`：用這份清單**取代**該請求者原本的定期清單（定期清單一律每月更新；舊版送來的 `refreshDays` 會被忽略） |
+| `POST /internal/v1/watch/add` | `{ domains: [...], note? }`：把網域**加進**該請求者的定期清單，最多 200 個，清單其他部分不變 |
 | `POST /internal/v1/watch/remove` | `{ domain }`：從該請求者的定期清單移除一個網域 |
 | `POST /internal/v1/traffic` | `{ domains: [...] }`：回傳這些網域存下的所有月份與 profile，以及抓取狀態，給要鏡像資料的服務（tag）用 |
 | `POST /internal/v1/tags` | `{ domains: [...], voter? }`：每個已知網域的所有標籤（含未顯示的）與來源、票數；帶 `voter`（讀者的 Google email）時另回該讀者的票與是否為管理員 |

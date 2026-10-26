@@ -752,14 +752,14 @@ export function buildApp(
     }
     return editor;
   };
-  app.post<{ Body: { domains?: string; refreshDays?: string; note?: string; back?: string } }>('/watch/', async (request, reply) => {
+  app.post<{ Body: { domains?: string; note?: string; back?: string } }>('/watch/', async (request, reply) => {
     const editor = await editorPost(request, reply);
     if (!editor) return reply;
     const lines = String(request.body?.domains ?? '')
       .split(/[\s,]+/)
       .filter(Boolean);
     const r = lines.length
-      ? await addWatches(pool, MANUAL, lines, Number(request.body?.refreshDays ?? 7), {
+      ? await addWatches(pool, MANUAL, lines, {
           by: editor.email,
           note: request.body?.note ?? null,
         })
@@ -942,20 +942,21 @@ export function buildApp(
     if (!result.requests.length) return reply.code(404).send({ error: 'not_requested', domain });
     return result;
   });
-  // { domains: [...], refreshDays } → the requester's standing list, replaced.
-  app.put<{ Body: { domains?: unknown; refreshDays?: unknown } }>('/internal/v1/watch', async (request, reply) => {
+  // { domains: [...] } → the requester's standing list, replaced. Every watched domain is refreshed monthly; a
+  // refreshDays sent by older clients is ignored.
+  app.put<{ Body: { domains?: unknown } }>('/internal/v1/watch', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
     if (!requester) return reply;
-    const r = await setWatchList(pool, requester, request.body?.domains, Number(request.body?.refreshDays ?? 7));
+    const r = await setWatchList(pool, requester, request.body?.domains);
     if ('error' in r) return reply.code(400).send({ error: r.error });
     return r;
   });
-  // { domains: [...], refreshDays, note? } → added to the requester's standing list; the rest of the list stays.
-  app.post<{ Body: { domains?: unknown; refreshDays?: unknown; note?: unknown } }>('/internal/v1/watch/add', async (request, reply) => {
+  // { domains: [...], note? } → added to the requester's standing list; the rest of the list stays.
+  app.post<{ Body: { domains?: unknown; note?: unknown } }>('/internal/v1/watch/add', async (request, reply) => {
     const requester = authenticate(request, reply, tokens);
     if (!requester) return reply;
     const note = typeof request.body?.note === 'string' ? request.body.note : null;
-    const r = await addWatches(pool, requester, request.body?.domains, Number(request.body?.refreshDays ?? 7), { by: requester, note });
+    const r = await addWatches(pool, requester, request.body?.domains, { by: requester, note });
     if ('error' in r) return reply.code(400).send({ error: r.error });
     return r;
   });

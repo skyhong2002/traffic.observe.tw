@@ -66,11 +66,11 @@ describe.skipIf(!url)('with a database', () => {
 
   it('sends at most the budget, highest priority first, and stores months and profiles', async () => {
     const now = new Date('2026-10-21T00:00:00Z');
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
-        ['sheet', 's.com.tw', 'watch', now, 30],
-        ['tag', 'a.com.tw', 'watch', now, 7],
-        ['tag', 'b.com.tw', 'watch', now, 7],
+        ['sheet', 's.com.tw', 'watch', now],
+        ['tag', 'a.com.tw', 'watch', now],
+        ['tag', 'b.com.tw', 'watch', now],
       ],
     ]);
     const { request, sent } = fakeFetch();
@@ -92,10 +92,10 @@ describe.skipIf(!url)('with a database', () => {
   });
 
   it('stops at a refusal and sends nothing during the cooldown', async () => {
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
-        ['tag', 'a.com.tw', 'watch', new Date(), 7],
-        ['tag', 'b.com.tw', 'watch', new Date(), 7],
+        ['tag', 'a.com.tw', 'watch', new Date()],
+        ['tag', 'b.com.tw', 'watch', new Date()],
       ],
     ]);
     const refused = fakeFetch(403);
@@ -107,12 +107,11 @@ describe.skipIf(!url)('with a database', () => {
   });
 
   it('sends nothing with budget 0', async () => {
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES (?, ?, ?, ?, ?)', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES (?, ?, ?, ?)', [
       'tag',
       'a.com.tw',
       'watch',
       new Date(),
-      7,
     ]);
     const { request, sent } = fakeFetch();
     expect(await run(pool, request, 0)).toEqual({ skipped: 'budget is 0' });
@@ -187,12 +186,11 @@ describe.skipIf(!url)('with a database', () => {
 
     // A lookup for a domain fetched in the last 30 days is answered from what is stored, not sent again.
     const { request: watched } = fakeFetch();
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES (?, ?, ?, ?, ?)', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES (?, ?, ?, ?)', [
       'tag',
       'w.com.tw',
       'watch',
       new Date(),
-      30,
     ]);
     await runOnce(pool, { config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }), request: watched, pauseMs: 0, now: () => new Date() });
     const asked = await server.inject({
@@ -660,12 +658,11 @@ describe.skipIf(!url)('with a database', () => {
   it('serves pages and the public API', async () => {
     const server = app();
     const { request } = fakeFetch();
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES (?, ?, ?, ?, ?)', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES (?, ?, ?, ?)', [
       'tag',
       'a.com.tw',
       'watch',
       new Date(),
-      7,
     ]);
     await run(pool, request);
     // An earlier month's channels: the table compares every share with the comparison month.
@@ -782,20 +779,15 @@ describe.skipIf(!url)('with a database', () => {
 
     const added = await form(cookie, '/watch/', {
       domains: 'https://www.x.com.tw/news/1\ny.com.tw, not a domain',
-      refreshDays: '30',
       note: '吉進要的',
     });
     expect(added.headers.location).toBe('/watch/?added=2&refused=3');
-    expect(await rows(pool, "SELECT domain, refresh_days, added_by, note FROM watches WHERE requester = 'manual' ORDER BY domain")).toEqual(
-      [
-        { domain: 'x.com.tw', refresh_days: 30, added_by: 'sky9109@gmail.com', note: '吉進要的' },
-        { domain: 'y.com.tw', refresh_days: 30, added_by: 'sky9109@gmail.com', note: '吉進要的' },
-      ],
-    );
+    expect(await rows(pool, "SELECT domain, added_by, note FROM watches WHERE requester = 'manual' ORDER BY domain")).toEqual([
+      { domain: 'x.com.tw', added_by: 'sky9109@gmail.com', note: '吉進要的' },
+      { domain: 'y.com.tw', added_by: 'sky9109@gmail.com', note: '吉進要的' },
+    ]);
     // Hand-added domains come after tag's.
-    await pool.query(
-      "INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ('tag', 'a.com.tw', 'watch', NOW(), 7)",
-    );
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('tag', 'a.com.tw', 'watch', NOW())");
     const { request, sent } = fakeFetch();
     await run(pool, request, 3);
     expect(sent[0]).toBe('a.com.tw');
@@ -860,10 +852,10 @@ describe.skipIf(!url)('with a database', () => {
 
   it('resolves tags from editors, AI, readers and admins, from the site page and from services', async () => {
     const now = new Date();
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
-        ['blog', 'food.blog', 'watch', now, 7],
-        ['tag', 'news.com.tw', 'watch', now, 7],
+        ['blog', 'food.blog', 'watch', now],
+        ['tag', 'news.com.tw', 'watch', now],
       ],
     ]);
     await editSites(pool, 'ed@x.tw', { single: { domain: 'news.com.tw', name: '新聞台', topics: '新聞, 台灣', revision: 0 } });
@@ -996,9 +988,7 @@ describe.skipIf(!url)('with a database', () => {
   });
 
   it('keeps political leaning out of tags, stores a reason per AI tag and counts votes per voter', async () => {
-    await pool.query(
-      "INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ('blog', 'food.blog', 'watch', NOW(), 7)",
-    );
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('blog', 'food.blog', 'watch', NOW())");
     const server = app();
     const call = (url: string, payload: object, method: 'POST' | 'PUT' = 'POST') =>
       server.inject({ method, url, headers: { authorization: `Bearer ${TOKEN}` }, payload });
@@ -1025,12 +1015,12 @@ describe.skipIf(!url)('with a database', () => {
 
   it('fetches Cloudflare Radar for every watched domain once a day and serves the periods', async () => {
     const now = new Date('2026-10-21T19:35:00Z');
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at, refresh_days) VALUES ?', [
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
-        ['tag', 'a.com.tw', 'watch', now, 7],
-        ['sheet', 'b.com.tw', 'watch', now, 30],
-        ['manual', 'c.com.tw', 'watch', now, 7],
-        ['sheet', 'a.com.tw', 'watch', now, 30],
+        ['tag', 'a.com.tw', 'watch', now],
+        ['sheet', 'b.com.tw', 'watch', now],
+        ['manual', 'c.com.tw', 'watch', now],
+        ['sheet', 'a.com.tw', 'watch', now],
       ],
     ]);
     const sent: string[] = [];

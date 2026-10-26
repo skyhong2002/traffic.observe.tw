@@ -765,7 +765,7 @@ export function lineChart(
 
 const DUE_LABEL: Record<string, string> = {
   new: '新網域，還沒抓過',
-  refresh: '到了更新週期',
+  refresh: '本月還沒更新',
   'catch-up': '還缺上個月的資料',
   lookup: '單次查詢',
 };
@@ -1452,16 +1452,15 @@ export function watchPage({
   ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity">${favicon(w.domain, w.domain)}<a class="site-name" href="/site/${html(w.domain)}/">${html(w.domain)}</a></span></td>
 <td class="l">${w.note && w.note !== w.domain ? html(w.note) : ''}</td>
 ${sortCell('num', w.latestVisits, w.latestMonth ? `${vol(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : '')}
-${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-domain">${tw(w.requestedAt.toISOString())}</span>`)}${editor ? `<td class="l"><span class="radar">${html(w.addedBy)}</span></td>` : ''}
+${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-domain">${tw(w.requestedAt.toISOString())}</span>`)}${editor ? `<td class="l"><span class="radar">${html(w.addedBy)}</span></td>` : ''}
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${html(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
-  const head = `<th class="l">網域</th><th class="l">備註</th><th class="num">最新造訪量</th><th class="num">週期</th><th class="l">最近成功</th><th class="l">加入時間</th>${editor ? '<th class="l">加入者</th>' : ''}<th data-nosort><span class="sr-only">操作</span></th>`;
-  const cols = editor ? 8 : 7;
+  const head = `<th class="l">網域</th><th class="l">備註</th><th class="num">最新造訪量</th><th class="l">最近成功</th><th class="l">加入時間</th>${editor ? '<th class="l">加入者</th>' : ''}<th data-nosort><span class="sr-only">操作</span></th>`;
+  const cols = editor ? 7 : 6;
   const services = others.filter((o) => o.requester !== 'sheet');
   const form = editor
     ? `<form class="form" method="post" action="/watch/"><label>網域或網址，一行一個（最多 200 個）
 <textarea name="domains" rows="5" required placeholder="example.com.tw&#10;https://news.example.com/"></textarea></label>
-<div class="row"><label>多久更新一次 <select name="refreshDays"><option value="7">每 7 天</option><option value="30">每 30 天</option></select></label>
-<label>備註 <input name="note" maxlength="255" size="28" placeholder="為什麼要追蹤（選填）"></label>
+<div class="row"><label>備註 <input name="note" maxlength="255" size="28" placeholder="為什麼要追蹤（選填）"></label>
 <button type="submit" class="primary">加入追蹤</button></div></form>`
     : `<p class="flash">${loginEnabled ? `<a href="/auth/google?next=/watch/">登入</a>後可以加入或移除網域。` : '登入尚未設定。'}</p>`;
   const listSection = list
@@ -1483,7 +1482,7 @@ ${sortCell('num', w.refreshDays, `每 ${w.refreshDays ?? ''} 天`)}${sortCell('l
 ${listSection}`,
     {
       nav: 'watch',
-      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 每小時依排程抓取，之後依設定的週期更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
+      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 每小時依排程抓取，之後每月 1 日所有追蹤中的網域一起到期、依序排隊更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
     },
   );
 }
@@ -1545,7 +1544,7 @@ export function discoverPage({
   const self = discoverHref(minVotes, taiwanOnly);
   const row = (c: Candidate) => {
     const add = editor
-      ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="${html(self)}"><input type="hidden" name="domains" value="${html(c.domain)}"><input type="hidden" name="refreshDays" value="30"><input type="hidden" name="note" value="similarsites 候選（${c.votes} 站推薦）"><button type="submit" class="quiet">加入追蹤</button></form>`
+      ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="${html(self)}"><input type="hidden" name="domains" value="${html(c.domain)}"><input type="hidden" name="note" value="similarsites 候選（${c.votes} 站推薦）"><button type="submit" class="quiet">加入追蹤</button></form>`
       : '';
     return `<tr><td class="l" data-v="${html(c.domain)}"><span class="site-identity">${favicon(c.domain, c.domain)}<span class="site-name">${html(c.domain)}</span></span></td>
 ${sortCell('l', c.clue ? 1 : 0, clueBadge(c.clue))}<td class="l">${c.category ? html(categoryLabel(c.category)) : ''}</td>${sortCell('num', c.votes, `${c.votes} 個`)}${sortCell(
@@ -1609,7 +1608,7 @@ export function similarPage({
     tracked.has(d)
       ? `<a class="quiet" href="/site/${html(d)}/">查看流量</a>`
       : editor
-        ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="/site/${html(site.domain)}/similar/"><input type="hidden" name="domains" value="${html(d)}"><input type="hidden" name="refreshDays" value="30"><input type="hidden" name="note" value="${html(`${site.domain} 的相似網站`)}"><button type="submit" class="quiet">加入追蹤</button></form>`
+        ? `<form class="inline add-watch" method="post" action="/watch/"><input type="hidden" name="back" value="/site/${html(site.domain)}/similar/"><input type="hidden" name="domains" value="${html(d)}"><input type="hidden" name="note" value="${html(`${site.domain} 的相似網站`)}"><button type="submit" class="quiet">加入追蹤</button></form>`
         : '<span class="muted">尚未追蹤</span>';
   const row = (e: SimilarListing['similar'][number]) => {
     const name = names.get(e.similar);

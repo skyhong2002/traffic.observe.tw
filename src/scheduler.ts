@@ -10,7 +10,7 @@ import { saveTraffic } from './store.ts';
 const DAY = 86_400_000;
 /** A domain being fetched is held this long, so two runs never send it twice. */
 const CLAIM = 15 * 60_000;
-/** Failures before a domain only gets retried monthly. */
+/** Failures before a domain only gets retried next month. */
 const MAX_FAILURES = 3;
 /** A domain that is missing last month's profile is retried this often until it appears. */
 const CATCH_UP = 3 * DAY;
@@ -45,8 +45,8 @@ export interface Candidate {
   domain: string;
   /** Index of the highest-priority requester watching it. */
   tier: number;
-  /** Shortest refresh interval among standing watches, or null if only one-off lookups. */
-  refreshDays: number | null;
+  /** On a standing list (refreshed every month), not only one-off lookups. */
+  watched: boolean;
   /** Oldest one-off lookup not answered since it was submitted. */
   pendingSince: number | null;
   lastAttempt: number;
@@ -55,6 +55,9 @@ export interface Candidate {
   latestProfile: string | null;
 }
 
+/** The 1st of `now`'s month (UTC), plus `months`. */
+export const monthStart = (now: Date, months = 0) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + months, 1));
+
 export const previousMonth = (now: Date) => {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -62,7 +65,8 @@ export const previousMonth = (now: Date) => {
 
 /**
  * What is due, in fetch order. Due: an unanswered one-off lookup; a watched
- * domain whose last success is older than its refresh interval; or a watched
+ * domain not fetched successfully since the 1st of this month (every watched
+ * domain comes due together at the start of a month); or a watched
  * domain still missing last month's profile (Similarweb only ever returns the
  * latest month's channels and countries, so a month not caught is lost), tried
  * every three days. Domains in backoff (next_attempt_at) wait. Order: watched
@@ -78,11 +82,11 @@ export function dueQueue(candidates: Candidate[], now = new Date(), catchUp = In
   const reason = (c: Candidate): DueReason | null => {
     if (c.nextAttempt > t) return null;
     if (c.pendingSince !== null) return 'lookup';
-    if (c.refreshDays === null) return null;
-    if (t - c.lastSuccess >= c.refreshDays * DAY) return c.lastSuccess ? 'refresh' : 'new';
+    if (!c.watched) return null;
+    if (c.lastSuccess < monthStart(now).getTime()) return c.lastSuccess ? 'refresh' : 'new';
     return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
   };
-  const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.refreshDays !== null && (c.latestProfile ?? '') < last ? 0 : 2);
+  const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.watched && (c.latestProfile ?? '') < last ? 0 : 2);
   let left = catchUp;
   return candidates
     .map((c) => ({ ...c, reason: reason(c) }))
@@ -93,7 +97,7 @@ export function dueQueue(candidates: Candidate[], now = new Date(), catchUp = In
     )
     .filter((c) => group(c) !== 0 || left-- > 0);
 }
-/** Why a domain is due: never fetched, past its refresh interval, last month's profile still missing, or a one-off lookup. */
+/** Why a domain is due: never fetched, not yet fetched this month, last month's profile still missing, or a one-off lookup. */
 export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
 
 export const dueDomains = (candidates: Candidate[], now = new Date(), catchUp = Infinity) =>
@@ -129,7 +133,6 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
     requester: string;
     kind: string;
     requested_at: Date;
-    refresh_days: number | null;
     last_attempt_at: Date | null;
     last_response_at: Date | null;
     last_success_at: Date | null;
@@ -137,7 +140,7 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
     latest: string | null;
   }>(
     pool,
-    `SELECT w.domain, w.requester, w.kind, w.requested_at, w.refresh_days,
+    `SELECT w.domain, w.requester, w.kind, w.requested_at,
        s.last_attempt_at, s.last_response_at, s.last_success_at, s.next_attempt_at,
        (SELECT MAX(month) FROM traffic_profiles p WHERE p.domain = w.domain) AS latest
      FROM watches w LEFT JOIN fetch_state s ON s.domain = w.domain`,
@@ -148,7 +151,7 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
     const c = out.get(r.domain) ?? {
       domain: r.domain,
       tier,
-      refreshDays: null,
+      watched: false,
       pendingSince: null,
       lastAttempt: time(r.last_attempt_at),
       lastSuccess: time(r.last_success_at),
@@ -156,7 +159,7 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
       latestProfile: r.latest,
     };
     c.tier = Math.min(c.tier, tier);
-    if (r.kind === 'watch' && r.refresh_days !== null) c.refreshDays = Math.min(c.refreshDays ?? Infinity, r.refresh_days);
+    if (r.kind === 'watch') c.watched = true;
     if (r.kind !== 'watch' && time(r.last_response_at) < r.requested_at.getTime() - LOOKUP_FRESH_DAYS * DAY)
       c.pendingSince = Math.min(c.pendingSince ?? Infinity, r.requested_at.getTime());
     out.set(r.domain, c);
@@ -295,11 +298,11 @@ export async function runOnce(
   }
 }
 
-/** Retry a day later; after three failures only monthly. */
+/** Retry a day later; after three failures not until next month, when everything watched comes due again. */
 async function recordFailure(pool: Pool, domain: string, at: Date, message: string) {
   await pool.query(
     `UPDATE fetch_state SET failures = failures + 1, last_error = ?,
        next_attempt_at = IF(failures >= ?, ?, ?) WHERE domain = ?`,
-    [message, MAX_FAILURES, new Date(at.getTime() + 30 * DAY), new Date(at.getTime() + DAY), domain],
+    [message, MAX_FAILURES, monthStart(at, 1), new Date(at.getTime() + DAY), domain],
   );
 }
