@@ -9,7 +9,7 @@ import { type Pool, rows } from './db.ts';
 // Sessions are stored as SHA-256 hashes.
 
 export type LoginConfig = { clientId: string; clientSecret: string; origin: string; admins: Set<string> };
-export type Editor = { email: string; name: string | null };
+export type Editor = { email: string; name: string | null; picture?: string | null };
 /** Exchanges an authorization code for the ID token's claims. */
 export type CodeExchange = (code: string, verifier: string) => Promise<Record<string, unknown>>;
 
@@ -75,14 +75,29 @@ function googleExchange(config: LoginConfig): CodeExchange {
   };
 }
 
+/** The profile picture URL, only when Google serves it from its own image host over https. */
+function googlePicture(value: unknown) {
+  if (typeof value !== 'string' || value.length > 512) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && /(^|\.)googleusercontent\.com$/.test(url.hostname) ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Checks the ID token claims; returns null when anything is off. */
 export function verifiedEditor(claims: Record<string, unknown>, config: LoginConfig, nonce: string, now = Date.now()): Editor | null {
-  const { iss, aud, azp, exp, email, email_verified: verified, name } = claims;
+  const { iss, aud, azp, exp, email, email_verified: verified, name, picture } = claims;
   if (!['https://accounts.google.com', 'accounts.google.com'].includes(String(iss))) return null;
   if (aud !== config.clientId || (azp !== undefined && azp !== config.clientId)) return null;
   if (typeof exp !== 'number' || exp * 1000 <= now || claims.nonce !== nonce) return null;
   if (verified !== true || typeof email !== 'string' || !email || email.length > 255) return null;
-  return { email: email.toLowerCase(), name: typeof name === 'string' && name ? name.slice(0, 255) : null };
+  return {
+    email: email.toLowerCase(),
+    name: typeof name === 'string' && name ? name.slice(0, 255) : null,
+    picture: googlePicture(picture),
+  };
 }
 
 export type LoginOptions = { exchange?: CodeExchange; now?: () => number };
@@ -97,7 +112,7 @@ export function registerLogin(app: FastifyInstance, pool: Pool, config: LoginCon
   async function currentUser(request: FastifyRequest): Promise<Editor | null> {
     const value = readCookie(request, SESSION_COOKIE);
     if (!config || !value || value.length > 64) return null;
-    const [row] = await rows<Editor>(pool, 'SELECT email, name FROM sessions WHERE token_hash = ? AND expires_at > ?', [
+    const [row] = await rows<Editor>(pool, 'SELECT email, name, picture FROM sessions WHERE token_hash = ? AND expires_at > ?', [
       hashToken(value),
       new Date(now()),
     ]);
@@ -164,10 +179,11 @@ export function registerLogin(app: FastifyInstance, pool: Pool, config: LoginCon
     const session = token();
     // Sign-ins are rare, so expired sessions are swept here rather than by a job.
     await pool.query('DELETE FROM sessions WHERE expires_at < ?', [at]);
-    await pool.query('INSERT INTO sessions (token_hash, email, name, created_at, expires_at) VALUES (?, ?, ?, ?, ?)', [
+    await pool.query('INSERT INTO sessions (token_hash, email, name, picture, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)', [
       hashToken(session),
       editor.email,
       editor.name,
+      editor.picture ?? null,
       at,
       new Date(at.getTime() + SESSION_DAYS * 86_400_000),
     ]);

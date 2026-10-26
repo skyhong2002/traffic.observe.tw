@@ -1311,12 +1311,43 @@ ${section(
   );
 }
 
-/** The header's sign-in slot (layout leaves <!--who--> for it). */
-export function whoSlot(user: { email: string } | null, loginEnabled: boolean, path: string) {
-  if (user)
-    return `<small>${html(user.email)}</small> <form method="post" action="/auth/logout"><button type="submit" class="quiet">登出</button></form>`;
-  return loginEnabled ? `<a href="/auth/google?next=${encodeURIComponent(path)}">登入</a>` : '';
+/**
+ * The header's sign-in slot (layout leaves <!--who--> for it), the same as tag.observe.tw: a plain 登入 link, or the
+ * Google profile picture (first letter when it has none) that opens a menu with name, email, role and 登出.
+ */
+export function whoSlot(
+  user: { email: string; name?: string | null; picture?: string | null } | null,
+  loginEnabled: boolean,
+  path: string,
+  admin = false,
+) {
+  if (!user) return loginEnabled ? `<a class="login-link" href="/auth/google?next=${encodeURIComponent(path)}">登入</a>` : '';
+  const label = user.name || user.email;
+  const avatar = (size: number) =>
+    `<span class="avatar" style="--size:${size}px" aria-hidden="true">${
+      user.picture
+        ? `<img src="${html(user.picture)}" alt="" width="${size}" height="${size}" referrerpolicy="no-referrer" onerror="this.remove()">`
+        : ''
+    }<span>${html([...label][0]?.toUpperCase() ?? '')}</span></span>`;
+  const links = admin ? '<a role="menuitem" href="/watch/">追蹤網域</a><a role="menuitem" href="/sites/">網站與標籤管理</a>' : '';
+  return `<div class="account" data-account><button type="button" class="account-button" aria-label="帳號：${html(label)}" aria-expanded="false" aria-haspopup="menu">${avatar(36)}</button>
+<div class="account-menu" role="menu" hidden><div class="account-who">${avatar(40)}<div><p class="account-name">${html(label)}</p>${
+    user.name ? `<p class="account-sub">${html(user.email)}</p>` : ''
+  }<p class="account-sub account-role">${admin ? '管理員' : '讀者'}</p></div></div>${links}<form method="post" action="/auth/logout"><button type="submit" role="menuitem">登出</button></form></div></div>${ACCOUNT_SCRIPT}`;
 }
+/** Opens and closes the account menu: a click on the picture, a click elsewhere or Escape. */
+const ACCOUNT_SCRIPT = `<script>
+(() => {
+  const box = document.querySelector('[data-account]');
+  if (!box) return;
+  const button = box.querySelector('.account-button');
+  const menu = box.querySelector('.account-menu');
+  const set = (open) => { menu.hidden = !open; button.setAttribute('aria-expanded', String(open)); };
+  button.addEventListener('click', () => set(menu.hidden));
+  document.addEventListener('pointerdown', (e) => { if (!menu.hidden && !box.contains(e.target)) set(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') set(false); });
+})();
+</script>`;
 
 const LOGIN_ERRORS: Record<string, string> = {
   not_editor: '這個 Google 帳號可以投票，但沒有編輯權限。需要權限請聯絡管理者。',

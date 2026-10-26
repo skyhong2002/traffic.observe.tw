@@ -2,9 +2,10 @@ import ExcelJS from 'exceljs';
 import { describe, expect, it } from 'vitest';
 import { cleanTag, resolveTags, voterOf } from '../src/crowd.ts';
 import { buildDomainSheet, domainSheetRows, readDomainSheet } from '../src/domain-sheet.ts';
+import { verifiedEditor } from '../src/login.ts';
 import { parseShare, parseVisits, recentMonths } from '../src/manual.ts';
 import { ranking, type SiteMonth, topicSummary } from '../src/metrics.ts';
-import { categoryLabel, channelTiles, similarwebSection, watchPage } from '../src/pages.ts';
+import { categoryLabel, channelTiles, similarwebSection, watchPage, whoSlot } from '../src/pages.ts';
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, catchUpQuota, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
@@ -611,5 +612,48 @@ describe('Taiwan share estimates', () => {
     expect(estimateTaiwanShare({ ...none, earlier: 0.5, countries })).toMatchObject({ share: 0.04, basis: 'bound', capped: true });
     // 4.2% against a 4% bound is within the slack: kept.
     expect(estimateTaiwanShare({ ...none, earlier: 0.042, countries })).toMatchObject({ share: 0.042, basis: 'history', capped: false });
+  });
+});
+
+describe('account menu', () => {
+  const config = { clientId: 'cid', clientSecret: 's', origin: 'https://traffic.example', admins: new Set<string>() };
+  const claims = (picture: unknown) => ({
+    iss: 'https://accounts.google.com',
+    aud: 'cid',
+    exp: 2e9,
+    nonce: 'n',
+    email: 'A@Gmail.com',
+    email_verified: true,
+    name: 'Ann',
+    picture,
+  });
+  it("keeps the Google picture only from Google's image host over https", () => {
+    expect(verifiedEditor(claims('https://lh3.googleusercontent.com/a/x=s96-c'), config, 'n', 1)?.picture).toBe(
+      'https://lh3.googleusercontent.com/a/x=s96-c',
+    );
+    for (const bad of [
+      'http://lh3.googleusercontent.com/a',
+      'https://evil.example/a.png',
+      'https://googleusercontent.com.evil.example/a',
+      3,
+      undefined,
+    ])
+      expect(verifiedEditor(claims(bad), config, 'n', 1)?.picture).toBeNull();
+  });
+  it('shows a login link when signed out and a picture button with a menu when signed in', () => {
+    expect(whoSlot(null, true, '/x?a=1')).toContain('href="/auth/google?next=%2Fx%3Fa%3D1"');
+    expect(whoSlot(null, false, '/')).toBe('');
+    const reader = whoSlot({ email: 'a@gmail.com', name: 'Ann', picture: 'https://lh3.googleusercontent.com/a' }, true, '/');
+    expect(reader).toContain('aria-label="帳號：Ann"');
+    expect(reader).toContain('<img src="https://lh3.googleusercontent.com/a"');
+    expect(reader).toContain('a@gmail.com');
+    expect(reader).toContain('讀者');
+    expect(reader).toContain('action="/auth/logout"');
+    expect(reader).not.toContain('/sites/');
+    const editor = whoSlot({ email: 'a@gmail.com', name: null, picture: null }, true, '/', true);
+    expect(editor).toContain('管理員');
+    expect(editor).toContain('href="/sites/"');
+    expect(editor).not.toContain('<img');
+    expect(editor).toContain('<span>A</span>');
   });
 });

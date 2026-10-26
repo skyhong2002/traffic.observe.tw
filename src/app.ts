@@ -143,7 +143,7 @@ export function buildApp(
     if (typeof payload !== 'string' || !payload.includes('<!--who-->')) return payload;
     const user = await editors.currentUser(request);
     if (user) reply.header('cache-control', 'private, no-store');
-    return payload.replace('<!--who-->', whoSlot(user, editors.enabled, request.url));
+    return payload.replace('<!--who-->', whoSlot(user, editors.enabled, request.url, Boolean(user && editors.isEditor(user.email))));
   });
 
   // monthView reads a few thousand rows; pages and the API share one short-lived copy per month.

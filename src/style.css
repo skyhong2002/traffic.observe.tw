@@ -245,15 +245,126 @@ p.body {
 .site-tools .who:empty {
   display: none;
 }
-.site-tools .who a {
+.login-link {
+  display: block;
+  padding: 6px 8px;
+  border-radius: 6px;
   color: var(--ink-2);
+  font-size: 14px;
+  white-space: nowrap;
 }
-.site-tools .who small {
-  display: inline-block;
-  max-width: 140px;
+.login-link:hover {
+  background: var(--chip);
+  color: var(--ink);
+  text-decoration: none;
+}
+/* The signed-in account: a round picture that opens a menu (as on tag.observe.tw). */
+.account {
+  position: relative;
+  display: flex;
+}
+.account-button {
+  display: flex;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+.account-button:hover {
+  box-shadow: 0 0 0 2px var(--series-1-wash);
+}
+.account-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.avatar {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: var(--size, 36px);
+  height: var(--size, 36px);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--series-1-wash);
+  color: var(--accent);
+  font-size: calc(var(--size, 36px) * 0.4);
+  font-weight: 500;
+}
+.avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.account-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 30;
+  width: 240px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid var(--axis);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.5);
+  font-size: 14px;
+  text-align: left;
+}
+.account-menu[hidden] {
+  display: none;
+}
+.account-who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+}
+.account-who > div {
+  min-width: 0;
+}
+.account-who p {
+  margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  vertical-align: middle;
+  white-space: nowrap;
+}
+.account-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+.account-sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+.account-who .account-role {
+  margin-top: 4px;
+}
+.account-menu a,
+.account-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.account-menu a:hover,
+.account-menu button:hover {
+  background: var(--chip);
+  color: var(--ink);
+  text-decoration: none;
+}
+.account-menu form {
+  display: block;
 }
 .site-tools form {
   display: inline;
