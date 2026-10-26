@@ -304,3 +304,33 @@
   refresh();
   filters();
 })();
+
+// The technology catalog is a compact link grid, independent of site tables.
+(() => {
+  const catalog = document.getElementById('tech-catalog');
+  const input = document.querySelector('[data-tech-search]');
+  if (!catalog || !input) return;
+  const items = [...catalog.children];
+  const count = document.querySelector('[data-table-count="tech-catalog"]');
+  const empty = document.querySelector('[data-tech-empty]');
+  input.addEventListener('input', () => {
+    const query = input.value.trim().toLocaleLowerCase();
+    let matched = 0;
+    for (const item of items) {
+      item.hidden = !item.dataset.techName.toLocaleLowerCase().includes(query);
+      if (!item.hidden) matched++;
+    }
+    count.textContent = query
+      ? `${matched} 項符合「${input.value.trim()}」・共 ${items.length} 項`
+      : `${items.length} 項技術 · 網站數 / 比例`;
+    empty.hidden = matched !== 0;
+  });
+  document.querySelector('[data-tech-sort]').addEventListener('change', (event) => {
+    const byName = event.target.value === 'name';
+    items.sort((a, b) =>
+      byName ? a.dataset.techName.localeCompare(b.dataset.techName) : Number(b.dataset.techCount) - Number(a.dataset.techCount),
+    );
+    catalog.append(...items);
+    catalog.setAttribute('aria-label', byName ? '技術，依名稱排序' : '技術，依網站數排序');
+  });
+})();
