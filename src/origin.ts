@@ -5,11 +5,15 @@ export const publicOrigin = (env: Record<string, string | undefined> = process.e
   new URL(env.TRAFFIC_PUBLIC_ORIGIN || 'https://site.observe.tw').origin;
 
 export function registerLegacyOrigin(app: FastifyInstance, origin = publicOrigin()) {
-  if (new URL(origin).hostname === 'traffic.observe.tw') return;
+  const target = new URL(origin);
+  if (target.hostname === 'traffic.observe.tw') return;
   app.addHook('onRequest', async (request, reply) => {
     // Local service callers retain their loopback URL; forwarded Host is not trusted.
     if (request.url.startsWith('/internal/') || !request.url.startsWith('/')) return;
-    if (/^traffic\.observe\.tw(?::\d+)?$/i.test(request.headers.host ?? '')) {
+    const host = (request.headers.host ?? '').toLowerCase();
+    // The tunnel forwards the visitor's scheme. It cannot choose the redirect host.
+    const needsHttps = target.protocol === 'https:' && host === target.host && request.headers['x-forwarded-proto'] === 'http';
+    if (/^traffic\.observe\.tw(?::\d+)?$/.test(host) || needsHttps) {
       return reply.redirect(`${origin}${request.url}`, 308);
     }
   });

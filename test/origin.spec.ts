@@ -38,6 +38,21 @@ describe('網站雷達 domain migration', () => {
     await app.close();
   });
 
+  it('upgrades HTTP visitors behind the tunnel while preserving local callers', async () => {
+    const app = server();
+    const path = '/table/?q=%E6%96%B0%E8%81%9E';
+    const res = await app.inject({ url: path, headers: { host: 'site.observe.tw', 'x-forwarded-proto': 'http' } });
+    expect(res.statusCode).toBe(308);
+    expect(res.headers.location).toBe(`https://site.observe.tw${path}`);
+    for (const headers of [
+      { host: 'site.observe.tw', 'x-forwarded-proto': 'https' },
+      { host: 'localhost:18150', 'x-forwarded-proto': 'http' },
+    ]) {
+      expect((await app.inject({ url: '/', headers })).statusCode).toBe(200);
+    }
+    await app.close();
+  });
+
   it('uses the new domain for default canonical links and Google callbacks', () => {
     expect(publicOrigin({})).toBe('https://site.observe.tw');
     expect(loginConfig({ GOOGLE_CLIENT_ID: 'id', GOOGLE_CLIENT_SECRET: 'secret' })?.origin).toBe('https://site.observe.tw');

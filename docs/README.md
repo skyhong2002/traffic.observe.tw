@@ -166,7 +166,7 @@
 
 ## 部署
 
-systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `systemctl --user enable --now`，2026-10-21 已啟用）。公開網址 `traffic.observe.tw` 經 Cloudflare Tunnel（observe-steamos）指到 `http://127.0.0.1:18150`；經 tunnel 進來的請求帶 `cf-connecting-ip`，所以 `/internal/*` 一律 404。
+systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `systemctl --user enable --now`，2026-10-21 已啟用）。公開網址 `site.observe.tw`（舊址 `traffic.observe.tw` 轉址）經 Cloudflare Tunnel（observe-steamos）指到 `http://127.0.0.1:18150`；經 tunnel 進來的請求帶 `cf-connecting-ip`，所以 `/internal/*` 一律 404。
 
 服務直接執行這份 checkout 的 TypeScript。UI 修改先跑 `npm run typecheck`、`npm run lint`、`npm test`（測試僅使用 `TRAFFIC_TEST_DB_URL` 指定的測試庫），並以另一個連接埠檢查畫面。`report.html` 與 `style.css` 在程序啟動時讀取，發布 UI 時執行 `systemctl --user restart traffic-observe-web.service`；不需重啟 worker 或套用資料庫 migration。部署後確認本機與公開站的 `/healthz`、`/api/v1/history` 及各頁面正常，並確認 HTML 引用新的 CSS 內容雜湊。若需回復，還原此次修改的 UI 檔案至部署前版本，再重啟 web 服務。
 
@@ -243,7 +243,7 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 
 ## 網站雷達更名與網域切換（2026-10-27）
 
-品牌改為「網站雷達」，規劃正式網址 `https://site.observe.tw`，涵蓋網站技術、流量、相似網站及協作分類。Logo 延用 C 版宋體與圖形，四字橫式為 182.9×54px，中文字仍為 30px；新素材包為 `docs/brand/site-radar-logo-kit.zip`，舊素材包與 A/B/C 預覽保留為歷史紀錄。展示頁由 `python tools/brand-showcase.py` 重產。
+品牌改為「網站雷達」，正式網址 `https://site.observe.tw`，涵蓋網站技術、流量、相似網站及協作分類。Logo 延用 C 版宋體與圖形，四字橫式為 182.9×54px，中文字仍為 30px；新素材包為 `docs/brand/site-radar-logo-kit.zip`，舊素材包與 A/B/C 預覽保留為歷史紀錄。展示頁由 `python tools/brand-showcase.py` 重產。
 
 程式預設來源改為新網域。切換前正式 `.env` 暫留 `TRAFFIC_PUBLIC_ORIGIN=https://traffic.observe.tw`，現有網域與 Google 登入可繼續使用；這時僅發布新品牌，不代表新網域已上線。切換條件與順序：
 
@@ -259,3 +259,15 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 2026-10-27 03:53（台北時間）新品牌已發布到現有 `traffic.observe.tw`：頁首頁尾、標題、API 文件與 Logo 更新，T3 專案名稱亦改為「網站雷達」。本機與正式首頁皆 200、無舊品牌文字；canonical 與 Google callback 仍為舊網域，未啟用舊站轉址。桌面 1280px、手機 390px 無頁面橫向溢出；typecheck、lint、遷移與 SEO 15 項測試通過。完整套件初次 130 項通過、1 項 Radar 測試因 MySQL 全伺服器 named lock `traffic-radar` 已由另一連線持有而失敗，單項重試相同；未中斷持鎖程序。
 
 使用者將自行處理 Cloudflare 與 Google 管理端設定，明確要求待通知後才切換正式來源或啟用舊站轉址。現有 Tunnel `observe-steamos`，ID `f6342ca7-0e3b-4998-8971-f8f1837d37e9`（從執行中的 connector 驗證），目前 ingress `traffic.observe.tw` → `http://127.0.0.1:18150`。OAuth client 所屬 project number 為 `453403068137`；控制台的專案／client 顯示名稱尚未驗證。勿將 analytics service account 的專案視為已確認的 OAuth 專案。
+
+
+2026-10-27 03:59（台北時間）管理端設定經使用者確認後，正式 `.env` 的 `TRAFFIC_PUBLIC_ORIGIN` 已切換為 `https://site.observe.tw`，重啟 web 完成。OAuth 專案確認為 `skys-gemini-api`、client 名稱 `observe.tw`；新 callback 為 `https://site.observe.tw/auth/google/callback`，既有 12 筆 URI 保留。應用端只變更公開來源，OAuth secret 與 openid/email/profile 權限範圍均未變更。
+
+使用者以 Brave 完成新網域真實 Google 登入並回到新站；服務紀錄核對新 host 的 callback 回 303，資料庫確認新增 session（驗證紀錄不保存個資、code 或 token）。新站主要公開頁面、API、canonical、robots/sitemap 均使用新來源且回 200。舊站首頁、網站頁、API、登入入口與 sitemap 回 308，保留原始 path/query；loopback 的首頁及健康檢查仍為 200，兩個公開 host 的 internal POST 仍為 404。15 項遷移/SEO 測試通過。
+
+公開 Cloudflare 與 Google DNS 均已回新站 A 記錄；本機 resolver 暫留負快取，因此 HTTPS 核對以公開 DNS 回覆的 IP 配合原 hostname/SNI 完成。舊站 robots.txt 與 favicon.ico 一度仍由 CDN HIT 舊快取，來源與附查詢參數的 URL 都正確回 308；使用者決定讓此兩個快取自然到期，未執行 purge。其他舊靜態檔若有未到期快取仍可暫時回圖像，並不影響主要頁面的網域轉址。新站圖像採內容雜湊 URL。
+
+本次環境設定備份與公開核對 JSON 位於 `data/last-site-domain-cutover.txt` 指向的私有目錄。僅重啟 web，未重啟 worker、未執行資料庫 migration。Google Search Console 網址變更仍是獨立的搜尋管理端後續作業，本次未執行。
+
+
+切換後補查發現新 host 的 HTTP 請求仍可回 200，因此 `src/origin.ts` 依 Tunnel 的 `x-forwarded-proto: http` 將正式 host 的訪客升級到固定 HTTPS 來源，保留 path/query；目的地僅取設定，不取轉送 host，loopback/internal 不受影響。已重啟 web，公開 `http://site.observe.tw/table/?q=...&from=...` 實測 308 至同一路徑的 HTTPS；新 HTTPS 首頁 200、登入入口 302 使用新 callback，舊 HTTPS 網站頁 308。最終 typecheck、lint、16 項遷移/SEO 測試與 diff 檢查通過。舊 robots/favicon 依使用者決定保留 CDN 快取至自然到期。
