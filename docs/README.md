@@ -271,3 +271,5 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 
 
 切換後補查發現新 host 的 HTTP 請求仍可回 200，因此 `src/origin.ts` 依 Tunnel 的 `x-forwarded-proto: http` 將正式 host 的訪客升級到固定 HTTPS 來源，保留 path/query；目的地僅取設定，不取轉送 host，loopback/internal 不受影響。已重啟 web，公開 `http://site.observe.tw/table/?q=...&from=...` 實測 308 至同一路徑的 HTTPS；新 HTTPS 首頁 200、登入入口 302 使用新 callback，舊 HTTPS 網站頁 308。最終 typecheck、lint、16 項遷移/SEO 測試與 diff 檢查通過。舊 robots/favicon 依使用者決定保留 CDN 快取至自然到期。
+
+2026-10-27 23:50（台北時間）Google Search Console（使用者處理）：新增並驗證 `https://site.observe.tw/` 資源，`sitemap.xml` 成功處理、讀到 4 個網址（`/`、`/table/`、`/tag/`、`/tech/`）；舊資源 `https://traffic.observe.tw/` 已提交網址變更至 `site.observe.tw` 並通過驗證，狀態為「This site is currently moving」，開始日 2026-10-27。索引轉移需等 Google 處理，期間舊站 308 必須保留；勿在舊資源按 Cancel move。同日實測舊站 robots.txt、favicon.ico 已回 308，先前的 CDN 快取已到期。GTM／GA 本站從未安裝，換網域無須調整。
