@@ -7,7 +7,7 @@ import { editSites, managedSites } from '../src/metadata.ts';
 import { monthView, ranking, topicSummary } from '../src/metrics.ts';
 import { radarLabel } from '../src/pages.ts';
 import { runRadar } from '../src/radar.ts';
-import { lastMonthShare, runConfig, runOnce } from '../src/scheduler.ts';
+import { lastMonthShare, refusedSince, runConfig, runOnce } from '../src/scheduler.ts';
 import { saveSheet } from '../src/sheet.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
@@ -104,6 +104,21 @@ describe.skipIf(!url)('with a database', () => {
     const after = fakeFetch();
     expect(await run(pool, after.request)).toMatchObject({ skipped: expect.stringContaining('cooling down') });
     expect(after.sent).toEqual([]);
+  });
+
+  it('reports when Similarweb has refused three runs in a row without an answer', async () => {
+    const at = (h: number) => new Date(Date.UTC(2026, 9, 28, h, 35));
+    const insert = (h: number, sent: number, ok: number, refused: number) =>
+      pool.query('INSERT INTO runs (started_at, budget, sent, ok, refused) VALUES (?, 15, ?, ?, ?)', [at(h), sent, ok, refused]);
+    await insert(1, 2, 2, 0);
+    await insert(2, 1, 0, 1);
+    await insert(3, 1, 0, 1);
+    expect(await refusedSince(pool)).toBeNull();
+    await insert(4, 0, 0, 0);
+    await insert(5, 1, 0, 1);
+    expect(await refusedSince(pool)).toEqual(at(2));
+    await insert(6, 3, 3, 0);
+    expect(await refusedSince(pool)).toBeNull();
   });
 
   it('sends nothing with budget 0', async () => {

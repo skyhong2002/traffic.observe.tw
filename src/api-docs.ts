@@ -395,6 +395,11 @@ export const ENDPOINTS: Endpoint[] = [
       { name: 'priority', type: 'string[]', desc: '來源的優先序' },
       { name: 'coolingDownUntil', type: 'string (ISO 時間) | null', desc: '被 Similarweb 拒絕後暫停到何時' },
       {
+        name: 'refusedSince',
+        type: 'string (ISO 時間) | null',
+        desc: '最近三輪都被 Similarweb 拒絕、一筆都沒抓到時，從何時開始；這段期間 queue 的 expectedAt 是 null',
+      },
+      {
         name: 'lastMonth',
         type: 'object',
         desc: 'month：上個月（YYYYMM）；sampled、found：近一天（本月內）有流量回應的網域數，與其中已有這個月資料的數量；catchUpPerRun：缺這個月的網域每輪可補抓幾個（每輪上限乘以 found／sampled，至少 1）',

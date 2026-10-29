@@ -167,6 +167,26 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
   return [...out.values()];
 }
 
+/** Runs refused in a row, without an answer, before the queue's times stop being a forecast. */
+const STALLED_RUNS = 3;
+
+/**
+ * When Similarweb started refusing every run, if the last STALLED_RUNS runs that
+ * sent anything were all refused before a single answer; null while fetching works.
+ */
+export async function refusedSince(pool: Pool) {
+  const recent = await rows<{ refused: number; ok: number }>(
+    pool,
+    `SELECT refused, ok FROM runs WHERE sent > 0 ORDER BY id DESC LIMIT ${STALLED_RUNS}`,
+  );
+  if (recent.length < STALLED_RUNS || recent.some((r) => !r.refused || r.ok)) return null;
+  const [r] = await rows<{ at: Date | null }>(
+    pool,
+    'SELECT MIN(started_at) AS at FROM runs WHERE sent > 0 AND id > COALESCE((SELECT MAX(id) FROM runs WHERE ok > 0), 0)',
+  );
+  return r?.at ?? null;
+}
+
 /** The latest refusal, if it is still inside the cooldown. */
 export async function coolingDown(pool: Pool, config: RunConfig, now = new Date()) {
   const [r] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(refused_at) AS at FROM fetch_state');

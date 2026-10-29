@@ -9,7 +9,7 @@ import { categoryLabel, channelTiles, similarwebSection, watchPage, whoSlot } fr
 import { lookupStatus } from '../src/requests.ts';
 import { type Candidate, catchUpQuota, dueDomains, previousMonth, runConfig } from '../src/scheduler.ts';
 import { readMonthTab, readMonthTabs, readWorkbook } from '../src/sheet.ts';
-import { publicDomain, searchShare } from '../src/similarweb.ts';
+import { publicDomain, searchShare, swContext } from '../src/similarweb.ts';
 import { fetchQueue } from '../src/status.ts';
 import { estimateTaiwanShare, taiwanCeiling } from '../src/taiwan-estimate.ts';
 
@@ -119,6 +119,8 @@ describe('dueDomains', () => {
     ]);
     const cooling = new Date('2026-10-21T10:50:00Z');
     expect(fetchQueue([candidate('a.tw')], config, cooling, now)[0].expectedAt).toBe('2026-10-21T11:35:00.000Z');
+    const refused = new Date('2026-10-20T03:35:00Z');
+    expect(fetchQueue([candidate('a.tw')], config, cooling, now, undefined, refused)[0]).toMatchObject({ position: 1, expectedAt: null });
   });
 });
 
@@ -127,6 +129,15 @@ describe('runConfig', () => {
     expect(runConfig({}).budget).toBe(0);
     expect(runConfig({ TRAFFIC_RUN_BUDGET: '15' }).budget).toBe(15);
     expect(runConfig({ TRAFFIC_RUN_BUDGET: 'x' }).budget).toBe(0);
+  });
+});
+
+describe('swContext', () => {
+  it('signs the device id and UTC date as extension 6.12.26 does', () => {
+    const id = '00000000-0000-4000-8000-000000000000';
+    expect(swContext(id, new Date('2026-10-29T23:30:00+08:00'))).toBe(
+      `${id}.69f26aabc14a58c54f21819a672d5948d3807a0b656b840546e857e45bed05a3`,
+    );
   });
 });
 

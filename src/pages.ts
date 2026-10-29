@@ -1377,13 +1377,17 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   const q = status.queue;
   const queueRows = q.map(
     (e) =>
-      `<tr${status.budget && e.position <= status.budget ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : '<span class="muted">不會送出</span>')}</tr>`,
+      `<tr${status.budget && e.position <= status.budget ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${status.refusedSince ? '未定' : '不會送出'}</span>`)}</tr>`,
   );
   const queueHead =
     '<th class="rank" aria-sort="ascending" title="抓取順序">#</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>';
   const queueNote = q.length
     ? `<p>共 ${q.length} 個網域等候抓取。${
-        status.budget ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。` : '目前暫停送出，表格是等候順序。'
+        status.refusedSince
+          ? 'Similarweb 目前拒絕每一輪的請求，恢復前沒有預計時間，表格是等候順序。'
+          : status.budget
+            ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。`
+            : '目前暫停送出，表格是等候順序。'
       }排程之後到期的網域會依同樣規則接在後面。${
         status.lastMonth.catchUpPerRun >= status.budget
           ? ''
@@ -1404,7 +1408,13 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
       dek: 'Similarweb 的更新進度與接下來的抓取排程。',
       actions: '<a href="/api/v1/status">JSON</a>',
     },
-    `${status.coolingDownUntil ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>` : ''}${stats}
+    `${
+      status.refusedSince
+        ? `<p class="flash"><span class="down">▼</span> Similarweb 從 ${tw(status.refusedSince)} 起拒絕每一輪的請求，一筆都沒有抓到${status.coolingDownUntil ? `；下次嘗試在 ${tw(status.coolingDownUntil)} 之後` : ''}</p>`
+        : status.coolingDownUntil
+          ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>`
+          : ''
+    }${stats}
 ${section(status.budget ? '下一輪抓取' : '等候抓取', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
 ${manualSection}
 ${section(
@@ -1526,6 +1536,7 @@ export function watchPage({
   flash,
   list = null,
   queue = new Map(),
+  refused = null,
 }: {
   editor: { email: string } | null;
   loginEnabled: boolean;
@@ -1536,11 +1547,13 @@ export function watchPage({
   list?: { requester: string; rows: WatchRow[] } | null;
   /** Where each due domain stands in the fetch queue. */
   queue?: Map<string, QueueEntry>;
+  /** Similarweb has refused every run since then, so the queue has no times. */
+  refused?: Date | null;
 }) {
   const queued = (w: WatchRow) => {
     const e = queue.get(w.domain);
     return e
-      ? `<span class="muted" title="${html(DUE_LABEL[e.reason] ?? e.reason)}">排第 ${e.position} 位${e.expectedAt ? `・預計 ${tw(e.expectedAt)}` : ''}</span>`
+      ? `<span class="muted" title="${html(DUE_LABEL[e.reason] ?? e.reason)}">排第 ${e.position} 位${e.expectedAt ? `・預計 ${tw(e.expectedAt)}` : refused ? '・Similarweb 拒絕中，時間未定' : ''}</span>`
       : null;
   };
   const state = (w: WatchRow) =>
@@ -1600,7 +1613,7 @@ const clueBadge = (clue: Candidate['clue']) =>
   clue
     ? `<span class="tag clue" title="${clue === 'tw' ? '.tw 網域' : '簡介是繁體中文'}">${clue === 'tw' ? '台灣網域' : '繁中簡介'}</span>`
     : '';
-const addedFlash = (n: number) => (n > 0 ? `<p class="flash" role="status">已加入 ${n} 個網域，下一輪抓取會先處理。</p>` : '');
+const addedFlash = (n: number) => (n > 0 ? `<p class="flash" role="status">已加入 ${n} 個網域，已排進抓取佇列。</p>` : '');
 /** Add buttons post in the background and turn into a note, so the page keeps its place; without JavaScript the form submits and returns here. */
 const ADD_WATCH_SCRIPT = `<script>
 document.addEventListener('submit', async (e) => {

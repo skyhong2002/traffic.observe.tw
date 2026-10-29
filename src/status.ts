@@ -8,6 +8,7 @@ import {
   loadCandidates,
   type MonthShare,
   type RunConfig,
+  refusedSince,
 } from './scheduler.ts';
 
 const HOUR = 3_600_000;
@@ -23,8 +24,16 @@ function nextRunAt(from: Date, minute: number) {
 /**
  * Everything due, in the order it will be sent, with the run expected to send it:
  * batches of `budget`, one per hour from the next run (after a cooldown, if one is on).
+ * No times while Similarweb refuses every run (`refused`): nothing says when it will stop.
  */
-export function fetchQueue(candidates: Candidate[], config: RunConfig, cooling: Date | null, now = new Date(), share?: MonthShare) {
+export function fetchQueue(
+  candidates: Candidate[],
+  config: RunConfig,
+  cooling: Date | null,
+  now = new Date(),
+  share?: MonthShare,
+  refused: Date | null = null,
+) {
   const first = nextRunAt(cooling && cooling > now ? cooling : now, config.runMinute);
   return dueQueue(candidates, now, share ? catchUpQuota(share, config.budget) : Infinity).map((c, i) => ({
     domain: c.domain,
@@ -32,24 +41,25 @@ export function fetchQueue(candidates: Candidate[], config: RunConfig, cooling: 
     requester: config.priority[c.tier] ?? null,
     reason: c.reason,
     lastSuccessAt: c.lastSuccess ? new Date(c.lastSuccess).toISOString() : null,
-    expectedAt: config.budget ? new Date(first.getTime() + Math.floor(i / config.budget) * HOUR).toISOString() : null,
+    expectedAt: config.budget && !refused ? new Date(first.getTime() + Math.floor(i / config.budget) * HOUR).toISOString() : null,
   }));
 }
 export type QueueEntry = ReturnType<typeof fetchQueue>[number];
 
 /** The queue alone, for pages that only mark where a domain stands. */
 export async function loadQueue(pool: Pool, config: RunConfig, now = new Date()) {
-  const [candidates, cooling, share] = await Promise.all([
+  const [candidates, cooling, share, refused] = await Promise.all([
     loadCandidates(pool, config),
     coolingDown(pool, config, now),
     lastMonthShare(pool, now),
+    refusedSince(pool),
   ]);
-  return fetchQueue(candidates, config, cooling, now, share);
+  return { entries: fetchQueue(candidates, config, cooling, now, share, refused), refusedSince: refused };
 }
 
 /** Worker health for /status/ and /api/v1/status. */
 export async function serviceStatus(pool: Pool, config: RunConfig, now = new Date()) {
-  const [runs, watchers, sends, candidates, cooling, share] = await Promise.all([
+  const [runs, watchers, sends, candidates, cooling, share, refused] = await Promise.all([
     rows<{
       id: number;
       started_at: Date;
@@ -71,12 +81,14 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     loadCandidates(pool, config),
     coolingDown(pool, config, now),
     lastMonthShare(pool, now),
+    refusedSince(pool),
   ]);
-  const queue = fetchQueue(candidates, config, cooling, now, share);
+  const queue = fetchQueue(candidates, config, cooling, now, share, refused);
   return {
     budget: config.budget,
     priority: config.priority,
     coolingDownUntil: cooling?.toISOString() ?? null,
+    refusedSince: refused?.toISOString() ?? null,
     lastMonth: { ...share, catchUpPerRun: catchUpQuota(share, config.budget) },
     watched: candidates.length,
     due: queue.length,

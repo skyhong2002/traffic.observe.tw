@@ -1,3 +1,4 @@
+import { createHmac, randomUUID } from 'node:crypto';
 import type { PlatformBreakdowns } from './manual-breakdowns.ts';
 
 // The Similarweb extension endpoint and its response, ported from tag
@@ -118,16 +119,31 @@ export const isRefusal = (error: unknown) => error instanceof TrafficFetchError 
  */
 export const extensionHeaders = {
   accept: 'application/json',
+  'content-type': 'application/json',
   'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36',
   origin: 'chrome-extension://hoklmmgfnpapgjgcpechhaamimifchmp',
-  'x-extension-version': '6.12.0',
+  'x-extension-version': '6.12.26',
 };
+
+/**
+ * Since extension 6.12.26 (2026-10-28) a request without X-Sw-Ctx gets 429
+ * {"exceeded":true,"userState":"anonymous"} after a few a day per IP. The
+ * extension sends its install's device id and an HMAC-SHA256 of
+ * "<id>:<UTC date>" under a key shipped in background.js.
+ */
+const CTX_KEY = Buffer.from('ghQWipIhydwDGpiZQ2PczBjdwDLtjIOWvjYxU7xFEyI=', 'base64');
+export const swContext = (deviceId: string, now = new Date()) =>
+  `${deviceId}.${createHmac('sha256', CTX_KEY)
+    .update(`${deviceId}:${now.toISOString().slice(0, 10)}`)
+    .digest('hex')}`;
+/** One install's id, like the extension keeps in its local storage. */
+const deviceId = process.env.TRAFFIC_SIMILARWEB_DEVICE_ID || randomUUID();
 
 /** The public endpoint used by the Similarweb extension, raw. No account cookies. */
 export async function requestSimilarweb(domain: string, request = fetch): Promise<Record<string, unknown>> {
   if (trafficDomain(domain) !== domain) throw Error('Invalid domain');
   const response = await request(`https://data.similarweb.com/api/v1/data?domain=${encodeURIComponent(domain)}`, {
-    headers: extensionHeaders,
+    headers: { ...extensionHeaders, 'x-sw-ctx': swContext(deviceId) },
     signal: AbortSignal.timeout(20_000),
     redirect: 'error',
   });

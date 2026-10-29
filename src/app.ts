@@ -704,12 +704,13 @@ export function buildApp(
       ]);
       const q = request.query;
       const listOf = typeof q.list === 'string' && q.list !== 'sheet' && others.some((o) => o.requester === q.list) ? q.list : null;
-      const queue = new Map((await loadQueue(pool, config)).map((e) => [e.domain, e]));
+      const { entries, refusedSince: refused } = await loadQueue(pool, config);
+      const queue = new Map(entries.map((e) => [e.domain, e]));
       const flash =
         q.error === 'invalid'
           ? '沒有可以加入的網域。請輸入像 example.com.tw 的網域或完整網址。'
           : q.added !== undefined
-            ? `已加入 ${Number(q.added) || 0} 個網域${Number(q.refused) ? `，${Number(q.refused)} 行看不懂而略過` : ''}。下一輪抓取會先處理。`
+            ? `已加入 ${Number(q.added) || 0} 個網域${Number(q.refused) ? `，${Number(q.refused)} 行看不懂而略過` : ''}，已排進抓取佇列。`
             : q.removed
               ? `已停止追蹤 ${q.removed}。已抓到的資料會保留。`
               : null;
@@ -722,6 +723,7 @@ export function buildApp(
         flash,
         list: listOf ? { requester: listOf, rows: publicTraffic(limitRows(await watchList(pool, listOf))) } : null,
         queue,
+        refused,
       });
     },
   );
