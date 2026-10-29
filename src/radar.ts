@@ -18,8 +18,6 @@ export interface RadarPeriod {
   bucketLowerBound: number | null;
 }
 
-/** A domain answered within this long is skipped: global buckets change weekly, the top 100 daily. */
-const FRESH = 20 * 3_600_000;
 const isTime = (value: unknown): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value));
 const positive = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
 
@@ -134,12 +132,7 @@ export async function loadRadar(pool: Pool, domains?: string[]) {
   return out;
 }
 
-/**
- * One daily batch over every watched domain (any requester): never-answered
- * first, then the oldest; domains answered in the last 20 hours are skipped.
- * 1 s apart, stops at 401/403/429, three failures in a row or the time limit;
- * the next day continues from the oldest. A named lock keeps runs apart.
- */
+/** Fill watched domains with no stored ranking and no previous attempt. No refreshes or retries. */
 export async function runRadar(
   pool: Pool,
   {
@@ -166,9 +159,9 @@ export async function runRadar(
     const due = await rows<{ domain: string }>(
       pool,
       `SELECT w.domain FROM (SELECT DISTINCT domain FROM watches) w LEFT JOIN radar_state s ON s.domain = w.domain
-       WHERE s.last_success_at IS NULL OR s.last_success_at < ?
-       ORDER BY s.last_success_at IS NOT NULL, s.last_success_at, s.last_attempt_at, w.domain`,
-      [new Date(now().getTime() - FRESH)],
+       WHERE s.last_attempt_at IS NULL AND s.last_success_at IS NULL
+         AND NOT EXISTS (SELECT 1 FROM radar_ranks r WHERE r.domain = w.domain)
+       ORDER BY w.domain`,
     );
     const [run] = (await pool.query('INSERT INTO radar_runs (started_at) VALUES (?)', [now()])) as unknown as [{ insertId: number }];
     const tally = { due: due.length, sent: 0, ok: 0, failed: 0, blocked: false, note: null as string | null };

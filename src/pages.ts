@@ -1017,7 +1017,7 @@ function similarwebMethod(site: Pick<SitePage, 'profile' | 'category' | 'similar
     '流量組成',
     `<ul>
 <li>${p.source === 'manual' ? '編輯者從 Similarweb 平台補登的資料，未填欄位不代表 0' : 'Similarweb 每次只提供最新一個月的組成'}，這裡顯示 ${monthLong(p.month)}。各項是占全部造訪的比例，「約」是依比例換算的造訪次數。</li>
-<li>${p.source === 'manual' ? '來源是編輯者從 Similarweb 平台手動補登，保留每次修改紀錄' : '來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站每月抓取一次並保存'}；Similarweb 的數字是估算，小網站誤差較大。</li>
+<li>${p.source === 'manual' ? '來源是編輯者從 Similarweb 平台手動補登，保留每次修改紀錄' : '來源是 Similarweb 免費資料（瀏覽器擴充功能用的端點），由本站抓取並保存，目前只補抓沒有資料且從未嘗試的網站'}；Similarweb 的數字是估算，小網站誤差較大。</li>
 <li>排名：全球與國家排名依 Similarweb 估算的造訪量；類別排名只和同一類別（${category ? html(categoryLabel(category)) : 'Similarweb 的分類'}）的網站比較。</li>
 <li>平均停留、每次造訪頁數、跳出率都是所有造訪的平均；跳出率是只看一頁就離開的造訪比例。</li>
 <li>導流來源的「自然搜尋」不含搜尋廣告；「AI 工具」是從 ChatGPT 等 AI 助理點進來的造訪。排行上的搜尋占比、AI 占比用的就是這兩項。</li>
@@ -1603,7 +1603,7 @@ ${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l'
 ${listSection}`,
     {
       nav: 'watch',
-      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 每小時依排程抓取，之後每月 1 日所有追蹤中的網域一起到期、依序排隊更新；Cloudflare Radar 每天更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
+      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 與 Cloudflare Radar 目前只補抓沒有資料且從未嘗試的網域；已有資料暫停定期更新，先前失敗或無資料的網域也暫不重試。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
     },
   );
 }

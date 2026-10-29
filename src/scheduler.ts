@@ -10,12 +10,6 @@ import { saveTraffic } from './store.ts';
 const DAY = 86_400_000;
 /** A domain being fetched is held this long, so two runs never send it twice. */
 const CLAIM = 15 * 60_000;
-/** Failures before a domain only gets retried next month. */
-const MAX_FAILURES = 3;
-/** A domain that is missing last month's profile is retried this often until it appears. */
-const CATCH_UP = 3 * DAY;
-/** Domains missing last month sent per run however rarely recent responses have had it, to look for it. */
-const PROBES = 1;
 /** How far back responses count towards how often last month is out (never before the 1st). */
 const SHARE_WINDOW = DAY;
 /** A one-off lookup is answered by any response this recent, even one fetched before it was asked. */
@@ -53,6 +47,8 @@ export interface Candidate {
   lastSuccess: number;
   nextAttempt: number;
   latestProfile: string | null;
+  /** Includes imported traffic without a fetch-state record. */
+  hasData?: boolean;
 }
 
 /** The 1st of `now`'s month (UTC), plus `months`. */
@@ -63,41 +59,15 @@ export const previousMonth = (now: Date) => {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
-/**
- * What is due, in fetch order. Due: an unanswered one-off lookup; a watched
- * domain not fetched successfully since the 1st of this month (every watched
- * domain comes due together at the start of a month); or a watched
- * domain still missing last month's profile (Similarweb only ever returns the
- * latest month's channels and countries, so a month not caught is lost), tried
- * every three days. Domains in backoff (next_attempt_at) wait. Order: watched
- * domains tried before but still missing last month first (that month is lost
- * once the next one is out), then never tried, then the rest; each group by
- * requester priority, then the oldest success. Only `catchUp` of the domains
- * missing last month are kept (catchUpQuota): before Similarweb has it for a
- * site, fetching it again only gets the month before.
- */
-export function dueQueue(candidates: Candidate[], now = new Date(), catchUp = Infinity) {
-  const t = now.getTime();
-  const last = previousMonth(now);
-  const reason = (c: Candidate): DueReason | null => {
-    if (c.nextAttempt > t) return null;
-    if (c.pendingSince !== null) return 'lookup';
-    if (!c.watched) return null;
-    if (c.lastSuccess < monthStart(now).getTime()) return c.lastSuccess ? 'refresh' : 'new';
-    return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
-  };
-  const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.watched && (c.latestProfile ?? '') < last ? 0 : 2);
-  let left = catchUp;
+/** Only fill domains without data that have never been attempted. No refreshes or retries. */
+export function dueQueue(candidates: Candidate[], now = new Date(), _catchUp = Infinity) {
   return candidates
-    .map((c) => ({ ...c, reason: reason(c) }))
-    .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
-    .sort(
-      (a, b) =>
-        group(a) - group(b) || a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess,
-    )
-    .filter((c) => group(c) !== 0 || left-- > 0);
+    .filter((c) => !c.lastAttempt && !c.lastSuccess && !c.hasData && !c.latestProfile && c.nextAttempt <= now.getTime())
+    .filter((c) => c.watched || c.pendingSince !== null)
+    .sort((a, b) => a.tier - b.tier || a.domain.localeCompare(b.domain))
+    .map((c) => ({ ...c, reason: (c.pendingSince !== null ? 'lookup' : 'new') as DueReason }));
 }
-/** Why a domain is due: never fetched, not yet fetched this month, last month's profile still missing, or a one-off lookup. */
+/** Queue reasons; refresh and catch-up are retained for API compatibility but currently disabled. */
 export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
 
 export const dueDomains = (candidates: Candidate[], now = new Date(), catchUp = Infinity) =>
@@ -121,9 +91,9 @@ export async function lastMonthShare(pool: Pool, now = new Date()) {
 }
 export type MonthShare = Awaited<ReturnType<typeof lastMonthShare>>;
 
-/** Domains missing last month a run may send: the budget times the share of recent answers that had it, at least PROBES. */
+/** Domains missing last month a run may send: the budget times the share of recent answers that had it, at least one (retained for status compatibility; catch-up is disabled). */
 export const catchUpQuota = (share: MonthShare, budget: number) =>
-  Math.max(PROBES, share.sampled ? Math.round((budget * share.found) / share.sampled) : 0);
+  Math.max(1, share.sampled ? Math.round((budget * share.found) / share.sampled) : 0);
 
 const time = (d: Date | null) => d?.getTime() ?? 0;
 
@@ -138,10 +108,12 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
     last_success_at: Date | null;
     next_attempt_at: Date | null;
     latest: string | null;
+    has_data: number;
   }>(
     pool,
     `SELECT w.domain, w.requester, w.kind, w.requested_at,
        s.last_attempt_at, s.last_response_at, s.last_success_at, s.next_attempt_at,
+       EXISTS (SELECT 1 FROM traffic_months m WHERE m.domain = w.domain) AS has_data,
        (SELECT MAX(month) FROM traffic_profiles p WHERE p.domain = w.domain) AS latest
      FROM watches w LEFT JOIN fetch_state s ON s.domain = w.domain`,
   );
@@ -157,6 +129,7 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
       lastSuccess: time(r.last_success_at),
       nextAttempt: time(r.next_attempt_at),
       latestProfile: r.latest,
+      hasData: Boolean(r.has_data),
     };
     c.tier = Math.min(c.tier, tier);
     if (r.kind === 'watch') c.watched = true;
@@ -286,14 +259,14 @@ export async function runOnce(
         const message = (error instanceof Error ? error.message : String(error)).slice(0, 255);
         if (isRefusal(error)) {
           await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, ?)', [domain, at, 'refused', status]);
-          // Not this domain's fault: it keeps its place and goes first after the cooldown.
+          // Keep the refusal for diagnostics; attempted domains are not retried.
           await upsertState(pool, domain, { refused_at: at, next_attempt_at: null, last_error: message });
           tally.refused = true;
           tally.note = message;
           break;
         }
         await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, ?)', [domain, at, 'error', status]);
-        await recordFailure(pool, domain, at, message);
+        await recordFailure(pool, domain, message);
         tally.failed++;
         // Repeated HTTP/network errors mean the provider is down; stop until the next run.
         if (++consecutive >= 3) {
@@ -321,7 +294,7 @@ export async function runOnce(
         // Answered without usable visits: normal for small sites.
         await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, 200)', [domain, at, 'no-data']);
         await upsertState(pool, domain, { last_response_at: at, result: JSON.stringify(summary) });
-        await recordFailure(pool, domain, at, (error instanceof Error ? error.message : String(error)).slice(0, 255));
+        await recordFailure(pool, domain, (error instanceof Error ? error.message : String(error)).slice(0, 255));
         tally.failed++;
       }
     }
@@ -341,11 +314,10 @@ export async function runOnce(
   }
 }
 
-/** Retry a day later; after three failures not until next month, when everything watched comes due again. */
-async function recordFailure(pool: Pool, domain: string, at: Date, message: string) {
-  await pool.query(
-    `UPDATE fetch_state SET failures = failures + 1, last_error = ?,
-       next_attempt_at = IF(failures >= ?, ?, ?) WHERE domain = ?`,
-    [message, MAX_FAILURES, monthStart(at, 1), new Date(at.getTime() + DAY), domain],
-  );
+/** Keep the failure for diagnostics without scheduling a retry. */
+async function recordFailure(pool: Pool, domain: string, message: string) {
+  await pool.query('UPDATE fetch_state SET failures = failures + 1, last_error = ?, next_attempt_at = NULL WHERE domain = ?', [
+    message,
+    domain,
+  ]);
 }

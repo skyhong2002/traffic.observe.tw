@@ -91,6 +91,33 @@ describe.skipIf(!url)('with a database', () => {
     expect(second.sent).toEqual(['s.com.tw']);
   });
 
+  it('only fills missing traffic once, skipping imported data and old failures across months', async () => {
+    const at = new Date('2026-10-01T00:00:00Z');
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
+      [
+        ['tag', 'imported.tw', 'watch', at],
+        ['tag', 'failed.tw', 'watch', at],
+        ['tag', 'new.tw', 'watch', at],
+      ],
+    ]);
+    await pool.query(
+      "INSERT INTO traffic_months (domain, month, visits, first_seen_at, fetched_at) VALUES ('imported.tw', '202609', 100, ?, ?)",
+      [at, at],
+    );
+    await pool.query("INSERT INTO fetch_state (domain, last_attempt_at, failures) VALUES ('failed.tw', ?, 1)", [at]);
+    const first = fakeFetch();
+    await run(pool, first.request);
+    expect(first.sent).toEqual(['new.tw']);
+    const later = fakeFetch();
+    await runOnce(pool, {
+      config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }),
+      request: later.request,
+      pauseMs: 0,
+      now: () => new Date('2027-01-01'),
+    });
+    expect(later.sent).toEqual([]);
+  });
+
   it('stops at a refusal and sends nothing during the cooldown', async () => {
     await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
@@ -1083,8 +1110,8 @@ describe.skipIf(!url)('with a database', () => {
     expect(await runRadar(pool, { token: null })).toEqual({ skipped: 'no CLOUDFLARE_RADAR_API_TOKEN' });
     expect(await go(now)).toMatchObject({ due: 3, sent: 3, ok: 3, blocked: false });
     expect(sent.sort()).toEqual(['a.com.tw', 'b.com.tw', 'c.com.tw']);
-    // Answered within 20 hours: nothing is due.
-    expect(await go(new Date(now.getTime() + 3_600_000))).toMatchObject({ due: 0, sent: 0 });
+    // Existing data is never refreshed, even months later.
+    expect(await go(new Date(now.getTime() + 90 * 86_400_000))).toMatchObject({ due: 0, sent: 0 });
     const ranks = await rows<{ domain: string; rank: number | null; bucket: number | null; bucket_lower_bound: number | null }>(
       pool,
       'SELECT domain, `rank`, bucket, bucket_lower_bound FROM radar_ranks ORDER BY domain',
@@ -1094,7 +1121,8 @@ describe.skipIf(!url)('with a database', () => {
       ['b.com.tw', '前 20,000 名'],
       ['c.com.tw', '未入前 200,000 名'],
     ]);
-    // A refusal stops the batch.
+    // A new domain is attempted once; a refusal is not retried.
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('tag', 'new.tw', 'watch', ?)", [now]);
     const refused = (async () => new Response('no', { status: 429 })) as unknown as typeof fetch;
     expect(
       await runRadar(pool, { token: 'radar-token', request: refused, now: () => new Date(now.getTime() + 86_400_000), pauseMs: 0 }),
@@ -1102,6 +1130,7 @@ describe.skipIf(!url)('with a database', () => {
       sent: 1,
       blocked: true,
     });
+    expect(await go(new Date(now.getTime() + 90 * 86_400_000))).toMatchObject({ sent: 0 });
     const server = app();
     const res = await server.inject({
       method: 'POST',
@@ -1111,7 +1140,7 @@ describe.skipIf(!url)('with a database', () => {
     });
     expect(res.json()).toMatchObject({
       scope: 'global',
-      lastRun: { blocked: true, sent: 1 },
+      lastRun: { blocked: false, sent: 0 },
       domains: { 'a.com.tw': [{ rank: 12, bucket: null, dateEnd: '2026-10-20T00:00:00.000Z' }] },
     });
     expect(Object.keys(res.json().domains)).toEqual(['a.com.tw']);
