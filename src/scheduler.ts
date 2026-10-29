@@ -187,6 +187,29 @@ export async function refusedSince(pool: Pool) {
   return r?.at ?? null;
 }
 
+/** The worker runs hourly; a gap this long means it stopped. */
+const WORKER_SILENT = 3 * 3_600_000;
+
+/**
+ * What is wrong with fetching, for /readyz and status.skyhong.tw: the worker
+ * has not run for WORKER_SILENT, or the last STALLED_RUNS runs that sent
+ * anything got no answer (refused or failed). Empty when fine or turned off.
+ */
+export async function fetchProblems(pool: Pool, config: RunConfig, now = new Date()) {
+  if (config.budget <= 0) return [];
+  const problems: string[] = [];
+  const [last] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(started_at) AS at FROM runs');
+  if (!last?.at || now.getTime() - last.at.getTime() > WORKER_SILENT)
+    problems.push(`worker has not run since ${last?.at?.toISOString() ?? 'ever'}`);
+  const recent = await rows<{ ok: number; note: string | null }>(
+    pool,
+    `SELECT ok, note FROM runs WHERE sent > 0 ORDER BY id DESC LIMIT ${STALLED_RUNS}`,
+  );
+  if (recent.length === STALLED_RUNS && recent.every((r) => !r.ok))
+    problems.push(`last ${STALLED_RUNS} Similarweb runs got no answer (${recent[0].note ?? 'failed'})`);
+  return problems;
+}
+
 /** The latest refusal, if it is still inside the cooldown. */
 export async function coolingDown(pool: Pool, config: RunConfig, now = new Date()) {
   const [r] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(refused_at) AS at FROM fetch_state');

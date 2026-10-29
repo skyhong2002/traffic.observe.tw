@@ -59,7 +59,7 @@ import {
 } from './pages.ts';
 import { lastRadarRun, loadRadar } from './radar.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
-import { runConfig } from './scheduler.ts';
+import { fetchProblems, runConfig } from './scheduler.ts';
 import { registerSeo } from './seo.ts';
 import { candidates, similarListing } from './similarsites.ts';
 import { aiShare, estimated, publicDomain, searchShare, type TrafficChannel, type TrafficProfile, taiwanShare } from './similarweb.ts';
@@ -483,6 +483,12 @@ export function buildApp(
   });
 
   app.get('/healthz', async () => ({ ok: true }));
+  // Whether Similarweb fetching works, for status.skyhong.tw: 503 with the problems when it does not.
+  app.get('/readyz', async (_request, reply) => {
+    const problems = await fetchProblems(pool, config);
+    reply.header('cache-control', 'no-store').code(problems.length ? 503 : 200);
+    return problems.length ? { status: 'not_ready', problems } : { status: 'ready' };
+  });
   // The public API and icons are read-only, so any site may call them from a browser.
   app.addHook('onSend', async (request, reply, payload) => {
     if (request.url.startsWith('/api/v1/') || request.url.startsWith('/icon/')) reply.header('access-control-allow-origin', '*');

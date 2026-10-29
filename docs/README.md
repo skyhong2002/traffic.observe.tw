@@ -26,6 +26,7 @@
 ## 抓取規則（`src/scheduler.ts`）
 
 - 每輪最多 `TRAFFIC_RUN_BUDGET` 筆，間隔 3 秒，最長 5 分鐘。**預設 0，也就是完全不送**：tag 還在自己打 Similarweb 的期間必須維持 0。
+- `/readyz`：抓取正常回 200 `{"status":"ready"}`；worker 超過 3 小時沒有執行，或最近三輪有送出的都沒有任何回應（被拒或失敗）時回 503，並列出問題。`TRAFFIC_RUN_BUDGET=0` 時一律算正常。status.skyhong.tw 用它監控（目標 `site-observe-fetch`）。Similarweb extension 6.12.26（2026-10-28）起，請求要帶 `X-Sw-Ctx`（裝置 ID 加上「ID:UTC 日期」的 HMAC-SHA256），沒有帶的請求很快就會收到 429 `{"exceeded":true,"userState":"anonymous"}`；裝置 ID 固定放在 `TRAFFIC_SIMILARWEB_DEVICE_ID`。
 - 任何 401／403／429：整輪立刻停，之後 `TRAFFIC_REFUSAL_COOLDOWN_MINUTES`（預設 50）分鐘內都不送，那個網域保留原本的順位。連續三次 HTTP 或網路錯誤也會停。
 - 用 MariaDB 的 `GET_LOCK('traffic-similarweb')` 保證同一時間只有一輪在跑。
 - 哪些網域到期：

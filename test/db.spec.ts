@@ -7,7 +7,7 @@ import { editSites, managedSites } from '../src/metadata.ts';
 import { monthView, ranking, topicSummary } from '../src/metrics.ts';
 import { radarLabel } from '../src/pages.ts';
 import { runRadar } from '../src/radar.ts';
-import { lastMonthShare, refusedSince, runConfig, runOnce } from '../src/scheduler.ts';
+import { fetchProblems, lastMonthShare, refusedSince, runConfig, runOnce } from '../src/scheduler.ts';
 import { saveSheet } from '../src/sheet.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
@@ -119,6 +119,32 @@ describe.skipIf(!url)('with a database', () => {
     expect(await refusedSince(pool)).toEqual(at(2));
     await insert(6, 3, 3, 0);
     expect(await refusedSince(pool)).toBeNull();
+  });
+
+  it('reports a silent worker or runs without answers for /readyz', async () => {
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '15' });
+    const now = new Date(Date.UTC(2026, 9, 28, 6, 0));
+    const at = (h: number) => new Date(Date.UTC(2026, 9, 28, h, 35));
+    const insert = (h: number, ok: number, note: string | null = null) =>
+      pool.query('INSERT INTO runs (started_at, budget, sent, ok, refused, note) VALUES (?, 15, 1, ?, ?, ?)', [
+        at(h),
+        ok,
+        ok ? 0 : 1,
+        note,
+      ]);
+    expect(await fetchProblems(pool, config, now)).toEqual(['worker has not run since ever']);
+    expect(await fetchProblems(pool, runConfig({}), now)).toEqual([]);
+    await insert(1, 0, 'Similarweb HTTP 429');
+    await insert(2, 0, 'Similarweb HTTP 429');
+    expect(await fetchProblems(pool, config, now)).toEqual(['worker has not run since 2026-10-28T02:35:00.000Z']);
+    await insert(3, 0, 'Similarweb HTTP 429');
+    expect(await fetchProblems(pool, config, now)).toEqual(['last 3 Similarweb runs got no answer (Similarweb HTTP 429)']);
+    await insert(4, 15);
+    expect(await fetchProblems(pool, config, now)).toEqual([]);
+    await pool.query('INSERT INTO runs (started_at, budget, sent, ok) VALUES (?, 15, 0, 0)', [new Date()]);
+    const app = buildApp(pool, { config, logger: false });
+    const ready = await app.inject({ url: '/readyz', headers: { host: 'site.observe.tw' } });
+    expect([ready.statusCode, ready.json()]).toEqual([200, { status: 'ready' }]);
   });
 
   it('sends nothing with budget 0', async () => {
