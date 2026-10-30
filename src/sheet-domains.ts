@@ -191,3 +191,9 @@ export const SHEET_DOMAINS: Record<string, string> = {
   '阿青 achingfoodie': 'achingfoodie.tw',
   'Ken&Alice': 'kenalice.tw',
 };
+
+// Misspelled domains in the sheet's own 網址 cells, corrected to the site's
+// real domain. The sheet stays read-only, so the fix lives here.
+export const SHEET_DOMAIN_TYPOS: Record<string, string> = {
+  'yunghching.com.tw': 'yungching.com.tw', // 永慶, 202608–202609
+};

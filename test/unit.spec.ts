@@ -310,6 +310,34 @@ describe('readWorkbook', () => {
     ]);
   });
 
+  it('corrects misspelled domains in the 網址 cells, and the months that borrow them', async () => {
+    const wb = new ExcelJS.Workbook();
+    for (const [month, rows] of [
+      [
+        '202607',
+        [
+          [null, null, '名次', '網站名', '網址', '流量'],
+          [null, null, null, '永慶', null, 1],
+        ],
+      ],
+      [
+        '202608',
+        [
+          [null, null, '名次', '網站名', '網址', '流量'],
+          [null, null, null, '永慶', 'http://yunghching.com.tw/', 1],
+        ],
+      ],
+    ] as const) {
+      const ws = wb.addWorksheet(month);
+      for (const r of rows) ws.addRow([...r]);
+    }
+    const rows = await readWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
+    expect(rows.map((r) => [r.month, r.url, r.domain])).toEqual([
+      ['202607', null, 'yungching.com.tw'],
+      ['202608', 'http://yunghching.com.tw/', 'yungching.com.tw'],
+    ]);
+  });
+
   it('fills the blank 網址 cells of the latest tab, which win over the hand list and can opt a name out', async () => {
     const wb = new ExcelJS.Workbook();
     for (const [month, rows] of [

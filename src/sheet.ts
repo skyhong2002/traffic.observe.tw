@@ -1,6 +1,6 @@
 import ExcelJS from 'exceljs';
 import { chunk, type Pool } from './db.ts';
-import { SHEET_DOMAINS } from './sheet-domains.ts';
+import { SHEET_DOMAIN_TYPOS, SHEET_DOMAINS } from './sheet-domains.ts';
 import { trafficDomain } from './similarweb.ts';
 
 // Reads GeneHong's「Similar Web 新聞」sheet (one tab per YYYYMM) as it is: the
@@ -108,10 +108,11 @@ export function readMonthTab(ws: ExcelJS.Worksheet, month: string): SheetRow[] {
     if (!rawName) return;
     const urlCell = urlCol ? row.getCell(urlCol) : null;
     const url = urlCell?.hyperlink || text(urlCell ?? nameCell) || nameCell.hyperlink || null;
-    const domain =
+    const written =
       (urlCell && (trafficDomain(urlCell.hyperlink ?? '') || trafficDomain(text(urlCell) ?? ''))) ||
       (nameCell.hyperlink ? trafficDomain(nameCell.hyperlink) : null) ||
       nameDomain(rawName);
+    const domain = written ? (SHEET_DOMAIN_TYPOS[written] ?? written) : null;
     const visitsCell = visitsCol ? row.getCell(visitsCol) : null;
     const visits = visitsCell ? number(visitsCell) : null;
     const first = text(row.getCell(1));
