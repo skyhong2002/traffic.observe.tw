@@ -310,7 +310,7 @@ describe('readWorkbook', () => {
     ]);
   });
 
-  it('corrects misspelled domains in the 網址 cells, and the months that borrow them', async () => {
+  it('corrects misspelled domains in the 網址 cells and the domain sheet', async () => {
     const wb = new ExcelJS.Workbook();
     for (const [month, rows] of [
       [
@@ -331,11 +331,15 @@ describe('readWorkbook', () => {
       const ws = wb.addWorksheet(month);
       for (const r of rows) ws.addRow([...r]);
     }
-    const rows = await readWorkbook((await wb.xlsx.writeBuffer()) as ArrayBuffer);
-    expect(rows.map((r) => [r.month, r.url, r.domain])).toEqual([
+    const source = (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+    const expected = [
       ['202607', null, 'yungching.com.tw'],
       ['202608', 'http://yunghching.com.tw/', 'yungching.com.tw'],
-    ]);
+    ];
+    expect((await readWorkbook(source)).map((r) => [r.month, r.url, r.domain])).toEqual(expected);
+    // The domain sheet copied the typo too.
+    const domains = new Map([['永慶', 'yunghching.com.tw']]);
+    expect((await readWorkbook(source, domains)).map((r) => [r.month, r.url, r.domain])).toEqual(expected);
   });
 
   it('fills the blank 網址 cells of the latest tab, which win over the hand list and can opt a name out', async () => {

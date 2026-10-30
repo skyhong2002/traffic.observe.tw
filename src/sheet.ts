@@ -163,6 +163,8 @@ export async function readWorkbook(buffer: ArrayBuffer, domains = new Map<string
   const byName = new Map<string, string>();
   for (const r of [...rows].sort((a, b) => a.month.localeCompare(b.month))) if (r.domain) byName.set(r.name, r.domain);
   for (const r of rows) if (domains.get(r.name) !== null) r.domain ??= byName.get(r.name) ?? null;
+  // The domain sheet copied the tab's URLs, typos included.
+  for (const r of rows) if (r.domain) r.domain = SHEET_DOMAIN_TYPOS[r.domain] ?? r.domain;
   return rows;
 }
 
