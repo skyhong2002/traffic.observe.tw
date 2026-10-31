@@ -91,31 +91,22 @@ describe.skipIf(!url)('with a database', () => {
     expect(second.sent).toEqual(['s.com.tw']);
   });
 
-  it('only fills missing traffic once, skipping imported data and old failures across months', async () => {
-    const at = new Date('2026-10-01T00:00:00Z');
-    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
-      [
-        ['tag', 'imported.tw', 'watch', at],
-        ['tag', 'failed.tw', 'watch', at],
-        ['tag', 'new.tw', 'watch', at],
-      ],
+  it('fetches a watched domain again once a month, starting on the 1st', async () => {
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('tag', 'monthly.tw', 'watch', ?)", [
+      new Date('2026-10-01T00:00:00Z'),
     ]);
-    await pool.query(
-      "INSERT INTO traffic_months (domain, month, visits, first_seen_at, fetched_at) VALUES ('imported.tw', '202609', 100, ?, ?)",
-      [at, at],
-    );
-    await pool.query("INSERT INTO fetch_state (domain, last_attempt_at, failures) VALUES ('failed.tw', ?, 1)", [at]);
-    const first = fakeFetch();
-    await run(pool, first.request);
-    expect(first.sent).toEqual(['new.tw']);
-    const later = fakeFetch();
-    await runOnce(pool, {
-      config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }),
-      request: later.request,
-      pauseMs: 0,
-      now: () => new Date('2027-01-01'),
-    });
-    expect(later.sent).toEqual([]);
+    const at = (iso: string) => {
+      const fake = fakeFetch();
+      return runOnce(pool, {
+        config: runConfig({ TRAFFIC_RUN_BUDGET: '5' }),
+        request: fake.request,
+        pauseMs: 0,
+        now: () => new Date(iso),
+      }).then(() => fake.sent);
+    };
+    expect(await at('2026-10-15T10:00:00Z')).toEqual(['monthly.tw']);
+    expect(await at('2026-10-31T10:00:00Z')).toEqual([]);
+    expect(await at('2026-11-01T01:00:00Z')).toEqual(['monthly.tw']);
   });
 
   it('stops at a refusal and sends nothing during the cooldown', async () => {

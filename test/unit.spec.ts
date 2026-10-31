@@ -28,7 +28,7 @@ const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => 
 });
 
 describe('dueDomains', () => {
-  it('only fills never-attempted domains in requester priority order', () => {
+  it('orders missing last month first, then never tried, each group by requester priority, then the oldest success', () => {
     const t = now.getTime();
     const month = previousMonth(now);
     const due = dueDomains(
@@ -47,7 +47,7 @@ describe('dueDomains', () => {
       ],
       now,
     );
-    expect(due).toEqual(['tag-new.tw', 'blog.tw', 'sheet-new.tw']);
+    expect(due).toEqual(['sheet-behind.tw', 'tag-new.tw', 'blog.tw', 'sheet-new.tw', 'tag-old.tw', 'sheet-old.tw']);
   });
 
   it('skips fresh domains, backoffs and answered one-off lookups', () => {
@@ -65,7 +65,7 @@ describe('dueDomains', () => {
     expect(due).toEqual([]);
   });
 
-  it('does not refresh watched domains at the start of a month', () => {
+  it('brings every watched domain due together on the 1st of the month', () => {
     const first = new Date('2026-11-01T00:35:00Z');
     const t = first.getTime();
     const late = { lastSuccess: t - DAY, lastAttempt: t - DAY, latestProfile: previousMonth(now) };
@@ -73,25 +73,15 @@ describe('dueDomains', () => {
       [candidate('a.tw', late), candidate('b.tw', { ...late, lastSuccess: t - 25 * DAY, lastAttempt: t - 25 * DAY, tier: 1 })],
       first,
     );
-    expect(due).toEqual([]);
+    expect(due).toEqual(['a.tw', 'b.tw']);
   });
 
-  it('skips existing data regardless of catch-up quota', () => {
+  it('keeps only the catch-up quota of the domains missing last month', () => {
     const t = now.getTime();
     const behind = { lastSuccess: t - 5 * DAY, lastAttempt: t - 5 * DAY, latestProfile: '202608' };
     const list = [candidate('a.tw', behind), candidate('b.tw', behind), candidate('new.tw', { tier: 1 })];
-    expect(dueDomains(list, now, 1)).toEqual(['new.tw']);
-    expect(dueDomains(list, now)).toEqual(['new.tw']);
-  });
-
-  it('skips failures, no-data answers and imported data even months later', () => {
-    const candidates = [
-      candidate('failed.tw', { lastAttempt: now.getTime() }),
-      candidate('imported.tw', { hasData: true }),
-      candidate('profile.tw', { latestProfile: '202609' }),
-      candidate('new.tw'),
-    ];
-    expect(dueDomains(candidates, new Date('2027-01-01'))).toEqual(['new.tw']);
+    expect(dueDomains(list, now, 1)).toEqual(['a.tw', 'new.tw']);
+    expect(dueDomains(list, now)).toEqual(['a.tw', 'b.tw', 'new.tw']);
   });
 
   it('scales the catch-up quota with how many recent answers had last month', () => {
@@ -102,11 +92,11 @@ describe('dueDomains', () => {
     expect(catchUpQuota(share(30, 30), 15)).toBe(15);
   });
 
-  it('does not retry a domain still missing last month', () => {
+  it('retries a watched domain still missing last month every three days', () => {
     const t = now.getTime();
     const base = { lastSuccess: t - 2 * DAY, latestProfile: '202608' };
     expect(dueDomains([candidate('a.tw', { ...base, lastAttempt: t - 2 * DAY })], now)).toEqual([]);
-    expect(dueDomains([candidate('a.tw', { ...base, lastAttempt: t - 4 * DAY })], now)).toEqual([]);
+    expect(dueDomains([candidate('a.tw', { ...base, lastAttempt: t - 4 * DAY })], now)).toEqual(['a.tw']);
   });
 
   it('puts every due domain in an hourly batch, budget at a time, from the next :35', () => {
@@ -125,6 +115,7 @@ describe('dueDomains', () => {
     expect(queue.map((e) => [e.domain, e.position, e.reason, e.requester, e.expectedAt])).toEqual([
       ['a.tw', 1, 'new', 'tag', '2026-10-21T10:35:00.000Z'],
       ['b.tw', 2, 'new', 'tag', '2026-10-21T10:35:00.000Z'],
+      ['c.tw', 3, 'refresh', 'tag', '2026-10-21T11:35:00.000Z'],
     ]);
     const cooling = new Date('2026-10-21T10:50:00Z');
     expect(fetchQueue([candidate('a.tw')], config, cooling, now)[0].expectedAt).toBe('2026-10-21T11:35:00.000Z');
