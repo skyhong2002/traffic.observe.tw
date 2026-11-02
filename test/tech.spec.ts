@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { detect, PRODUCTS, safeSourceUrl, WAPPALYZER_NAMES } from '../src/tech.ts';
-import { type Hop, homepageFetcher, isPublicAddress, ScanFailure, scanDomain } from '../src/tech-scan.ts';
+import { cookieJar, type Hop, homepageFetcher, isPublicAddress, ScanFailure, scanDomain } from '../src/tech-scan.ts';
 import { compileVocabulary, loadRules, MATCH_BUDGET_MS, matchInputOf, matchTech, readPin, rulesDirectory } from '../src/wappalyzer.ts';
 
 // Rules in the Wappalyzer format, written for these tests.
@@ -113,6 +113,38 @@ describe('fetching a homepage', () => {
     const o = await scanDomain('a.example', rules, homepageFetcher(get), at);
     expect(o).toMatchObject({ status: 'detected', sourceUrl: 'https://www.a.example/home', httpStatus: 200 });
     expect(seen).toEqual(['https://a.example/', 'https://www.a.example/home?x=1']);
+  });
+  it('sends cookies set during the redirect chain back on later hops', async () => {
+    const cookies: (string | undefined)[] = [];
+    const get = async (url: URL, _max: number, cookie?: string): Promise<Hop> => {
+      cookies.push(cookie);
+      const html = { 'content-type': 'text/html' };
+      if (url.href === 'https://h.example/')
+        return { status: 302, headers: { location: 'https://www.h.example/' }, body: Buffer.alloc(0), truncated: false };
+      if (url.href === 'https://www.h.example/' && !cookie?.includes('gate=1'))
+        return {
+          status: 302,
+          headers: {
+            location: 'https://www.h.example/',
+            'set-cookie': ['gate=1; Domain=.h.example; Secure; HttpOnly', 'other=x; Domain=elsewhere.example'],
+          },
+          body: Buffer.alloc(0),
+          truncated: false,
+        };
+      if (url.href === 'https://www.h.example/')
+        return { status: 200, headers: html, body: Buffer.from('<meta name="generator" content="Hugo 0.1">'), truncated: false };
+      throw new ScanFailure('network');
+    };
+    expect(await scanDomain('h.example', rules, homepageFetcher(get), at)).toMatchObject({ status: 'detected' });
+    expect(cookies).toEqual([undefined, undefined, 'gate=1']);
+  });
+  it('keeps host-only and Secure cookies to where they belong', () => {
+    const jar = cookieJar();
+    jar.store(new URL('https://a.example/'), ['host=1', 'secure=1; Secure', 'wide=1; Domain=a.example']);
+    expect(jar.header(new URL('https://a.example/'))).toBe('host=1; secure=1; wide=1');
+    expect(jar.header(new URL('http://a.example/'))).toBe('host=1; wide=1');
+    expect(jar.header(new URL('https://www.a.example/'))).toBe('wide=1');
+    expect(jar.header(new URL('https://b.example/'))).toBeUndefined();
   });
   it('tries www when the bare domain does not resolve', async () => {
     const { get, seen } = net({ 'https://www.g.example/': { body: '<meta name="generator" content="Hugo 0.1">' } });

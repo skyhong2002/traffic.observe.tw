@@ -95,7 +95,59 @@ function publicLookup(
 }
 
 export type Hop = { status: number; headers: http.IncomingHttpHeaders; body: Buffer; truncated: boolean };
-export type HopGet = (url: URL, maxBytes: number) => Promise<Hop>;
+/** One GET; `cookie` is the Cookie header the redirect chain has collected so far. */
+export type HopGet = (url: URL, maxBytes: number, cookie?: string) => Promise<Hop>;
+
+type Cookie = { name: string; value: string; domain: string; hostOnly: boolean; secure: boolean };
+
+/**
+ * The cookies one homepage's redirect chain sets, sent back on later hops. Sites such as sogo.com.tw and
+ * shoppingdesign.com.tw set a cookie and redirect to themselves, looping until it comes back. Paths and expiry are
+ * ignored: the jar lives for one domain's attempt only.
+ */
+export function cookieJar() {
+  const cookies: Cookie[] = [];
+  const matches = (c: Cookie, host: string) => (c.hostOnly ? host === c.domain : host === c.domain || host.endsWith(`.${c.domain}`));
+  return {
+    store(url: URL, header: string | string[] | undefined) {
+      const host = url.hostname.toLowerCase();
+      for (const line of header === undefined ? [] : Array.isArray(header) ? header : [header]) {
+        const [pair, ...attributes] = line.split(';');
+        const eq = pair.indexOf('=');
+        if (eq <= 0) continue;
+        const name = pair.slice(0, eq).trim();
+        const value = pair.slice(eq + 1).trim();
+        let domain = host;
+        let hostOnly = true;
+        let secure = false;
+        for (const attribute of attributes) {
+          const [key, ...rest] = attribute.split('=');
+          const k = key.trim().toLowerCase();
+          if (k === 'secure') secure = true;
+          else if (k === 'domain') {
+            const d = rest.join('=').trim().replace(/^\./, '').toLowerCase();
+            // A Domain the host is not inside is refused, as a browser does.
+            if (!d || (host !== d && !host.endsWith(`.${d}`))) {
+              domain = '';
+              break;
+            }
+            domain = d;
+            hostOnly = false;
+          }
+        }
+        if (!domain) continue;
+        const at = cookies.findIndex((c) => c.name === name && c.domain === domain && c.hostOnly === hostOnly);
+        if (at >= 0) cookies.splice(at, 1);
+        cookies.push({ name, value, domain, hostOnly, secure });
+      }
+    },
+    header(url: URL) {
+      const host = url.hostname.toLowerCase();
+      const sent = cookies.filter((c) => matches(c, host) && (!c.secure || url.protocol === 'https:'));
+      return sent.length ? sent.map((c) => `${c.name}=${c.value}`).join('; ') : undefined;
+    },
+  };
+}
 
 const decoderFor = (encoding: string | undefined): zlib.Gunzip | zlib.Inflate | zlib.BrotliDecompress | null =>
   encoding === 'gzip' || encoding === 'x-gzip'
@@ -107,7 +159,7 @@ const decoderFor = (encoding: string | undefined): zlib.Gunzip | zlib.Inflate | 
         : null;
 
 /** One GET without following redirects: the status, headers and at most maxBytes of the (decoded) body. */
-export const httpGet: HopGet = (url, maxBytes) =>
+export const httpGet: HopGet = (url, maxBytes, cookie) =>
   new Promise((resolve, reject) => {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port) return reject(new ScanFailure('address'));
     if (isIP(url.hostname.replace(/^\[|\]$/g, '')) && !isPublicAddress(url.hostname.replace(/^\[|\]$/g, '')))
@@ -129,7 +181,14 @@ export const httpGet: HopGet = (url, maxBytes) =>
       agent: false,
       // Some sites (hk.finance.yahoo.com) send more than Node's default 16 KiB of headers.
       maxHeaderSize: 64 * 1024,
+      // Node gives each address 250 ms before trying the next; a distant IPv4 host with an unreachable IPv6 address
+      // (456bereastreet.com) then fails although it answers within a second.
+      ...({ autoSelectFamilyAttemptTimeout: 2_500 } as object),
+      // Old servers still offer 1024-bit DH (noble.com.tw); browsers accept it, OpenSSL's default level 2 does not.
+      // Only a public homepage is read, so the weaker handshake risks nothing we send.
+      ciphers: 'DEFAULT@SECLEVEL=1',
       headers: {
+        ...(cookie ? { cookie } : {}),
         'user-agent': USER_AGENT,
         accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.5',
         'accept-language': 'zh-TW,zh;q=0.9,en;q=0.5',
@@ -207,8 +266,10 @@ export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
   return async (domain) => {
     const follow = async (start: URL): Promise<Page> => {
       let url = start;
+      const jar = cookieJar();
       for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-        const response = await get(url, MAX_HTML);
+        const response = await get(url, MAX_HTML, jar.header(url));
+        jar.store(url, response.headers['set-cookie']);
         const location = response.headers.location;
         if (response.status >= 300 && response.status < 400 && location) {
           url = new URL(location, url);
