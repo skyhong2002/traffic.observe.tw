@@ -1,5 +1,7 @@
 import { type ManualMonth, manualChannels, manualDetailFields, manualDetailValues, proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals } from './manual-breakdowns.ts';
+import { MANUAL_FORM_SCRIPT } from './manual-form-script.ts';
+import { OCR_IMPORTER } from './manual-ocr.ts';
 import type { ManagedSite } from './metadata.ts';
 import { displayHtml, favicon, html, layout, siteTabs, vol, volText } from './pages.ts';
 
@@ -11,6 +13,9 @@ export interface ManualForm {
   free: Array<{ month: string; estimated: boolean }>;
   message?: string;
   error?: string;
+  errorFields?: string[];
+  selectedMonth?: string;
+  completedMonth?: string;
   draft?: Record<string, string | undefined>;
 }
 
@@ -142,13 +147,15 @@ ${tagInput('topics', '標籤', draft?.topics ?? site.baseTopics.join(', '), '點
 export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: ManualForm) {
   const d = form.draft ?? {};
   const byMonth = new Map(form.months.map((m) => [m.month, m]));
-  const month = d.month && form.choices.includes(d.month) ? d.month : form.choices[0];
+  const selected = d.month ?? form.selectedMonth;
+  const month = selected && form.choices.includes(selected) ? selected : form.choices[0];
+  const invalid = (key: string) => (form.errorFields?.includes(key) ? ' aria-invalid="true" aria-describedby="manual-error"' : '');
   // A month already entered starts filled in, so correcting it is just editing the numbers.
   const saved = byMonth.get(month);
   const detailValues = manualDetailValues(saved);
   const value = (key: keyof NonNullable<ManualForm['draft']>, fromSaved: string) => html(form.draft ? (d[key] ?? '') : fromSaved);
   const field = (key: string, label: string, where: string, placeholder: string, fromSaved: string, unit = '') =>
-    `<div class="field"><label for="manual-${key}">${label}</label><span class="input-unit"><input id="manual-${key}" name="${key}" value="${value(key, fromSaved)}" placeholder="${placeholder}" inputmode="${['countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
+    `<div class="field"><label for="manual-${key}">${label}</label><span class="input-unit"><input id="manual-${key}" name="${key}"${invalid(key)} value="${value(key, fromSaved)}" placeholder="${placeholder}" inputmode="${['visits', 'countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
   const free = form.free.length
     ? form.free.map((f) => `${monthLabel(f.month)} ${f.estimated ? '有估算' : '<b>無估算</b>'}`).join('・')
     : '還沒有向 Similarweb 抓過';
@@ -173,13 +180,23 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
   return layout(
     `人工補登・${site.name}`,
     siteHead(site, 'manual'),
-    `${flash(form.error, form.message)}
+    `${form.error ? `<p class="flash" id="manual-error" role="alert" tabindex="-1"><b>尚未儲存。</b>${html(form.error)} 已填內容仍保留，請修正後再按儲存。${(form.errorFields ?? []).map((key) => `<a href="#manual-${html(key)}">前往欄位</a>`).join('　')}</p>` : flash(undefined, form.message)}
 <p class="callout manual-status${needed ? ' warn' : ''}"><b>Similarweb 免費資料</b>　${free}${needed ? '。沒有估算的月份可以從 Similarweb 平台抄數字補上。' : '。免費資料有估算的月份仍優先使用免費資料。'}</p>
 <section class="block"><h2>補登一個月份</h2>
 <ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol>
-<form class="form manual-form" method="post" action="/site/${html(site.domain)}/manual/">
+<section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
+<h3 id="manual-import-heading">從截圖填入</h3>
+<p class="note">選擇同一網站、同一月份的 Similarweb 英文版截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器。先核對結果，再選擇要填入的欄位。</p>
+<label for="manual-screenshots">選擇截圖</label><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple>
+<button type="button" data-recognize>辨識截圖</button>
+<p role="status" aria-live="polite" data-progress></p><div data-review></div>
+<noscript><p>截圖辨識需要啟用 JavaScript，仍可使用下方表單手動補登。</p></noscript>
+</section>
+<form class="form manual-form" method="post" action="/site/${html(site.domain)}/manual/" data-has-error="${Boolean(form.error)}" data-completed-month="${html(form.completedMonth ?? '')}">
+<p id="manual-draft-status" role="status" aria-live="polite" class="note"></p>
+<p class="note">只需填月份與月造訪量即可儲存；其他欄位可留空，之後再補。</p>
 <div class="field-grid manual-basics">
-<div class="field"><label for="manual-month">月份</label><select id="manual-month" name="month">${form.choices
+<div class="field"><label for="manual-month">月份</label><select id="manual-month" name="month"${invalid('month')}>${form.choices
       .map(
         (m) =>
           `<option value="${m}"${m === month ? ' selected' : ''}${savedData(m)}>${monthLabel(m)}${byMonth.has(m) ? '（已補登）' : ''}</option>`,
@@ -188,35 +205,26 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 ${field('visits', '月造訪量', 'Traffic &amp; engagement → Total visits', '60.10M', saved ? millions(saved.visits) : '')}
 ${field('taiwan', '台灣', 'Geography → Taiwan', '61.57', saved ? percentInput(saved.taiwanShare) : '', '%')}
 </div>
-<h3>流量來源占比</h3><div class="field-grid">
+<h3>流量來源占比（選填）</h3><div class="field-grid">
 ${field('search', '自然搜尋', 'Marketing channels → Org. Search', '36.45', saved ? percentInput(saved.searchShare) : '', '%')}
 ${field('ai', 'Gen AI', 'Marketing channels → Gen AI', '0.37', saved ? percentInput(saved.aiShare) : '', '%')}
 ${manualChannels.map(([key, label]) => field(key, label, 'Marketing channels → ' + label, '0.00', percentInput(saved?.channels[key] ?? null), '%')).join('')}
 </div>
-<h3>互動與排名</h3><div class="field-grid">${manualDetailFields.map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit)).join('')}</div>
-<div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries" rows="5" placeholder="TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
+<h3>互動與排名（選填）</h3><div class="field-grid">${manualDetailFields.map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit)).join('')}</div>
+<div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
 <details class="manual-breakdowns"${form.error ? ' open' : ''}><summary>平台詳細分布（選填）</summary>
 <p class="note">請確認各表使用相同月份、Worldwide 與 All traffic 範圍。各表的占比分母不同。每行填「名稱 | 占比 | 變化」，變化可省略；名稱未提供時填 ?。保留平台的 &lt;0.01%、&gt;5000%、New，不自行換算。</p>
 <div class="field-grid manual-basics">${breakdownTotals.map(([key, label]) => field(key, label, key === 'socialTotal' ? '占全站造訪；不等同自然社群' : '占全站造訪', '<0.01%', detailValues[key] ?? '')).join('')}</div>
-<div class="manual-detail-grid">${breakdownFields.map(([key, label, hint]) => `<div class="field"><label for="manual-${key}">${html(label)}</label><textarea id="manual-${key}" name="${key}" rows="3" maxlength="20000" placeholder="${html(hint.split('；')[0])}">${value(key, detailValues[key] ?? '')}</textarea><small>${html(hint)}</small></div>`).join('')}</div>
+<div class="manual-detail-grid">${breakdownFields.map(([key, label, hint]) => `<div class="field"><label for="manual-${key}">${html(label)}</label><textarea id="manual-${key}" name="${key}"${invalid(key)} rows="3" maxlength="20000" placeholder="${html(hint.split('；')[0])}">${value(key, detailValues[key] ?? '')}</textarea><small>${html(hint)}</small></div>`).join('')}</div>
 </details>
-<div class="form-actions"><button type="submit" class="primary">儲存</button><span class="note">造訪量可直接貼平台的寫法（60.10M、950K）；占比不知道可以留空。同一月份再存一次會覆蓋。</span></div>
+<div class="form-actions"><button type="submit" class="primary">儲存</button><button type="button" id="manual-discard" class="quiet" hidden>放棄此月份草稿</button><span class="note">造訪量可直接貼平台的寫法（60.10M、950K）；占比不知道可以留空。同一月份再存一次會覆蓋。</span></div>
 </form></section>
 <section class="block"><h2>已補登的月份</h2>${
       rows
         ? `<div class="scroll"><table data-sortable><thead><tr><th class="l" aria-sort="descending">月份</th><th class="num">月造訪量</th><th class="num">自然搜尋</th><th class="num">Gen AI</th><th class="num">台灣</th>${manualChannels.map(([, label]) => `<th class="num">${html(label)}</th>`).join('')}<th class="l">補登者</th><th data-nosort><span class="sr-only">操作</span></th></tr></thead><tbody>${rows}</tbody></table></div>`
         : '<p class="note">還沒有補登的月份。</p>'
     }</section>
-<script>
-(() => {
-  // Choosing a month already entered fills in its numbers; a new month starts empty.
-  const month = document.getElementById('manual-month');
-  month.addEventListener('change', () => {
-    const o = month.selectedOptions[0];
-    for (const key of ['visits', 'search', 'ai', 'taiwan', ${[...manualChannels.map(([key]) => key), ...manualDetailFields.map(([key]) => key), ...breakdownTotals.map(([key]) => key), ...breakdownFields.map(([key]) => key), 'countries'].map((key) => JSON.stringify(key)).join(', ')}]) document.getElementById('manual-' + key).value = o.dataset[key.toLowerCase()] ?? '';
-  });
-})();
-</script>`,
+${MANUAL_FORM_SCRIPT}<script type="module" src="${OCR_IMPORTER}"></script>`,
     { nav: 'sites' },
   );
 }

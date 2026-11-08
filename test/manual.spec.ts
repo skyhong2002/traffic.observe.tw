@@ -1,7 +1,34 @@
 import { describe, expect, it } from 'vitest';
-import { manualProfile, parseManualDetails } from '../src/manual.ts';
+import { manualProfile, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
+import { ManualInputError } from '../src/manual-input.ts';
 
 describe('manual Similarweb details', () => {
+  it('accepts copied full-width numbers, rank prefixes and both platform time formats', () => {
+    expect(parseVisits('６０．１０Ｍ')).toBe(60_100_000);
+    expect(parseShare('３６．４５％', '自然搜尋', 'search')).toBeCloseTo(0.3645);
+    expect(parseManualDetails({ duration: '２：０５', globalRank: '#1,234' })).toMatchObject({
+      timeOnSite: 125,
+      globalRank: 1234,
+    });
+    expect(parseManualDetails({ duration: '01:02:05' }).timeOnSite).toBe(3725);
+    expect(parseManualDetails({ duration: '00:00' }).timeOnSite).toBe(0);
+  });
+  it('treats missing platform values as unknown and keeps bounded shares out of exact metrics', () => {
+    expect(parseShare('—', '搜尋')).toBeNull();
+    expect(parseManualDetails({ duration: 'N/A', pages: '—', bounce: '-' })).toMatchObject({
+      timeOnSite: null,
+      pagesPerVisit: null,
+      bounceRate: null,
+    });
+    expect(() => parseShare('<0.01%', '搜尋', 'search')).toThrow(ManualInputError);
+    try {
+      parseShare('<0.01%', '搜尋', 'search');
+    } catch (error) {
+      expect(error).toMatchObject({ fields: ['search'] });
+    }
+    expect(() => parseManualDetails({ duration: '2:60' })).toThrow(ManualInputError);
+    expect(() => parseVisits('60.1')).toThrow(ManualInputError);
+  });
   it('keeps unentered values unknown, explicit zeros, and all supplied countries', () => {
     expect(parseManualDetails({})).toMatchObject({ bounceRate: null, timeOnSite: null, countries: [], globalRank: null });
     expect(parseManualDetails({ bounce: '0', duration: '0', countries: 'TW 60\nUS 0', taiwan: '60' })).toMatchObject({

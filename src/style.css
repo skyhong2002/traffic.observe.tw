@@ -2628,3 +2628,33 @@ a.tag:hover,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+/* Screenshot import is reviewed separately before it changes the manual form. */
+.manual-import {
+  margin: 24px 0;
+  padding: 16px 0;
+  border-block: 1px solid var(--line, #30343b);
+}
+.manual-import input[type="file"] {
+  display: block;
+  max-width: 100%;
+  margin: 10px 0;
+}
+.manual-import [data-review] > * {
+  margin-block: 12px;
+}
+.manual-import [data-review] > label {
+  display: block;
+}
+.manual-import [data-review] th,
+.manual-import [data-review] td {
+  white-space: normal;
+  min-width: 90px;
+}
+.manual-import [data-review] th:first-child,
+.manual-import [data-review] td:first-child {
+  min-width: 40px;
+}
+.manual-import .ocr-value {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}

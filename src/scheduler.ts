@@ -1,11 +1,12 @@
 import { type Pool, rows } from './db.ts';
+import { fetchPolicy, policyNote } from './fetch-policy.ts';
 import { fetchSummary, isRefusal, parseDomainTraffic, requestSimilarweb, TrafficFetchError } from './similarweb.ts';
 import { saveTraffic } from './store.ts';
 
 // The one place that sends requests to data.similarweb.com. This machine has
-// one IP and Similarweb refuses after ~20 requests in a burst (403, lifts after
-// ~11 minutes), so each hourly run sends at most `budget` requests, 3 s apart,
-// highest-priority domains first, and stops at the first 401/403/429.
+// one IP. Every run shares an optional weekly budget, sends requests 3 s apart,
+// and stops at the first 401/403/429. While last month's profile is unavailable,
+// probe at most once per day instead of spending the week's allowance hourly.
 
 const DAY = 86_400_000;
 /** A domain being fetched is held this long, so two runs never send it twice. */
@@ -24,11 +25,17 @@ export const LOOKUP_FRESH_DAYS = 30;
 export function runConfig(env: Record<string, string | undefined> = process.env) {
   const num = (name: string, fallback: number) => {
     const value = Number(env[name]);
-    return env[name] !== undefined && env[name] !== '' && Number.isInteger(value) && value >= 0 ? value : fallback;
+    return env[name] !== undefined && env[name] !== '' && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
   };
   return {
     /** Requests one run may send; 0 sends none. */
     budget: num('TRAFFIC_RUN_BUDGET', 0),
+    /** Optional local cap; auto uses response-driven backoff, 0 disables requests. */
+    weeklyBudget: env.TRAFFIC_WEEKLY_BUDGET === 'auto' ? null : num('TRAFFIC_WEEKLY_BUDGET', 15),
+    /** Before last month's profile appears, allow at most one request per interval. */
+    probeIntervalHours: Math.max(1, num('TRAFFIC_PROBE_INTERVAL_HOURS', 24)),
+    /** A 429 without Retry-After does not establish when the server will reset. */
+    quotaCooldownHours: Math.max(1, num('TRAFFIC_QUOTA_COOLDOWN_HOURS', 168)),
     /** After a refusal nothing is sent for this long (tag's limit lifted after ~11 minutes). */
     cooldownMinutes: num('TRAFFIC_REFUSAL_COOLDOWN_MINUTES', 50),
     /** Requesters in priority order; earlier ones are fetched first. Editors' hand-added domains (manual) come last. */
@@ -196,7 +203,7 @@ const WORKER_SILENT = 3 * 3_600_000;
  * anything got no answer (refused or failed). Empty when fine or turned off.
  */
 export async function fetchProblems(pool: Pool, config: RunConfig, now = new Date()) {
-  if (config.budget <= 0) return [];
+  if (config.budget <= 0 || config.weeklyBudget === 0) return [];
   const problems: string[] = [];
   const [last] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(started_at) AS at FROM runs');
   if (!last?.at || now.getTime() - last.at.getTime() > WORKER_SILENT)
@@ -210,12 +217,7 @@ export async function fetchProblems(pool: Pool, config: RunConfig, now = new Dat
   return problems;
 }
 
-/** The latest refusal, if it is still inside the cooldown. */
-export async function coolingDown(pool: Pool, config: RunConfig, now = new Date()) {
-  const [r] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(refused_at) AS at FROM fetch_state');
-  const until = r?.at ? r.at.getTime() + config.cooldownMinutes * 60_000 : 0;
-  return until > now.getTime() ? new Date(until) : null;
-}
+export { coolingDown } from './fetch-policy.ts';
 
 const upsertState = (pool: Pool, domain: string, set: Record<string, unknown>) => {
   const cols = Object.keys(set);
@@ -247,7 +249,7 @@ export async function runOnce(
     pauseMs?: number;
     deadlineMs?: number;
     delay?: (ms: number) => Promise<void>;
-    /** Fetch just these domains (tools/fetch-once.ts), still within the budget and cooldown. */
+    /** Fetch just these domains, still within every shared limit and cooldown. */
     only?: string[];
   } = {},
 ) {
@@ -256,12 +258,22 @@ export async function runOnce(
   try {
     const [[lock]] = (await conn.query("SELECT GET_LOCK('traffic-similarweb', 0) AS got")) as unknown as [[{ got: number }]];
     if (lock.got !== 1) return { skipped: 'another run holds the lock' };
-    const cooling = await coolingDown(pool, config, now());
-    if (cooling) return { skipped: `cooling down until ${cooling.toISOString()}` };
+    const started = now();
+    const policy = await fetchPolicy(pool, config, started);
+    const skipped = policyNote(policy);
+    if (skipped) {
+      // Even an intentional wait is a worker heartbeat for /readyz.
+      await pool.query('INSERT INTO runs (started_at, finished_at, budget, note) VALUES (?, ?, ?, ?)', [
+        started,
+        now(),
+        config.budget,
+        skipped,
+      ]);
+      return { skipped };
+    }
     const due =
       only ?? dueDomains(await loadCandidates(pool, config), now(), catchUpQuota(await lastMonthShare(pool, now()), config.budget));
-    const batch = due.slice(0, config.budget);
-    const started = now();
+    const batch = due.slice(0, policy.maxPerRun);
     const [run] = (await pool.query('INSERT INTO runs (started_at, budget) VALUES (?, ?)', [started, config.budget])) as unknown as [
       { insertId: number },
     ];
@@ -276,23 +288,37 @@ export async function runOnce(
       }
       if (index) await delay(pauseMs);
       const at = now();
+      // Recheck under the lock: an interval, week, or month can change mid-run.
+      const current = await fetchPolicy(pool, config, at);
+      const hold = policyNote(current);
+      if (hold) {
+        tally.note = hold;
+        break;
+      }
       await upsertState(pool, domain, { last_attempt_at: at, next_attempt_at: new Date(at.getTime() + CLAIM) });
+      // Reserve before the network call. A crash/timeout still consumes allowance.
+      const [send] = (await pool.query('INSERT INTO sends (domain, at, outcome) VALUES (?, ?, ?)', [domain, at, 'pending'])) as unknown as [
+        { insertId: number },
+      ];
       tally.sent++;
       let data: Record<string, unknown>;
       try {
-        data = await requestSimilarweb(domain, request);
+        data = await requestSimilarweb(domain, request, at);
       } catch (error) {
         const status = error instanceof TrafficFetchError ? error.status : null;
         const message = (error instanceof Error ? error.message : String(error)).slice(0, 255);
         if (isRefusal(error)) {
-          await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, ?)', [domain, at, 'refused', status]);
+          await pool.query('UPDATE sends SET outcome = ?, http_status = ? WHERE id = ?', ['refused', error.httpStatus, send.insertId]);
           // Not this domain's fault: it keeps its place and goes first after the cooldown.
-          await upsertState(pool, domain, { refused_at: at, next_attempt_at: null, last_error: message });
+          const retryAt =
+            error.retryAt ??
+            new Date(at.getTime() + (status === 429 ? config.quotaCooldownHours * 3_600_000 : config.cooldownMinutes * 60_000));
+          await upsertState(pool, domain, { refused_at: at, retry_after_at: retryAt, next_attempt_at: null, last_error: message });
           tally.refused = true;
           tally.note = message;
           break;
         }
-        await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, ?)', [domain, at, 'error', status]);
+        await pool.query('UPDATE sends SET outcome = ?, http_status = ? WHERE id = ?', ['error', status, send.insertId]);
         await recordFailure(pool, domain, at, message);
         tally.failed++;
         // Repeated HTTP/network errors mean the provider is down; stop until the next run.
@@ -307,7 +333,7 @@ export async function runOnce(
       try {
         const traffic = parseDomainTraffic(data, domain, at);
         await saveTraffic(pool, [traffic]);
-        await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, 200)', [domain, at, 'ok']);
+        await pool.query('UPDATE sends SET outcome = ?, http_status = 200 WHERE id = ?', ['ok', send.insertId]);
         await upsertState(pool, domain, {
           last_response_at: at,
           last_success_at: at,
@@ -319,7 +345,7 @@ export async function runOnce(
         tally.ok++;
       } catch (error) {
         // Answered without usable visits: normal for small sites.
-        await pool.query('INSERT INTO sends (domain, at, outcome, http_status) VALUES (?, ?, ?, 200)', [domain, at, 'no-data']);
+        await pool.query('UPDATE sends SET outcome = ?, http_status = 200 WHERE id = ?', ['no-data', send.insertId]);
         await upsertState(pool, domain, { last_response_at: at, result: JSON.stringify(summary) });
         await recordFailure(pool, domain, at, (error instanceof Error ? error.message : String(error)).slice(0, 255));
         tally.failed++;

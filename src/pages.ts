@@ -1375,26 +1375,47 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   ];
   const priority = [...new Set(status.priority.map(sourceOf))];
   const q = status.queue;
+  const policy = status.policy;
+  const policyMessage =
+    policy.reason === 'disabled'
+      ? 'Similarweb 自動抓取已暫停，既有資料仍可查詢。'
+      : policy.reason === 'weekly-limit'
+        ? `本週請求額度已用完；最早於 ${tw(policy.resumeAt)} 後恢復。`
+        : policy.reason === 'provider-cooldown'
+          ? `Similarweb 拒絕請求，暫停至 ${tw(policy.resumeAt)}。`
+          : policy.reason === 'waiting-for-month'
+            ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料；下一次探查不早於 ${tw(policy.resumeAt)}。`
+            : '';
   const queueRows = q.map(
     (e) =>
-      `<tr${status.budget && e.position <= status.budget ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${status.refusedSince ? '未定' : '不會送出'}</span>`)}</tr>`,
+      `<tr${policy.maxPerRun && e.position <= policy.maxPerRun && e.expectedAt ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${policy.reason === 'disabled' ? '已暫停' : '未定'}</span>`)}</tr>`,
   );
   const queueHead =
     '<th class="rank" aria-sort="ascending" title="抓取順序">#</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>';
   const queueNote = q.length
     ? `<p>共 ${q.length} 個網域等候抓取。${
-        status.refusedSince
-          ? 'Similarweb 目前拒絕每一輪的請求，恢復前沒有預計時間，表格是等候順序。'
-          : status.budget
-            ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${status.budget} 個（底色標示）。`
-            : '目前暫停送出，表格是等候順序。'
+        policy.reason
+          ? `${policyMessage}表格是等候順序。`
+          : status.refusedSince
+            ? 'Similarweb 目前拒絕每一輪的請求，恢復前沒有預計時間，表格是等候順序。'
+            : q[0].expectedAt
+              ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${policy.maxPerRun} 個（底色標示）。`
+              : '目前暫停送出，表格是等候順序。'
       }排程之後到期的網域會依同樣規則接在後面。${
-        status.lastMonth.catchUpPerRun >= status.budget
-          ? ''
-          : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
+        policy.waitingForMonth
+          ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料，每 ${policy.probeIntervalHours} 小時最多探查一次。`
+          : status.lastMonth.catchUpPerRun >= status.budget
+            ? ''
+            : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
       }</p>`
     : '<p>目前沒有到期的網域。</p>';
-  const stats = `<div class="stats"><div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時一輪，間隔 3 秒' : '0：目前不送出任何請求'}</small></div>
+  const weeklyStat =
+    policy.weekly.limit === null
+      ? `<span>本週請求</span><b>${policy.weekly.used}</b><small>依實際回應退避；伺服器週額度未確認</small>`
+      : `<span>本機每週請求額度</span><b>${policy.weekly.used} / ${policy.weekly.limit}</b><small>剩餘 ${policy.weekly.remaining} 次・${tw(policy.weekly.resetsAt)} 重置</small>`;
+  const stats = `<div class="stats"><div>${weeklyStat}</div>
+<div><span>最新流量月份</span><b>${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'}</b><small>最新組成：${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</small></div>
+<div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時檢查排程，依探查間隔及退避狀態送出' : '0：目前不送出任何請求'}</small></div>
 <div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small><a href="#queue">看排程</a></small></div>
 <div><span>近 24 小時請求</span><b>${sent24}</b><small>${
     Object.entries(status.last24h)
@@ -1409,11 +1430,13 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
       actions: '<a href="/api/v1/status">JSON</a>',
     },
     `${
-      status.refusedSince
-        ? `<p class="flash"><span class="down">▼</span> Similarweb 從 ${tw(status.refusedSince)} 起拒絕每一輪的請求，一筆都沒有抓到${status.coolingDownUntil ? `；下次嘗試在 ${tw(status.coolingDownUntil)} 之後` : ''}</p>`
-        : status.coolingDownUntil
-          ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>`
-          : ''
+      policyMessage
+        ? `<p class="flash">${policyMessage}</p>`
+        : status.refusedSince
+          ? `<p class="flash"><span class="down">▼</span> Similarweb 從 ${tw(status.refusedSince)} 起拒絕每一輪的請求，一筆都沒有抓到${status.coolingDownUntil ? `；下次嘗試在 ${tw(status.coolingDownUntil)} 之後` : ''}</p>`
+          : status.coolingDownUntil
+            ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>`
+            : ''
     }${stats}
 ${section(status.budget ? '下一輪抓取' : '等候抓取', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
 ${manualSection}

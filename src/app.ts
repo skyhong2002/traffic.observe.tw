@@ -31,6 +31,8 @@ import {
   recentMonths,
   setManualMonth,
 } from './manual.ts';
+import { ManualInputError } from './manual-input.ts';
+import { registerManualOcr } from './manual-ocr.ts';
 import { EditError, editSites, loadMetadata, type ManagedSite, managedSites } from './metadata.ts';
 import { editSitePage, type ManualForm, manageSitesPage, manualPage, tagsByUse } from './metadata-pages.ts';
 import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
@@ -140,6 +142,7 @@ export function buildApp(
     if (request.url.startsWith('/internal/') && !authenticate(request, reply, tokens)) return reply;
   });
   registerLegacyOrigin(app, PUBLIC_ORIGIN);
+  registerManualOcr(app);
   // HTML forms on /watch/.
   app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_request, body, done) =>
     done(null, Object.fromEntries(new URLSearchParams(body as string))),
@@ -362,7 +365,10 @@ export function buildApp(
     return site ? editSitePage(site, tagsByUse(sites), error, draft, message) : null;
   };
   /** The page for months copied from Similarweb's platform, with what the free endpoint last answered. */
-  const manualFor = async (domain: string, form: Pick<ManualForm, 'message' | 'error' | 'draft'> = {}) => {
+  const manualFor = async (
+    domain: string,
+    form: Pick<ManualForm, 'message' | 'error' | 'draft' | 'errorFields' | 'selectedMonth' | 'completedMonth'> = {},
+  ) => {
     const { site } = await siteFor(domain);
     if (!site) return null;
     const [months, traffic] = await Promise.all([loadManualMonths(pool, { domain: site.domain }), loadTraffic(pool, [site.domain])]);
@@ -376,13 +382,21 @@ export function buildApp(
     if (!page) return reply.code(404).send({ error: 'not found' });
     return reply.type('text/html').send(page);
   });
-  app.get<{ Params: { domain: string }; Querystring: { done?: string } }>('/site/:domain/manual/', async (request, reply) => {
-    if (!(await requireEditor(request, reply, request.url))) return reply;
-    if (!trafficAccess.getStore()) return reply.code(403).send({ error: 'full traffic access required' });
-    const page = await manualFor(request.params.domain, { message: DONE[request.query.done ?? ''] });
-    if (!page) return reply.code(404).send({ error: 'not found' });
-    return reply.type('text/html').send(page);
-  });
+  app.get<{ Params: { domain: string }; Querystring: { done?: string; month?: string } }>(
+    '/site/:domain/manual/',
+    async (request, reply) => {
+      if (!(await requireEditor(request, reply, request.url))) return reply;
+      if (!trafficAccess.getStore()) return reply.code(403).send({ error: 'full traffic access required' });
+      const message = DONE[request.query.done ?? ''];
+      const page = await manualFor(request.params.domain, {
+        message,
+        selectedMonth: request.query.month,
+        completedMonth: message ? request.query.month : undefined,
+      });
+      if (!page) return reply.code(404).send({ error: 'not found' });
+      return reply.type('text/html').send(page);
+    },
+  );
   app.post<{
     Params: { domain: string };
     Body: Record<string, string | undefined>;
@@ -396,7 +410,7 @@ export function buildApp(
     const month = String(body.month ?? '');
     try {
       const remove = body.action === 'delete';
-      if (!remove && !recentMonths().includes(month)) throw new EditError('只能補登最近三個月。');
+      if (!remove && !recentMonths().includes(month)) throw new ManualInputError('只能補登最近三個月。', 'month');
       const details = remove ? null : parseManualDetails(body);
       await setManualMonth(
         pool,
@@ -411,19 +425,21 @@ export function buildApp(
               visits: parseVisits(body.visits),
               channels: parseManualChannels(body),
               details,
-              searchShare: parseShare(body.search, '自然搜尋占比'),
-              aiShare: parseShare(body.ai, 'Gen AI 占比'),
-              taiwanShare: parseShare(body.taiwan, '台灣占比') ?? details?.countries.find((c) => c.code === 'TW')?.share ?? null,
+              searchShare: parseShare(body.search, '自然搜尋占比', 'search'),
+              aiShare: parseShare(body.ai, 'Gen AI 占比', 'ai'),
+              taiwanShare: parseShare(body.taiwan, '台灣占比', 'taiwan') ?? details?.countries.find((c) => c.code === 'TW')?.share ?? null,
             },
       );
       request.log.info({ by: editor.email, domain: site.domain, month, remove }, 'manual month saved');
       views.clear();
       historyCache = null;
       contextCache = null;
-      return reply.redirect(`/site/${site.domain}/manual/?done=${remove ? 'deleted' : 'saved'}`, 303);
+      return reply.redirect(`/site/${site.domain}/manual/?done=${remove ? 'deleted' : 'saved'}&month=${month}`, 303);
     } catch (error) {
       if (!(error instanceof EditError)) throw error;
-      const page = await manualFor(site.domain, { error: error.message, draft: body });
+      const errorFields = error instanceof ManualInputError ? error.fields.filter(Boolean) : [];
+      request.log.warn({ domain: site.domain, month, reason: error.message, fields: errorFields }, 'manual month validation failed');
+      const page = await manualFor(site.domain, { error: error.message, errorFields, draft: body });
       return reply.code(error.status).type('text/html').send(page);
     }
   });

@@ -386,12 +386,17 @@ export const ENDPOINTS: Endpoint[] = [
     group: '抓取與服務',
     path: '/api/v1/status',
     summary: 'Similarweb 抓取排程與最近批次',
-    detail: '抓取狀態頁用的資料。每小時一輪，每輪最多 budget 個網域。',
+    detail: '抓取狀態頁用的資料。每小時檢查排程，送出量受每輪與每週額度、新月份探查間隔及拒絕後退避共同限制。',
     params: [],
     example: '/api/v1/status',
     type: 'application/json',
     fields: [
       { name: 'budget', type: 'integer', desc: '每輪上限' },
+      {
+        name: 'policy',
+        type: 'object',
+        desc: '本機抓取政策（不是已確認的伺服器額度）。reason：disabled、weekly-limit、provider-cooldown、waiting-for-month 或 null；resumeAt：最早可恢復時間（不保證伺服器已解除限制）；maxPerRun：當前可送數；weekly：limit、used、remaining、startsAt、resetsAt（UTC 週一重置，所有預留及送出的請求均計入；auto 模式的 limit、remaining 為 null，代表未設本機固定週上限，仍遵守探查間隔及拒絕退避，不代表伺服器無限額）；waitingForMonth、targetMonth、latestMonth、latestProfileMonth、probeIntervalHours、coolingDownUntil',
+      },
       { name: 'priority', type: 'string[]', desc: '來源的優先序' },
       { name: 'coolingDownUntil', type: 'string (ISO 時間) | null', desc: '被 Similarweb 拒絕後暫停到何時' },
       {
@@ -409,7 +414,7 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'queue',
         type: 'object[]',
-        desc: '排程：domain、position、requester、reason（new、refresh、catch-up、lookup）、lastSuccessAt、expectedAt',
+        desc: '排程：domain、position、requester、reason（new、refresh、catch-up、lookup）、lastSuccessAt、expectedAt；暫停、限額、等待探查、或超出目前可用額度時 expectedAt 為 null',
       },
       { name: 'watchers', type: 'object[]', desc: '各來源與類型的網域數：requester、kind、domains' },
       { name: 'last24h', type: 'object', desc: '近 24 小時的請求結果計數' },

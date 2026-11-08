@@ -1,4 +1,5 @@
 import { type Pool, rows } from './db.ts';
+import { type FetchPolicy, fetchPolicy } from './fetch-policy.ts';
 import {
   type Candidate,
   catchUpQuota,
@@ -33,33 +34,45 @@ export function fetchQueue(
   now = new Date(),
   share?: MonthShare,
   refused: Date | null = null,
+  policy?: FetchPolicy,
 ) {
   const first = nextRunAt(cooling && cooling > now ? cooling : now, config.runMinute);
+  const perRun = policy?.maxPerRun ?? config.budget;
   return dueQueue(candidates, now, share ? catchUpQuota(share, config.budget) : Infinity).map((c, i) => ({
     domain: c.domain,
     position: i + 1,
     requester: config.priority[c.tier] ?? null,
     reason: c.reason,
     lastSuccessAt: c.lastSuccess ? new Date(c.lastSuccess).toISOString() : null,
-    expectedAt: config.budget && !refused ? new Date(first.getTime() + Math.floor(i / config.budget) * HOUR).toISOString() : null,
+    // Do not promise times beyond the known allowance or before the next probe.
+    expectedAt:
+      perRun &&
+      !refused &&
+      (!policy ||
+        ((policy.weekly.remaining === null || i < policy.weekly.remaining) &&
+          (!policy.waitingForMonth || i === 0) &&
+          (policy.weekly.limit === null || first.getTime() + Math.floor(i / perRun) * HOUR < new Date(policy.weekly.resetsAt).getTime())))
+        ? new Date(first.getTime() + Math.floor(i / perRun) * HOUR).toISOString()
+        : null,
   }));
 }
 export type QueueEntry = ReturnType<typeof fetchQueue>[number];
 
 /** The queue alone, for pages that only mark where a domain stands. */
 export async function loadQueue(pool: Pool, config: RunConfig, now = new Date()) {
-  const [candidates, cooling, share, refused] = await Promise.all([
+  const [candidates, cooling, share, refused, policy] = await Promise.all([
     loadCandidates(pool, config),
     coolingDown(pool, config, now),
     lastMonthShare(pool, now),
     refusedSince(pool),
+    fetchPolicy(pool, config, now),
   ]);
-  return { entries: fetchQueue(candidates, config, cooling, now, share, refused), refusedSince: refused };
+  return { entries: fetchQueue(candidates, config, cooling, now, share, refused, policy), refusedSince: refused };
 }
 
 /** Worker health for /status/ and /api/v1/status. */
 export async function serviceStatus(pool: Pool, config: RunConfig, now = new Date()) {
-  const [runs, watchers, sends, candidates, cooling, share, refused] = await Promise.all([
+  const [runs, watchers, sends, candidates, cooling, share, refused, policy] = await Promise.all([
     rows<{
       id: number;
       started_at: Date;
@@ -82,10 +95,12 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     coolingDown(pool, config, now),
     lastMonthShare(pool, now),
     refusedSince(pool),
+    fetchPolicy(pool, config, now),
   ]);
-  const queue = fetchQueue(candidates, config, cooling, now, share, refused);
+  const queue = fetchQueue(candidates, config, cooling, now, share, refused, policy);
   return {
     budget: config.budget,
+    policy,
     priority: config.priority,
     coolingDownUntil: cooling?.toISOString() ?? null,
     refusedSince: refused?.toISOString() ?? null,

@@ -4,7 +4,7 @@
 
 ## 為什麼要獨立
 
-- 主機只有一個對外 IP，Similarweb 大約連續 20 次就回 403（約 11 分鐘後解除）。所有請求必須由同一個排程、同一份預算送出。
+- 主機只有一個對外 IP，所有請求必須由同一個排程、同一份預算送出。2026-11-06 確認官方 Chrome 插件有每週使用限制，不能以早期觀察到的短時間 IP 限速作為目前額度依據；證據見 [查核筆記](research/similarweb-limits-20261106.md)。
 - Similarweb 每次只回最近三個月的造訪量，以及**最新一個月**的導流（搜尋、AI…）、國家和排名。某個網域如果當月沒抓到，那個月的搜尋S／AI 就永遠沒了。所以每個網域每月至少要抓到一次，抓到的就永久保存。
 
 ## 組成
@@ -26,17 +26,20 @@
 ## 抓取規則（`src/scheduler.ts`）
 
 - 每輪最多 `TRAFFIC_RUN_BUDGET` 筆，間隔 3 秒，最長 5 分鐘。**預設 0，也就是完全不送**：tag 還在自己打 Similarweb 的期間必須維持 0。
-- `/readyz`：抓取正常回 200 `{"status":"ready"}`；worker 超過 3 小時沒有執行，或最近三輪有送出的都沒有任何回應（被拒或失敗）時回 503，並列出問題。`TRAFFIC_RUN_BUDGET=0` 時一律算正常。status.skyhong.tw 用它監控（目標 `site-observe-fetch`）。Similarweb extension 6.12.26（2026-10-28）起，請求要帶 `X-Sw-Ctx`（裝置 ID 加上「ID:UTC 日期」的 HMAC-SHA256），沒有帶的請求很快就會收到 429 `{"exceeded":true,"userState":"anonymous"}`；裝置 ID 固定放在 `TRAFFIC_SIMILARWEB_DEVICE_ID`。
-- 任何 401／403／429：整輪立刻停，之後 `TRAFFIC_REFUSAL_COOLDOWN_MINUTES`（預設 50）分鐘內都不送，那個網域保留原本的順位。連續三次 HTTP 或網路錯誤也會停。
+- 每週所有請求共用 `TRAFFIC_WEEKLY_BUDGET`（預設 15；0 為停抓；設 `auto` 可取消本機固定週上限），週一 00:00 UTC（台北 08:00）重置。15 是插件介面的本機保守政策，不是已確認的資料伺服器 API 規格；`auto` 也不代表伺服器沒有限額，仍受每日探查、實際拒絕及退避保護。送出前先在 `sends` 預留一次，成功、無資料、錯誤、拒絕及程序中斷留下的 pending 都計入；既有歷史紀錄也計入當週，重啟不會歸零。手動指定網域同樣受限。
+- `/readyz`：worker 超過 3 小時沒有執行，或最近三輪有送出的都沒有任何回應時回 503。額度用完、等待每日探查或退避時，每小時仍記錄零請求批次，證明 worker 持續運作；預算 0 為刻意停抓，回 200。`/status/` 與 `/api/v1/status` 另列 `policy`：停抓原因、最早恢復時間、每週用量與重置時間、最新流量與組成月份。超出當前可用額度的隊列項目不預告抓取時間。
+- 任何 401／403／429：整輪立刻停，那個網域保留原本的順位。遵守有效的 `Retry-After`，並至少等待 `TRAFFIC_REFUSAL_COOLDOWN_MINUTES`（預設 50）分鐘。429 沒有提供時間時，預設等待 `TRAFFIC_QUOTA_COOLDOWN_HOURS=168`（七天），不假定資料伺服器與插件介面都在週一重置。HTTP 200 的 `exceeded: true` 也視為全域限額，不記成網域無資料。退避寫入 `fetch_state.retry_after_at`，重啟不會清掉。連續三次 HTTP 或網路錯誤也會停。
 - 用 MariaDB 的 `GET_LOCK('traffic-similarweb')` 保證同一時間只有一輪在跑。
 - 哪些網域到期：
   1. 一次性查詢（blog）在提交後還沒得到回應；
   2. 定期清單（tag、試算表、手動等所有來源）本月 1 日（UTC，台北 08:00）之後還沒成功抓過：每個月初全部一起到期、一起排隊，沒有各自的週期；
   3. 定期清單裡還缺上個月 profile 的網域，每 3 天重試一次，直到 Similarweb 給出上個月的資料。
-- 順序依 `TRAFFIC_PRIORITY`（預設 `tag,blog,sheet,manual`；`manual` 是編輯在 `/watch/` 手動加入的），抓過但還缺上個月資料的最優先（Similarweb 只給最新一個月的管道與國家，過了就抓不到），再來是從沒抓過的，最後是其他到期的；每組內依來源排序，再依最舊的成功時間。Similarweb 不一定同時給出每個網站的新月份，所以缺上個月的網域每輪只補抓「每輪上限 × 近一天（本月內）有流量回應的網域中已有上個月的比例」個，至少 1 個：月初還沒給出時每輪只抽查 1 個，給出的網站越多補抓越多，剩下還沒給出的網站不會佔滿額度。單次查詢的網域若 30 天內已抓過，直接以現有資料回覆，不再重抓。
+- 順序依 `TRAFFIC_PRIORITY`（預設 `tag,blog,sheet,manual`；`manual` 是編輯在 `/watch/` 手動加入的），抓過但還缺上個月資料的最優先，再來是從沒抓過的，最後是其他到期的；每組內依來源排序，再依最舊的成功時間。全庫還沒有上個月的組成時，每 `TRAFFIC_PROBE_INTERVAL_HOURS`（預設 24）小時最多送一次，仍計入週額度；新月份首次出現後，補抓上限回到每輪預算乘以近一天有上月資料的比例（至少 1），仍受週額度約束。單次查詢的網域若 30 天內已抓過，直接以現有資料回覆。
 - 失敗（沒有資料、錯誤）隔天重試；累積三次後等到下個月 1 日跟大家一起重抓。
 
-容量估算：每小時 15 筆 × 24 = 360 筆／天。所有定期清單約 2,100 個網域每月各一次，月初一起排隊，大約 6 天排完；Similarweb 還沒給出上個月的網站會先少量抽查，給出後才加速。
+每週少量額度無法維持整份約 2,100 個網域的每月更新；需另決定優先清單或合適的資料方案，不能沿用原本每小時 15 筆的容量估算。若要完全停抓直到人工確認新月份，設定 `TRAFFIC_RUN_BUDGET=0`，worker 與 web 同步重啟，Radar 與技術偵測仍可運作。新增 `0012_similarweb_retry.sql` 必須先套用再重啟。
+
+2026-11-06 16:12（台北時間）先部署保護；稍後修正為低頻自動探查：正式設定使用 `TRAFFIC_RUN_BUDGET=15`、`TRAFFIC_WEEKLY_BUDGET=auto`、探查間隔 24 小時，遇到實際拒絕依 `Retry-After` 或 7 天退避。新月份尚未出現時每天最多探查 1 個網域，出現後恢復原本每輪最多 15 筆，仍依近一天收到新月份的比例限制補抓。保留資料庫鎖、送出前預留與跨重啟記錄。158 項測試、型別檢查、lint 通過；詳見 [查核與實施紀錄](research/similarweb-limits-20261106.md)。
 
 ## Cloudflare Radar（`src/radar.ts`）
 
@@ -274,3 +277,11 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 切換後補查發現新 host 的 HTTP 請求仍可回 200，因此 `src/origin.ts` 依 Tunnel 的 `x-forwarded-proto: http` 將正式 host 的訪客升級到固定 HTTPS 來源，保留 path/query；目的地僅取設定，不取轉送 host，loopback/internal 不受影響。已重啟 web，公開 `http://site.observe.tw/table/?q=...&from=...` 實測 308 至同一路徑的 HTTPS；新 HTTPS 首頁 200、登入入口 302 使用新 callback，舊 HTTPS 網站頁 308。最終 typecheck、lint、16 項遷移/SEO 測試與 diff 檢查通過。舊 robots/favicon 依使用者決定保留 CDN 快取至自然到期。
 
 2026-10-27 23:50（台北時間）Google Search Console（使用者處理）：新增並驗證 `https://site.observe.tw/` 資源，`sitemap.xml` 成功處理、讀到 4 個網址（`/`、`/table/`、`/tag/`、`/tech/`）；舊資源 `https://traffic.observe.tw/` 已提交網址變更至 `site.observe.tw` 並通過驗證，狀態為「This site is currently moving」，開始日 2026-10-27。索引轉移需等 Google 處理，期間舊站 308 必須保留；勿在舊資源按 Cancel move。同日實測舊站 robots.txt、favicon.ico 已回 308，先前的 CDN 快取已到期。GTM／GA 本站從未安裝，換網域無須調整。
+
+2026-11-08 14:06（台北時間）部署人工補登儲存保護：11/7 14:18 的 `tw.news.yahoo.com` 補登 POST 回 400，正式 `manual_months` 與異動表皆無該站紀錄；舊版未記驗證原因，無法還原當時失敗的欄位或輸入值。已修正可重現的格式限制，接受分:秒（如 `2:05`）、全形數字／百分號與排名前的 `#`；未提供的 `—`、`N/A` 保持未知，界限占比仍不能當作確切值。造訪量改用文字鍵盤方便輸入 K/M/B，其他欄位明示選填。退件時顯示「尚未儲存」、保留原值並連到錯誤欄位，服務紀錄寫入失敗原因與欄位，不記表單原文。各站、各月草稿在同分頁 sessionStorage 暫存，切月、重整、重新登入返回可還原；未存離開時提示，儲存成功只清除該月草稿，並移除成功 URL 標記，避免之後重整誤刪新草稿。關閉分頁後草稿不保證保留。
+
+完整 164 項測試、型別與 lint 檢查通過；最後的成功頁重整修正另重跑 4 項草稿測試通過。僅重啟 web，沒有 migration 或正式資料寫入。本機及正式 `/healthz`、網站 API 回 200，未登入補登頁正常 303 至登入；部署前後補登及異動表均 0 列，10 月原始補登值仍須重新輸入。程式備份、資料快照及查核結果在 `data/manual-save-fix-20261108/`；回復時將 `before/` 的 app.ts、manual.ts、manual-breakdowns.ts、metadata-pages.ts 還原至 src/ 後重啟 web，新加的兩個模組可保留。
+
+2026-11-08 15:12（台北時間）部署人工補登截圖匯入：補登頁的「從截圖填入」接受 1–4 張 PNG/JPG/WebP（每張最多 10 MB），支援 Similarweb 英文版 Worldwide／All traffic 的概況、國家表與渠道柱狀圖。Tesseract.js 7.0.0、英文模型 1.0.0 由釘選 npm 套件安裝，`manual-ocr.ts` 只供應白名單資源，網址含程式雜湊；首次下載約 15 MB，後續可使用瀏覽器快取。圖片、辨識與核對都留在瀏覽器，不傳到伺服器或外部辨識服務。`manual-ocr-parser.js` 依文字座標區分圖表數值、座標軸與國家變化欄，低信心／衝突數值不猜測，混合月份不允許填入。網域不從截圖推定；使用者須確認目前網域、月份與範圍，再勾選欄位填入草稿，最後仍須按原表單「儲存」。已有內容預設不覆寫，核對期間被改過的內容會阻止覆蓋；辨識資料下載失敗仍能手動編輯或重試。
+
+使用者確認提供的兩張截圖屬於 `tw.stock.yahoo.com`，202610；瀏覽器實測辨識 29.54M、5.25 頁、00:05:40、跳出率 42.87%、台灣 94.16%、五國占比與十個渠道（包含明確的零）。169 項完整測試、型別與 lint 通過，最後初始化失敗保護另重跑實際瀏覽器測試通過；390px 核對介面無頁面溢出、瀏覽器測試阻擋所有站外請求仍正常運作，重新整理可保留已匯入草稿。僅重啟 web，未做 migration 或正式補登寫入；正式健康、網站 API 與辨識資源均正常。部署前後補登及異動資料一致：爸爸已自行成功補登 `tw.news.yahoo.com` 的 202610、63.02M，`tw.stock.yahoo.com` 尚未人工補登。程式與套件檔備份、部署前資料快照及查核結果在 `data/manual-screenshot-import-20261108/`；回復時還原 before/ 的 src 檔案、package.json、package-lock.json，執行 npm ci 並重啟 web。

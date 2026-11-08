@@ -106,12 +106,25 @@ export function publicDomain(raw: unknown): string | null {
 
 export class TrafficFetchError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  retryAt: Date | null;
+  httpStatus: number;
+  constructor(status: number, message: string, retryAt: Date | null = null, httpStatus = status) {
     super(message);
     this.status = status;
+    this.retryAt = retryAt;
+    this.httpStatus = httpStatus;
   }
 }
-export const isRefusal = (error: unknown) => error instanceof TrafficFetchError && [401, 403, 429].includes(error.status);
+export const isRefusal = (error: unknown): error is TrafficFetchError =>
+  error instanceof TrafficFetchError && [401, 403, 429].includes(error.status);
+
+/** Retry-After can be seconds or an HTTP date. Ignore invalid/past values. */
+export function retryAfter(value: string | null, now: Date): Date | null {
+  if (!value?.trim()) return null;
+  const text = value.trim();
+  const at = /^\d+$/.test(text) ? now.getTime() + Number(text) * 1000 : Date.parse(text);
+  return Number.isFinite(at) && at > now.getTime() && at <= 8.64e15 ? new Date(at) : null;
+}
 
 /**
  * CloudFront answers 403 unless the request looks like the extension's own call:
@@ -140,15 +153,18 @@ export const swContext = (deviceId: string, now = new Date()) =>
 const deviceId = process.env.TRAFFIC_SIMILARWEB_DEVICE_ID || randomUUID();
 
 /** The public endpoint used by the Similarweb extension, raw. No account cookies. */
-export async function requestSimilarweb(domain: string, request = fetch): Promise<Record<string, unknown>> {
+export async function requestSimilarweb(domain: string, request = fetch, now = new Date()): Promise<Record<string, unknown>> {
   if (trafficDomain(domain) !== domain) throw Error('Invalid domain');
   const response = await request(`https://data.similarweb.com/api/v1/data?domain=${encodeURIComponent(domain)}`, {
-    headers: { ...extensionHeaders, 'x-sw-ctx': swContext(deviceId) },
+    headers: { ...extensionHeaders, 'x-sw-ctx': swContext(deviceId, now) },
     signal: AbortSignal.timeout(20_000),
     redirect: 'error',
   });
-  if (!response.ok) throw new TrafficFetchError(response.status, `Similarweb HTTP ${response.status}`);
-  return (await response.json()) as Record<string, unknown>;
+  const retryAt = retryAfter(response.headers.get('retry-after'), now);
+  if (!response.ok) throw new TrafficFetchError(response.status, `Similarweb HTTP ${response.status}`, retryAt);
+  const data = (await response.json()) as Record<string, unknown>;
+  if (data?.exceeded === true) throw new TrafficFetchError(429, 'Similarweb usage quota exceeded (HTTP 200)', retryAt, 200);
+  return data;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: the provider's JSON, checked field by field below.

@@ -17,6 +17,7 @@ const change = (now: unknown[], before?: unknown[], sameMonth = false) =>
     CAPPED: 8,
     state: { to: '202609', from: sameMonth ? '202609' : '202608', data: { radar: {} } },
     topicsOf: () => [],
+    window: { displayDomainText: (value: string) => value },
     site: { m: { '202609': now, ...(before ? { '202608': before } : {}) } },
   });
 

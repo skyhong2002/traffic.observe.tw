@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
+import { fetchPolicy } from '../src/fetch-policy.ts';
 import { recentMonths } from '../src/manual.ts';
 import { editSites, managedSites } from '../src/metadata.ts';
 import { monthView, ranking, topicSummary } from '../src/metrics.ts';
-import { radarLabel } from '../src/pages.ts';
+import { radarLabel, statusPage } from '../src/pages.ts';
 import { runRadar } from '../src/radar.ts';
 import { fetchProblems, lastMonthShare, refusedSince, runConfig, runOnce } from '../src/scheduler.ts';
 import { saveSheet } from '../src/sheet.ts';
+import { serviceStatus } from '../src/status.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
 const url = process.env.TRAFFIC_TEST_DB_URL;
@@ -63,8 +65,15 @@ describe.skipIf(!url)('with a database', () => {
       login: null,
       logger: false,
     });
+  // The month is known to be published; these tests exercise full batches rather than probes.
+  const published = () =>
+    pool.query(
+      "INSERT INTO traffic_profiles (domain, month, profile, first_seen_at, fetched_at) VALUES ('published.tw', '202609', '{}', ?, ?)",
+      [new Date('2026-10-20T00:00:00Z'), new Date('2026-10-20T00:00:00Z')],
+    );
 
   it('sends at most the budget, highest priority first, and stores months and profiles', async () => {
+    await published();
     const now = new Date('2026-10-21T00:00:00Z');
     await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
       [
@@ -175,6 +184,149 @@ describe.skipIf(!url)('with a database', () => {
     const { request, sent } = fakeFetch();
     expect(await run(pool, request, 0)).toEqual({ skipped: 'budget is 0' });
     expect(sent).toEqual([]);
+  });
+
+  it('counts all outcomes and reservations, limits manual batches, and resumes on Monday', async () => {
+    await published();
+    const at = new Date('2026-10-21T10:00:00Z');
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '10', TRAFFIC_WEEKLY_BUDGET: '4' });
+    for (const outcome of ['error', 'no-data', 'pending'])
+      await pool.query('INSERT INTO sends (domain, at, outcome) VALUES (?, ?, ?)', ['used.tw', at, outcome]);
+    const first = fakeFetch();
+    expect(await runOnce(pool, { config, only: ['a.tw', 'b.tw'], request: first.request, now: () => at, pauseMs: 0 })).toMatchObject({
+      sent: 1,
+      ok: 1,
+    });
+    expect(first.sent).toEqual(['a.tw']);
+    const second = fakeFetch();
+    expect(await runOnce(pool, { config, only: ['b.tw'], request: second.request, now: () => at })).toMatchObject({
+      skipped: expect.stringContaining('weekly request limit reached'),
+    });
+    expect(second.sent).toEqual([]);
+    expect((await fetchPolicy(pool, config, at)).weekly).toMatchObject({ used: 4, remaining: 0 });
+    expect(await fetchProblems(pool, config, new Date(at.getTime() + 60_000))).toEqual([]);
+    const monday = new Date('2026-10-26T00:00:00Z');
+    const third = fakeFetch();
+    expect(await runOnce(pool, { config, only: ['b.tw'], request: third.request, now: () => monday })).toMatchObject({ sent: 1 });
+    expect((await fetchPolicy(pool, config, monday)).weekly).toMatchObject({ used: 1, remaining: 3 });
+  });
+
+  it('reserves before calling the provider, and does not double count a timeout', async () => {
+    await published();
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '3', TRAFFIC_WEEKLY_BUDGET: '1' });
+    const at = new Date('2026-10-21T10:00:00Z');
+    const request = (async () => {
+      expect((await fetchPolicy(pool, config, at)).weekly.remaining).toBe(0);
+      expect(await rows(pool, 'SELECT outcome FROM sends')).toEqual([{ outcome: 'pending' }]);
+      throw new Error('timeout');
+    }) as typeof fetch;
+    expect(await runOnce(pool, { config, only: ['a.tw'], request, now: () => at })).toMatchObject({ sent: 1, failed: 1 });
+    expect(await rows(pool, 'SELECT outcome FROM sends')).toEqual([{ outcome: 'error' }]);
+    expect((await fetchPolicy(pool, config, at)).weekly.used).toBe(1);
+  });
+
+  it('does not let a second runner spend the same remaining allowance', async () => {
+    await published();
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: '1' });
+    const at = new Date('2026-10-21T10:00:00Z');
+    const second = fakeFetch();
+    const request = (async () => {
+      expect(await runOnce(pool, { config, only: ['b.tw'], request: second.request, now: () => at })).toEqual({
+        skipped: 'another run holds the lock',
+      });
+      return new Response(JSON.stringify(similarweb('a.tw')));
+    }) as typeof fetch;
+    expect(await runOnce(pool, { config, only: ['a.tw'], request, now: () => at })).toMatchObject({ sent: 1, ok: 1 });
+    expect(second.sent).toEqual([]);
+    expect((await fetchPolicy(pool, config, at)).weekly.used).toBe(1);
+  });
+
+  it('keeps an exhausted worker healthy while it records hourly waits', async () => {
+    await published();
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: '1' });
+    const first = new Date('2026-10-21T10:00:00Z');
+    const one = fakeFetch();
+    await runOnce(pool, { config, only: ['a.tw'], request: one.request, now: () => first });
+    const later = new Date('2026-10-21T15:00:00Z');
+    expect(await fetchProblems(pool, config, later)).toEqual(['worker has not run since 2026-10-21T10:00:00.000Z']);
+    const next = fakeFetch();
+    await runOnce(pool, { config, only: ['b.tw'], request: next.request, now: () => later });
+    expect(await fetchProblems(pool, config, later)).toEqual([]);
+    expect(next.sent).toEqual([]);
+  });
+
+  it('shares the daily probe interval with manual calls and removes it once the month appears', async () => {
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: 'auto' });
+    await pool.query('INSERT INTO sends (domain, at, outcome) VALUES ?', [
+      Array.from({ length: 106 }, () => ['used.tw', new Date('2026-11-05T07:35:00Z'), 'ok']),
+    ]);
+    let at = new Date('2026-11-06T08:00:00Z');
+    const options = { config, only: ['a.tw', 'b.tw'], now: () => at, pauseMs: 0 };
+    expect(await fetchPolicy(pool, config, at)).toMatchObject({
+      reason: null,
+      maxPerRun: 1,
+      weekly: { limit: null, used: 106, remaining: null },
+    });
+    // Auto mode still monitors worker health and reports usage without inventing a provider quota.
+    expect(await fetchProblems(pool, config, at)).toEqual(['worker has not run since ever']);
+    expect(statusPage(await serviceStatus(pool, config, at))).toContain('伺服器週額度未確認');
+    const first = fakeFetch();
+    expect(await runOnce(pool, { ...options, request: first.request })).toMatchObject({ sent: 1 });
+    const second = fakeFetch();
+    at = new Date('2026-11-06T09:00:00Z');
+    expect(await runOnce(pool, { ...options, request: second.request })).toMatchObject({
+      skipped: expect.stringContaining('next probe'),
+    });
+    expect(second.sent).toEqual([]);
+    expect(await fetchProblems(pool, config, at)).toEqual([]);
+    at = new Date('2026-11-07T08:00:00Z');
+    const third = fakeFetch();
+    expect(await runOnce(pool, { ...options, request: third.request })).toMatchObject({ sent: 1 });
+    await pool.query("UPDATE traffic_profiles SET month = '202610'");
+    const fourth = fakeFetch();
+    expect(await runOnce(pool, { ...options, request: fourth.request })).toMatchObject({ sent: 2 });
+  });
+
+  it('persists a seven-day quota cooldown across a weekly reset, without marking the site as no-data', async () => {
+    await published();
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: 'auto' });
+    const at = new Date('2026-10-25T23:35:00Z');
+    const exceeded = (async () => new Response(JSON.stringify({ exceeded: true }), { status: 200 })) as typeof fetch;
+    expect(await runOnce(pool, { config, only: ['a.tw', 'b.tw'], request: exceeded, now: () => at })).toMatchObject({
+      sent: 1,
+      refused: true,
+      failed: 0,
+    });
+    expect(await rows(pool, 'SELECT outcome, http_status FROM sends')).toEqual([{ outcome: 'refused', http_status: 200 }]);
+    expect(await rows(pool, 'SELECT failures, last_response_at FROM fetch_state')).toEqual([{ failures: 0, last_response_at: null }]);
+    const monday = new Date('2026-10-26T00:35:00Z');
+    const next = fakeFetch();
+    expect(await runOnce(pool, { config, only: ['a.tw'], request: next.request, now: () => monday })).toMatchObject({
+      skipped: expect.stringContaining('cooling down'),
+    });
+    expect(next.sent).toEqual([]);
+    const state = await serviceStatus(pool, config, monday);
+    expect(state.policy).toMatchObject({ reason: 'provider-cooldown', resumeAt: '2026-11-01T23:35:00.000Z' });
+    expect(state.coolingDownUntil).toBe('2026-11-01T23:35:00.000Z');
+  });
+
+  it('honors Retry-After and reports intentional weekly waits without inventing queue times', async () => {
+    await published();
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: '1' });
+    const at = new Date('2026-10-21T10:00:00Z');
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('tag', 'a.tw', 'watch', ?)", [at]);
+    const request = (async () => new Response('', { status: 429, headers: { 'retry-after': '7200' } })) as typeof fetch;
+    await runOnce(pool, { config, request, now: () => at });
+    const state = await serviceStatus(pool, config, at);
+    expect(state.coolingDownUntil).toBe('2026-10-21T12:00:00.000Z');
+    expect(state.queue[0].expectedAt).toBeNull();
+    expect(statusPage(state)).toContain('Similarweb 拒絕請求');
+    const exhausted = await serviceStatus(pool, config, new Date('2026-10-21T13:00:00Z'));
+    expect(exhausted.policy.reason).toBe('weekly-limit');
+    expect(statusPage(exhausted)).toContain('本週請求額度已用完');
+    const paused = await serviceStatus(pool, runConfig({}), at);
+    expect(paused.policy).toMatchObject({ reason: 'disabled', resumeAt: null, maxPerRun: 0 });
+    expect(statusPage(paused)).toContain('Similarweb 自動抓取已暫停');
   });
 
   it('keeps the request contract tag served to blog at /internal/similarweb', async () => {
@@ -576,12 +728,24 @@ describe.skipIf(!url)('with a database', () => {
     expect((await post(entry, { cookie: '', origin })).statusCode).toBe(303);
     expect((await post(entry, { cookie, origin: 'https://evil.example' })).statusCode).toBe(403);
     expect((await post({ ...entry, visits: '60.1' })).body).toContain('單位');
-    expect((await post({ ...entry, Direct: '101' })).statusCode).toBe(400);
+    const rejected = await post({ ...entry, Direct: '101', duration: '2:05', globalRank: '#1,234' });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.body).toContain('尚未儲存。');
+    expect(rejected.body).toContain('name="Direct" aria-invalid="true"');
+    expect(rejected.body).toContain('name="duration" value="2:05"');
+    expect(rejected.body).toContain('name="globalRank" value="#1,234"');
+    const warn = vi.spyOn(server.log, 'warn');
+    await post({ ...entry, duration: '2:60' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ domain: 'news.example.tw', month, fields: ['duration'], reason: expect.stringContaining('平均停留時間') }),
+      'manual month validation failed',
+    );
+    warn.mockRestore();
     expect((await post({ ...entry, month: '201901' })).statusCode).toBe(400);
     expect(await rows(pool, 'SELECT * FROM manual_months')).toHaveLength(0);
-    const saved = await post(entry);
+    const saved = await post({ ...entry, duration: '２：０５', globalRank: '#1,234' });
     expect(saved.statusCode).toBe(303);
-    expect(saved.headers.location).toBe('/site/news.example.tw/manual/?done=saved');
+    expect(saved.headers.location).toBe(`/site/news.example.tw/manual/?done=saved&month=${month}`);
     // Entered numbers come before the sheet; shares left blank stay empty rather than falling back.
     expect((await monthView(pool, month)).find((s) => s.domain === 'news.example.tw')).toMatchObject({
       visits: 60.1,
@@ -779,6 +943,7 @@ describe.skipIf(!url)('with a database', () => {
   });
 
   it('lets editors sign in with Google and add or remove domains by hand', async () => {
+    await published();
     const origin = 'https://traffic.example';
     const login = { clientId: 'cid', clientSecret: 'secret', origin, admins: new Set(['sky9109@gmail.com']) };
     let email = 'sky9109@gmail.com';

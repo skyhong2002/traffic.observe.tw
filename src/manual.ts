@@ -1,6 +1,7 @@
 import type { PoolConnection } from 'mysql2/promise';
 import { type Pool, rows } from './db.ts';
 import { breakdownValues, parseBreakdowns, parseReportedPercent } from './manual-breakdowns.ts';
+import { ManualInputError, manualText, missingManualValue } from './manual-input.ts';
 import { EditError } from './metadata.ts';
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 
@@ -21,17 +22,17 @@ export const manualChannels = [
 export function parseManualChannels(body: Record<string, unknown>) {
   const channels: Partial<Record<TrafficChannel, number>> = {};
   for (const [key, label] of manualChannels) {
-    const value = parseShare(body[key], label);
+    const value = parseShare(body[key], label, key);
     if (value !== null) channels[key] = value;
   }
   for (const [key, totalKey] of [
     ['Referrals', 'referralTotal'],
     ['DisplayAds', 'displayTotal'],
   ] as const) {
-    const total = parseReportedPercent(body[totalKey]);
+    const total = parseReportedPercent(body[totalKey], totalKey, totalKey);
     if (total?.bound === null) {
       if (channels[key] !== undefined && Math.abs(channels[key] - total.value) > 0.001)
-        throw new EditError(`${key} 渠道占比與明細總占比不一致。`);
+        throw new ManualInputError(`${key} 渠道占比與明細總占比不一致。`, key, totalKey);
       channels[key] ??= total.value;
     }
   }
@@ -42,7 +43,7 @@ export type ManualDetails = Omit<TrafficProfile, 'month' | 'channels' | 'source'
 export const manualDetailFields = [
   ['bounce', '跳出率', '百分比，例如 42.5', '%'],
   ['pages', '每次造訪頁數', '例如 3.25', '頁'],
-  ['duration', '平均停留時間', '秒數或時:分:秒，例如 125 或 00:02:05', ''],
+  ['duration', '平均停留時間', '秒數、分:秒或時:分:秒，例如 125、2:05 或 00:02:05', ''],
   ['globalRank', '全球排名', '正整數，例如 1234', ''],
   ['countryCode', '排名國家', '兩碼國家代碼，例如 TW', ''],
   ['countryRank', '國家排名', '該國家的網站排名', ''],
@@ -52,52 +53,57 @@ export const manualDetailFields = [
 
 export function parseManualDetails(body: Record<string, unknown>): ManualDetails {
   const positive = (key: string, integer = false) => {
-    const text = String(body[key] ?? '')
-      .trim()
-      .replace(/,/g, '');
-    if (!text) return null;
+    const raw = manualText(body[key]);
+    if (missingManualValue(raw)) return null;
+    const text = (integer ? raw.replace(/^#\s*/, '') : raw).replace(/,/g, '');
     const n = Number(text);
     if (!Number.isFinite(n) || n <= 0 || (integer && !Number.isSafeInteger(n)))
-      throw new EditError(`${manualDetailFields.find(([k]) => k === key)?.[1] ?? key}請填${integer ? '正整數' : '大於 0 的數字'}。`);
+      throw new ManualInputError(
+        `${manualDetailFields.find(([k]) => k === key)?.[1] ?? key}請填${integer ? '正整數' : '大於 0 的數字'}。`,
+        key,
+      );
     return n;
   };
-  let duration = String(body.duration ?? '').trim();
+  let duration = manualText(body.duration);
+  if (missingManualValue(duration)) duration = '';
   if (duration.includes(':')) {
-    if (!/^\d+:[0-5]\d:[0-5]\d$/.test(duration)) throw new EditError('平均停留時間請填秒數或時:分:秒。');
-    const [h, m, sec] = duration.split(':').map(Number);
-    duration = String(h * 3600 + m * 60 + sec);
+    if (!/^(?:\d+:[0-5]\d:[0-5]\d|\d+:[0-5]\d)$/.test(duration))
+      throw new ManualInputError('平均停留時間請填秒數、分:秒或時:分:秒，例如 125、2:05 或 00:02:05。', 'duration');
+    duration = String(duration.split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0));
   }
   const timeOnSite = duration ? Number(duration) : null;
-  if (timeOnSite !== null && (!Number.isFinite(timeOnSite) || timeOnSite < 0)) throw new EditError('平均停留時間請填非負秒數。');
+  if (timeOnSite !== null && (!Number.isFinite(timeOnSite) || timeOnSite < 0))
+    throw new ManualInputError('平均停留時間請填非負秒數。', 'duration');
   const countryCode = String(body.countryCode ?? '')
     .trim()
     .toUpperCase();
   const countryRank = positive('countryRank', true);
   if ((countryCode || countryRank !== null) && (!/^[A-Z]{2}$/.test(countryCode) || countryRank === null))
-    throw new EditError('國家排名請同時填兩碼國家代碼與排名。');
+    throw new ManualInputError('國家排名請同時填兩碼國家代碼與排名。', 'countryCode', 'countryRank');
   const category = String(body.category ?? '').trim();
   const categoryRank = positive('categoryRank', true);
   if ((category || categoryRank !== null) && (!category || category.length > 128 || categoryRank === null))
-    throw new EditError('分類排名請同時填分類名稱（最多 128 字）與排名。');
+    throw new ManualInputError('分類排名請同時填分類名稱（最多 128 字）與排名。', 'category', 'categoryRank');
   const countries: TrafficProfile['countries'] = [];
-  const countryText = String(body.countries ?? '').trim();
-  if (countryText.length > 8000) throw new EditError('國家占比內容過長。');
+  const countryText = manualText(body.countries);
+  if (countryText.length > 8000) throw new ManualInputError('國家占比內容過長。', 'countries');
   for (const line of countryText.split(/\r?\n/).filter((v) => v.trim())) {
     const match = /^\s*([a-z]{2})[\s,]+(\d+(?:\.\d+)?%?)\s*$/i.exec(line);
-    if (!match) throw new EditError('國家占比請每行填國家代碼與百分比，例如 TW 61.57。');
+    if (!match) throw new ManualInputError('國家占比請每行填國家代碼與百分比，例如 TW 61.57。', 'countries');
     const code = match[1].toUpperCase();
-    if (countries.some((c) => c.code === code)) throw new EditError('國家代碼不能重複。');
-    countries.push({ code, share: parseShare(match[2], '國家占比') as number });
+    if (countries.some((c) => c.code === code)) throw new ManualInputError('國家代碼不能重複。', 'countries');
+    countries.push({ code, share: parseShare(match[2], '國家占比', 'countries') as number });
   }
-  const tw = parseShare(body.taiwan, '台灣占比');
+  const tw = parseShare(body.taiwan, '台灣占比', 'taiwan');
   const listedTw = countries.find((c) => c.code === 'TW');
-  if (listedTw && tw !== null && Math.abs(listedTw.share - tw) > 1e-9) throw new EditError('台灣占比與國家列表的 TW 不一致。');
+  if (listedTw && tw !== null && Math.abs(listedTw.share - tw) > 1e-9)
+    throw new ManualInputError('台灣占比與國家列表的 TW 不一致。', 'taiwan', 'countries');
   if (!listedTw && tw !== null) countries.push({ code: 'TW', share: tw });
-  if (countries.reduce((sum, c) => sum + c.share, 0) > 1.001) throw new EditError('國家占比合計不能超過 100%。');
+  if (countries.reduce((sum, c) => sum + c.share, 0) > 1.001) throw new ManualInputError('國家占比合計不能超過 100%。', 'countries');
   return {
     breakdowns: parseBreakdowns(body),
     countries: countries.sort((a, b) => b.share - a.share),
-    bounceRate: parseShare(body.bounce, '跳出率'),
+    bounceRate: parseShare(body.bounce, '跳出率', 'bounce'),
     pagesPerVisit: positive('pages'),
     timeOnSite,
     globalRank: positive('globalRank', true),
@@ -168,25 +174,25 @@ export function recentMonths(now = new Date(), count = 3) {
 const UNITS: Record<string, number> = { K: 1e3, M: 1e6, B: 1e9 };
 /** "60.10M", "950K", "1.2B" or a plain count such as "60,100,000"; the platform shows the first form. */
 export function parseVisits(value: unknown) {
-  const text = String(value ?? '')
-    .trim()
-    .replace(/,/g, '')
-    .toUpperCase();
+  const text = manualText(value).replace(/,/g, '').toUpperCase();
   const m = /^(\d+(?:\.\d+)?)\s*([KMB])?$/.exec(text);
-  if (!m) throw new EditError('月造訪量請照 Similarweb 平台的寫法填，例如 60.10M。');
+  if (!m) throw new ManualInputError('月造訪量請照 Similarweb 平台的寫法填，例如 60.10M。', 'visits');
   const visits = Math.round(Number(m[1]) * (m[2] ? UNITS[m[2]] : 1));
-  if (!m[2] && visits < 1000) throw new EditError('月造訪量請加上單位 K、M 或 B，例如 60.10M。');
-  if (!(visits > 0) || visits > 1e12) throw new EditError('月造訪量不正確。');
+  if (!m[2] && visits < 1000) throw new ManualInputError('月造訪量請加上單位 K、M 或 B，例如 60.10M。', 'visits');
+  if (!(visits > 0) || visits > 1e12) throw new ManualInputError('月造訪量不正確。', 'visits');
   return visits;
 }
 /** "36.45%" or "36.45" → 0.3645; empty → null (not entered). */
-export function parseShare(value: unknown, label: string) {
-  const text = String(value ?? '')
-    .trim()
-    .replace(/%$/, '');
-  if (!text) return null;
+export function parseShare(value: unknown, label: string, field = '') {
+  const raw = manualText(value);
+  if (missingManualValue(raw)) return null;
+  const text = raw.replace(/%$/, '').trim();
   const n = Number(text);
-  if (!Number.isFinite(n) || n < 0 || n > 100) throw new EditError(`${label}請填 0 到 100 的百分比。`);
+  if (!text || !Number.isFinite(n) || n < 0 || n > 100)
+    throw new ManualInputError(
+      `${label}請填 0 到 100 的百分比；未提供可留空。小於或大於某數的占比請填在「平台詳細分布」，不能當成確切占比。`,
+      field,
+    );
   return n / 100;
 }
 
