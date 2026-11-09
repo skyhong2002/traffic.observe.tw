@@ -289,7 +289,7 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'sites[].errorCode',
         type: 'string | null',
-        desc: 'robots、waf、rate-limit、http-error、not-html、timeout、network、address',
+        desc: 'robots、waf、rate-limit、http-error、not-html、timeout、network、dns、address',
       },
       { name: 'sites[].observedAt', type: 'string | null', desc: '保留的成功結果是何時讀到的；之後失敗也會保留' },
       { name: 'sites[].origin', type: '"traffic" | "blog" | null', desc: 'blog 是從 blog.observe.tw 併入、本站還沒自己檢查過的結果' },

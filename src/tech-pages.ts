@@ -28,6 +28,7 @@ export const ERROR_LABEL: Record<TechErrorCode, string> = {
   'not-html': '首頁不是網頁',
   timeout: '逾時',
   network: '連不上',
+  dns: '網域不存在（查不到 DNS）',
   address: '網域指向非公開位址',
 };
 const EVIDENCE_LABEL: Record<string, string> = {

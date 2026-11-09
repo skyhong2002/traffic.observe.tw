@@ -177,7 +177,42 @@ describe('fetching a homepage', () => {
     expect(await scan({ status: 503 })).toMatchObject({ status: 'failed', errorCode: 'http-error' });
     expect(await scan({ headers: { 'content-type': 'application/pdf' } })).toMatchObject({ status: 'failed', errorCode: 'not-html' });
   });
-  it('tries the browser only after a WAF page or 429, and keeps the plain result when the browser fails too', async () => {
+  it('calls a domain with no DNS for any homepage URL dns, and a name that resolved but would not connect network', async () => {
+    const failing = (codes: Record<string, 'dns' | 'network' | 'timeout'>) =>
+      homepageFetcher(async (url) => {
+        throw new ScanFailure(codes[url.href] ?? 'dns');
+      });
+    expect(await scanDomain('n.example', rules, failing({}), at)).toMatchObject({ status: 'failed', errorCode: 'dns' });
+    expect(await scanDomain('n.example', rules, failing({ 'https://www.n.example/': 'network' }), at)).toMatchObject({
+      status: 'failed',
+      errorCode: 'network',
+    });
+    expect(await scanDomain('n.example', rules, failing({ 'https://n.example/': 'timeout' }), at)).toMatchObject({ errorCode: 'timeout' });
+  });
+  it('retries through the browser after a failed connection but not after a name that does not resolve', async () => {
+    let used = 0;
+    const browser = async () => {
+      used++;
+      return { url: 'https://www.k.example/', status: 200, headers: {}, html: '<meta name="generator" content="Hugo 0.1">' };
+    };
+    const plain = (code: 'network' | 'timeout' | 'dns') =>
+      homepageFetcher(async () => {
+        throw new ScanFailure(code);
+      });
+    expect(await scanDomain('k.example', rules, plain('network'), at, browser)).toMatchObject({
+      status: 'detected',
+      sourceUrl: 'https://www.k.example/',
+    });
+    expect(await scanDomain('k.example', rules, plain('timeout'), at, browser)).toMatchObject({ status: 'detected' });
+    expect(used).toBe(2);
+    expect(await scanDomain('k.example', rules, plain('dns'), at, browser)).toMatchObject({ status: 'failed', errorCode: 'dns' });
+    expect(used).toBe(2);
+    const refused = async (): Promise<never> => {
+      throw new ScanFailure('network');
+    };
+    expect(await scanDomain('k.example', rules, plain('timeout'), at, refused)).toMatchObject({ status: 'failed', errorCode: 'timeout' });
+  });
+  it('tries the browser after a WAF page or 429 but not after an HTTP error, and keeps the plain result when the browser fails too', async () => {
     const plain = (status: number) => homepageFetcher(net({ 'https://f.example/': { status } }).get);
     const browser = async () => ({
       url: 'https://f.example/',

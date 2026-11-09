@@ -164,18 +164,23 @@ export const httpGet: HopGet = (url, maxBytes, cookie) =>
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port) return reject(new ScanFailure('address'));
     if (isIP(url.hostname.replace(/^\[|\]$/g, '')) && !isPublicAddress(url.hostname.replace(/^\[|\]$/g, '')))
       return reject(new ScanFailure('address'));
-    const fail = (error: unknown) =>
+    const fail = (error: unknown) => {
+      const code = (error as NodeJS.ErrnoException)?.code;
       reject(
         error instanceof ScanFailure
           ? error
           : new ScanFailure(
-              (error as NodeJS.ErrnoException)?.code === 'EADDRBLOCKED'
+              code === 'EADDRBLOCKED'
                 ? 'address'
-                : (error as Error)?.message === 'timeout'
-                  ? 'timeout'
-                  : 'network',
+                : // The name has no address at all (NXDOMAIN or no A/AAAA); EAI_AGAIN, a resolver hiccup, stays 'network'.
+                  code === 'ENOTFOUND' || code === 'ENODATA'
+                  ? 'dns'
+                  : (error as Error)?.message === 'timeout'
+                    ? 'timeout'
+                    : 'network',
             ),
       );
+    };
     const request = (url.protocol === 'https:' ? https : http).get(url, {
       lookup: publicLookup as never,
       agent: false,
@@ -261,7 +266,10 @@ export const homepageUrls = (domain: string) => [
   `http://www.${domain}/`,
 ];
 
-/** The homepage of a domain: the first of homepageUrls that connects. */
+/**
+ * The homepage of a domain: the first of homepageUrls that connects. When none does, the failure is 'dns' only if no
+ * name resolved at all; a name that resolved but would not connect is the more telling answer.
+ */
 export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
   return async (domain) => {
     const follow = async (start: URL): Promise<Page> => {
@@ -287,13 +295,13 @@ export function homepageFetcher(get: HopGet = httpGet): PageFetcher {
       }
       throw new ScanFailure('http-error');
     };
-    let failure: unknown;
+    let failure: ScanFailure | undefined;
     for (const url of homepageUrls(domain))
       try {
         return await follow(new URL(url));
       } catch (error) {
-        if (!(error instanceof ScanFailure) || !['network', 'timeout'].includes(error.code)) throw error;
-        failure = error;
+        if (!(error instanceof ScanFailure) || !['network', 'timeout', 'dns'].includes(error.code)) throw error;
+        if (!failure || failure.code === 'dns' || error.code !== 'dns') failure = error;
       }
     throw failure;
   };
@@ -306,10 +314,13 @@ const withTimeout = <T>(work: Promise<T>, ms: number) =>
   });
 
 /**
- * One domain's attempt: what its homepage shows, or why there was no page. When the page is a WAF challenge or a 429
- * and a `fallback` is given (tech-browser.ts, a real browser), the homepage is tried once more through it; its result
- * is kept when it got the page.
+ * One domain's attempt: what its homepage shows, or why there was no page. When a `fallback` is given (tech-browser.ts,
+ * a real browser), the homepage is tried once more through it after a WAF challenge or a 429, and after a name that
+ * resolved would not connect or timed out: Chromium completes a certificate chain the server leaves out
+ * (citycafe.com.tw sends no intermediate) where Node refuses. Its result is kept when it got the page. A name that
+ * does not resolve is not retried.
  */
+const RETRIED = new Set<TechErrorCode>(['waf', 'rate-limit', 'network', 'timeout']);
 export async function scanDomain(
   domain: string,
   rules: WappalyzerRules,
@@ -318,7 +329,7 @@ export async function scanDomain(
   fallback?: PageFetcher,
 ): Promise<TechObservation> {
   const first = await scanWith(domain, rules, fetchPage, at);
-  if (!fallback || first.status !== 'blocked' || !['waf', 'rate-limit'].includes(first.errorCode ?? '')) return first;
+  if (!fallback || !first.errorCode || !RETRIED.has(first.errorCode)) return first;
   const second = await scanWith(domain, rules, fallback, at);
   return second.status === 'detected' || second.status === 'unknown' ? second : first;
 }
@@ -480,7 +491,7 @@ export async function runTech(
   }: {
     rules?: WappalyzerRules | null;
     fetchPage?: PageFetcher;
-    /** The second try for WAF pages (scanDomain). */
+    /** The second try for WAF pages and failed connections (scanDomain). */
     fallback?: PageFetcher;
     now?: () => Date;
     budget?: number;
