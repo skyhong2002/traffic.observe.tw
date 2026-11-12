@@ -4,6 +4,16 @@ import { apiDocsPage, apiIndex, openApi } from './api-docs.ts';
 import { authenticate, serviceTokens } from './auth.ts';
 import { BRAND_HEAD, registerBrand } from './brand.ts';
 import {
+  collectionMonth,
+  collectionMonths,
+  loadCollection,
+  publicCollection,
+  setCollectionPriority,
+  syncCollections,
+  validCollectionMonth,
+} from './collection.ts';
+import { collectionPage, validCollectionSort, validCollectionSource } from './collection-pages.ts';
+import {
   cleanTag,
   loadCrowd,
   overridesOf,
@@ -17,6 +27,7 @@ import {
   votesOf,
 } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
+import { fetchPolicy } from './fetch-policy.ts';
 import { buildHistory, type History } from './history.ts';
 import { iconStore } from './icons.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
@@ -249,7 +260,7 @@ export function buildApp(
       ranking(compared, topic).filter((s) => !queryText || `${s.name} ${s.domain}`.toLowerCase().includes(queryText)),
     );
     const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
-    const unit: 'share' | 'count' = query.unit === 'count' ? 'count' : 'share';
+    const unit: 'share' | 'count' | 'tw' = query.unit === 'count' || query.unit === 'tw' ? query.unit : 'share';
     return { months, month, from, show, unit, topics, topic, exclude, source, sources, list: placed };
   };
 
@@ -365,6 +376,16 @@ export function buildApp(
     return site ? editSitePage(site, tagsByUse(sites), error, draft, message) : null;
   };
   /** The page for months copied from Similarweb's platform, with what the free endpoint last answered. */
+  const manualChoices = async (domain: string) =>
+    [
+      ...new Set([
+        ...recentMonths(),
+        ...(await rows<{ month: string }>(pool, 'SELECT month FROM collection_domains WHERE domain = ?', [domain])).map((r) => r.month),
+      ]),
+    ]
+      .filter((month) => month < new Date().toISOString().slice(0, 7).replace('-', ''))
+      .sort()
+      .reverse();
   const manualFor = async (
     domain: string,
     form: Pick<ManualForm, 'message' | 'error' | 'draft' | 'errorFields' | 'selectedMonth' | 'completedMonth'> = {},
@@ -373,7 +394,7 @@ export function buildApp(
     if (!site) return null;
     const [months, traffic] = await Promise.all([loadManualMonths(pool, { domain: site.domain }), loadTraffic(pool, [site.domain])]);
     const free = (traffic.get(site.domain)?.monthly ?? []).slice(-3).map((m) => ({ month: m.month, estimated: estimated(m.visits) }));
-    return manualPage(site, { months, choices: recentMonths(), free, ...form });
+    return manualPage(site, { months, choices: await manualChoices(site.domain), free, ...form });
   };
   const DONE: Record<string, string> = { saved: '已儲存。', deleted: '已刪除這個月份的補登數字。' };
   app.get<{ Params: { domain: string }; Querystring: { saved?: string } }>('/site/:domain/edit/', async (request, reply) => {
@@ -410,7 +431,8 @@ export function buildApp(
     const month = String(body.month ?? '');
     try {
       const remove = body.action === 'delete';
-      if (!remove && !recentMonths().includes(month)) throw new ManualInputError('只能補登最近三個月。', 'month');
+      if (!remove && !(await manualChoices(site.domain)).includes(month))
+        throw new ManualInputError('只能補登最近三個月或已建立的月份缺漏清單。', 'month');
       const details = remove ? null : parseManualDetails(body);
       await setManualMonth(
         pool,
@@ -703,7 +725,8 @@ export function buildApp(
     if (!allowCheck(user.email)) return reply.redirect(`/tech/${domain}/?done=rate_limited`, 303);
     const browser = browserFetcher();
     const r = await checkNow(pool, domain, { fallback: browser.fetchPage }).finally(() => browser.close());
-    if ('error' in r) return reply.redirect(`/tech/${domain}/?done=${r.error === 'no_rules' ? 'no_rules' : 'checked'}`, 303);
+    if ('error' in r)
+      return reply.redirect(`/tech/${domain}/?done=${r.error === 'no_rules' ? 'no_rules' : r.error === 'busy' ? 'busy' : 'checked'}`, 303);
     techCache = null;
     return reply.redirect(`/tech/${domain}/?done=${r.fresh ? 'checked' : 'recent'}`, 303);
   });
@@ -829,6 +852,79 @@ export function buildApp(
     const [status, manual] = await Promise.all([serviceStatus(pool, config), manualCandidates(pool)]);
     return statusPage(status, manual);
   });
+  app.get<{
+    Querystring: { month?: string; state?: string; priority?: string; page?: string; saved?: string; source?: string; sort?: string };
+  }>('/status/collection/', async (request, reply) => {
+    const month = request.query.month ?? collectionMonth(config);
+    if (!validCollectionMonth(month)) return reply.code(400).send({ error: 'invalid month' });
+    const [collection, months, editor, policy] = await Promise.all([
+      loadCollection(pool, config, month),
+      collectionMonths(pool, config),
+      editors.currentEditor(request),
+      fetchPolicy(pool, config),
+    ]);
+    const state = ['all', 'missing', 'pending', 'retry', 'retry-wait', 'manual-needed', 'complete'].includes(request.query.state ?? '')
+      ? request.query.state!
+      : 'all';
+    reply.type('text/html; charset=utf-8');
+    return collectionPage(
+      collection,
+      [...new Set([month, ...months])].sort().reverse(),
+      !!editor,
+      state,
+      Math.max(0, Math.min(4, Math.floor(Number(request.query.priority) || 0))),
+      Math.max(1, Math.floor(Number(request.query.page) || 1)),
+      publicDomain(request.query.saved) || '',
+      validCollectionSource(request.query.source),
+      policy,
+      validCollectionSort(request.query.sort),
+    );
+  });
+  app.post<{
+    Body: {
+      domain?: string;
+      priority?: string;
+      month?: string;
+      state?: string;
+      filterPriority?: string;
+      page?: string;
+      source?: string;
+      sort?: string;
+    };
+  }>('/status/collection/priority', async (request, reply) => {
+    const editor = await editorPost(request, reply);
+    if (!editor) return reply;
+    const domain = publicDomain(request.body?.domain);
+    const priority = Number(request.body?.priority);
+    if (!domain || request.body?.priority === undefined || !Number.isInteger(priority) || priority < 0 || priority > 4)
+      return reply.code(400).send({ error: 'invalid priority' });
+    try {
+      await setCollectionPriority(pool, domain, priority, editor.email);
+    } catch {
+      return reply.code(400).send({ error: 'unknown domain' });
+    }
+    const month = validCollectionMonth(request.body?.month) ? request.body.month : collectionMonth(config);
+    const state = ['all', 'missing', 'pending', 'retry', 'retry-wait', 'manual-needed', 'complete'].includes(request.body?.state ?? '')
+      ? request.body.state!
+      : 'all';
+    const filterPriority = Math.max(0, Math.min(4, Math.floor(Number(request.body?.filterPriority) || 0)));
+    const page = Number.isFinite(Number(request.body?.page)) ? Math.max(1, Math.floor(Number(request.body?.page))) : 1;
+    const source = validCollectionSource(request.body?.source);
+    const sort = validCollectionSort(request.body?.sort);
+    return reply.redirect(
+      `/status/collection/?${new URLSearchParams({ month, state, priority: String(filterPriority), source, sort, page: String(page), saved: domain })}`,
+      303,
+    );
+  });
+  app.post<{ Body: { month?: string } }>('/status/collection/month', async (request, reply) => {
+    const editor = await editorPost(request, reply);
+    if (!editor) return reply;
+    const month = request.body?.month;
+    if (!validCollectionMonth(month) || month >= new Date().toISOString().slice(0, 7).replace('-', ''))
+      return reply.code(400).send({ error: 'invalid month' });
+    await syncCollections(pool, { ...config, targetMonth: month });
+    return reply.redirect(`/status/collection/?month=${month}`, 303);
+  });
 
   // Public, read-only API.
   // The API, described once in api-docs.ts: the page, the JSON index and the OpenAPI document.
@@ -876,6 +972,8 @@ export function buildApp(
       '上月名次',
       '搜尋S',
       'AI',
+      '台灣搜尋S(估算)',
+      '台灣AI(估算)',
       '搜尋占比',
       'AI占比',
       '台灣占比',
@@ -899,6 +997,8 @@ export function buildApp(
         s.prevRank,
         s.searchVisits,
         s.aiVisits,
+        s.taiwanSearchVisits,
+        s.taiwanAiVisits,
         s.searchShare,
         s.aiShare,
         s.taiwanShare,
@@ -960,6 +1060,11 @@ export function buildApp(
     return record;
   });
   app.get('/api/v1/status', async () => serviceStatus(pool, config));
+  app.get<{ Querystring: { month?: string } }>('/api/v1/collection', async (request, reply) => {
+    const month = request.query.month ?? collectionMonth(config);
+    if (!validCollectionMonth(month)) return reply.code(400).send({ error: 'invalid month' });
+    return publicCollection(await loadCollection(pool, config, month));
+  });
 
   // Services on this machine (auth.ts). The /internal/similarweb pair keeps the
   // contract tag served, so blog's client works unchanged.

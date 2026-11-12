@@ -124,7 +124,7 @@ function row(domain, s) {
   const radar = (state.data.radar[domain] || []).at(-1) || null;
   return {
     domain, displayDomain: window.displayDomainText(domain), name: window.displayDomainText(s.name || domain), group: s.group, topics: topicsOf(s), visits: now[V], twVisits: taiwanNow, twBasis: now[BASIS] || 0, twShare: twShare(now), twCapped: now[CAPPED] === 1, prev: before ? before[V] : null,
-    change, search: now[S], ai: now[A], taiwan: now[T], origin: now[ORIGIN], radar,
+    change, search: now[S], ai: now[A], twSearch: now[S] != null && twShare(now) != null ? now[S] * twShare(now) : null, twAi: now[A] != null && twShare(now) != null ? now[A] * twShare(now) : null, taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
   };
 }
@@ -395,8 +395,8 @@ const COLS = [
   { key: 'topics', label: '標籤', cls: 'l tags-cell', sort: (r) => (r.topics.length ? r.topics.join('、') : null), dir: 1 },
   { key: 'change', label: '區間變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '台灣造訪量與所選比較月份相比' },
   { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算' },
-  { key: 'search', label: '自然搜尋', cls: 'num', sort: (r) => r.search, dir: -1, title: '自然搜尋帶來的造訪' },
-  { key: 'ai', label: 'AI 導流', cls: 'num', sort: (r) => r.ai, dir: -1, title: 'GenAI 導流造訪' },
+  { key: 'twSearch', label: '台灣搜尋', cls: 'num', sort: (r) => r.twSearch, dir: -1, title: '台灣自然搜尋造訪（估算）＝ 造訪量 × 自然搜尋占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
+  { key: 'twAi', label: '台灣 AI', cls: 'num', sort: (r) => r.twAi, dir: -1, title: '台灣 GenAI 導流造訪（估算）＝ 造訪量 × AI 導流占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
   { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1 },
   { key: 'radar', label: 'Radar 全球', cls: 'l radar', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期' },
 ];
@@ -424,11 +424,11 @@ const millions = (n) => {
   return unit ? `${v}<span class="unit">${unit}</span>` : v;
 };
 /** 台灣造訪量 with ≈ (an estimate) or < (a ceiling) where Similarweb did not measure the share; the title says how. */
-function twCell(r) {
-  if (!r.twBasis || r.twVisits == null) return millions(r.twVisits);
+function twCell(r, n = r.twVisits) {
+  if (!r.twBasis || n == null) return millions(n);
   const pct = trafficDigits === 2 ? String(Number((r.twShare * 100).toPrecision(2))) : r.twShare < 0.1 ? (r.twShare * 100).toFixed(2) : (r.twShare * 100).toFixed(1);
   const note = `${BASIS_NOTE[r.twBasis]}（占比 ${pct}%）${r.twCapped ? '；原本的估算超過這個上限，已改用上限' : ''}`;
-  return `<span class="estimate" title="${esc(note)}">${r.twBasis === 3 ? '&lt;' : '≈'}${millions(r.twVisits)}</span>`;
+  return `<span class="estimate" title="${esc(note)}">${r.twBasis === 3 ? '&lt;' : '≈'}${millions(n)}</span>`;
 }
 function rankingRow(r, cal) {
   const tr = document.createElement('tr');
@@ -441,7 +441,7 @@ function rankingRow(r, cal) {
     twVisits: twCell(r),
     visits: millions(r.visits),
     change: `<span class="trend-cell"><span class="spark-cell" title="近一年台灣造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
-    search: millions(r.search), ai: millions(r.ai), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
+    twSearch: twCell(r, r.twSearch), twAi: twCell(r, r.twAi), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
   };
   tr.innerHTML = COLS.map((c) => `<td class="${c.cls}">${cells[c.key]}</td>`).join('');
   const pts = cal.map((k) => ({ key: k, value: twVisits(state.data.sites[r.domain].m[k]) }));

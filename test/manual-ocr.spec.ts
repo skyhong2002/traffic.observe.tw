@@ -57,6 +57,53 @@ describe('Similarweb screenshot extraction', () => {
     expect(result.fields.visits).toBeUndefined();
     expect(result.warnings.join(' ')).toContain('月造訪量');
   });
+  it('reads extension engagement and countries without importing desktop-only sources', () => {
+    const result = mergeScreenshots(['extension-engagement', 'extension-geography'].map((name) => parseScreenshot(fixture(name))));
+    expect(result.months).toEqual(['202610']);
+    expect(result.fields).toEqual({
+      visits: '416.5K',
+      pages: '3.34',
+      duration: '00:05:40',
+      bounce: '44.43',
+      taiwan: '97.02',
+      countries: 'TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3',
+    });
+    expect(parseVisits(result.fields.visits)).toBe(416_500);
+    expect(result.warnings.join(' ')).toContain('已略過該區塊');
+    expect(result.warnings.join(' ')).toContain('Germany');
+    expect(result.warnings.join(' ')).toContain('請核對範圍');
+  });
+  it('keeps device restrictions on the country card and on a cropped source card', () => {
+    const input = fixture('extension-geography');
+    // Put the device filter above the country card instead of the source card.
+    const restrictedCountry = input.replace(/\t1143\t/g, '\t10\t');
+    expect(parseScreenshot(restrictedCountry).fields).toEqual({});
+    expect(parseScreenshot(input.replace('Countries', 'Sources')).fields).toEqual({});
+    expect(parseScreenshot(input.replace('Desktop', 'Mobile')).fields).toEqual(parseScreenshot(input).fields);
+  });
+  it('requires an explicit all-traffic scope for extension source lists and preserves explicit zeroes', () => {
+    const input = fixture('extension-geography');
+    // Simulate an all-device source card using the real extension row layout.
+    const allTraffic = input.replace('Desktop', 'All').replace('Only', 'traffic');
+    const result = parseScreenshot(allTraffic);
+    expect(result.fields).toMatchObject({
+      Direct: '60.69',
+      search: '32.53',
+      SocialOrganic: '3.63',
+      ai: '0.69',
+      Mail: '0.32',
+      SocialPaid: '0',
+      SearchPaid: '0',
+      Affiliate: '0',
+      DisplayAds: '0',
+    });
+    // Tesseract lost the decimal in 2.13%; never copy its out-of-range 213%.
+    expect(result.fields.Referrals).toBeUndefined();
+    const noScope = parseScreenshot(allTraffic.replace('Worldwide', 'Unknown'));
+    expect(noScope.fields.Direct).toBeUndefined();
+    expect(noScope.fields.taiwan).toBe('97.02');
+    expect(noScope.warnings.join(' ')).toContain('已略過該區塊');
+  });
   it('refuses explicit desktop traffic and reports missing or conflicting dates', () => {
     expect(parseScreenshot(fixture('engagement').replace('Worldwide', 'Desktop')).fields).toEqual({});
     expect(parseScreenshot(fixture('engagement').replace(/0ct2026/g, 'October2026')).months).toEqual(['202610']);

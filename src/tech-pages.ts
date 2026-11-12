@@ -10,11 +10,12 @@ import {
   siteCell,
   sortCell,
   table,
+  tableDescription,
   tw,
   twDate,
 } from './pages.ts';
 import { CATEGORIES, CATEGORY_LABEL, PRODUCTS, type TechCategory, type TechErrorCode, type TechStatus } from './tech.ts';
-import type { TechRecord } from './tech-scan.ts';
+import { type TechRecord, techConfig } from './tech-scan.ts';
 
 // /tech/ (every known site's technologies), /tech/<domain>/ (one domain, any domain) and the site page's 網站技術
 // block. The overview is computed once here for the page and /api/v1/tech alike.
@@ -42,7 +43,7 @@ const EVIDENCE_LABEL: Record<string, string> = {
 
 const techMethod = (
   count: number,
-) => `<p>每個網域的首頁一個月抓一次（網站雷達自己抓，和一般瀏覽器一樣讀首頁），比對 <a href="https://github.com/enthec/webappanalyzer" rel="noopener">Wappalyzer 社群版規則</a>裡本站列出的 ${count} 項技術：網址、HTML、script、meta、回應標頭與頁面元素。需要執行 JavaScript、讀 cookie 或另外發請求的規則不採用，所以只靠前端程式載入的技術可能看不到。</p>
+) => `<p>自動掃描每 ${techConfig().intervalHours} 小時最多一批、每批最多 ${techConfig().budget} 個網域，網域之間至少等 ${techConfig().pauseSeconds} 秒；成功的首頁 30 天後才再掃描（網站雷達自己抓，和一般瀏覽器一樣讀首頁，不使用 Similarweb 額度），比對 <a href="https://github.com/enthec/webappanalyzer" rel="noopener">Wappalyzer 社群版規則</a>裡本站列出的 ${count} 項技術：網址、HTML、script、meta、回應標頭與頁面元素。需要執行 JavaScript、讀 cookie 或另外發請求的規則不採用，所以只靠前端程式載入的技術可能看不到。</p>
 <p>一頁只能證明它帶了什麼，不能證明網站沒用什麼：「未辨識」表示首頁沒有清單內任何技術的痕跡，不是沒有技術。版本只來自網頁明寫的 <code>meta generator</code>，互相矛盾時標「不明」；CDN 與主機只是提示，信心最多 40%。抓取失敗時保留上一次成功的結果。部落格原本在 blog.observe.tw 由文章頁偵測的結果已併入，等本站自己抓過後取代。</p>`;
 
 export interface TechSite {
@@ -218,7 +219,7 @@ export function techPage(o: TechOverview, view?: unknown) {
       actions: `<a href="/api/v1/tech${link({}).slice('/tech/'.length)}">JSON</a>`,
       tabs: navigation,
     },
-    `<div class="tech-explorer">${content}</div>`,
+    `<p class="note">網站技術資料來自各站首頁掃描；使用 Similarweb 額度：否。查看本頁與 JSON 只讀已儲存結果。<a href="/status/">查看各類更新頻率</a></p><div class="tech-explorer">${content}</div>`,
     {
       nav: 'tech',
       method: `${techMethod(PRODUCTS.size)}${methodPart('技術', `<p>每項技術出現在幾個網站的首頁；比例的分母是此來源有成功檢查結果的 ${c.withSnapshot.toLocaleString('en-US')} 個網站。一個網站可能使用多項技術。網站數與比例不受檢查結果篩選影響。</p>`)}`,
@@ -233,7 +234,8 @@ export interface TechViewer {
 }
 const MESSAGES: Record<string, string> = {
   checked: '已重新檢查。',
-  recent: '十分鐘內才檢查過，先顯示上次的結果。',
+  recent: `${techConfig().manualCacheHours} 小時內已掃描過首頁，顯示已儲存的結果，沒有重新連線。`,
+  busy: '網站技術掃描進行中，請稍後再試。',
   rate_limited: '檢查太頻繁，請稍後再試（每個帳號每小時 10 次）。',
   no_rules: '偵測規則尚未安裝，暫時無法檢查。',
 };
@@ -243,9 +245,9 @@ const detectionRows = (r: TechRecord) =>
     .sort((a, b) => CATEGORIES.indexOf(a.category) - CATEGORIES.indexOf(b.category) || a.name.localeCompare(b.name))
     .map(
       (d) =>
-        `<tr><td class="l" data-v="${html(d.name)}">${techChip(d)}</td><td class="l" data-v="${CATEGORIES.indexOf(d.category)}">${CATEGORY_LABEL[d.category] ?? html(d.category)}</td><td class="l">${d.version === 'unknown' ? '<span class="muted">不明</span>' : html(d.version)}</td>${sortCell('num', d.confidence, `${Math.round(d.confidence * 100)}%`)}<td class="l">${d.evidence
-          .map((e) => (e.kind === 'generator' ? `meta generator：${html(e.value)}` : (EVIDENCE_LABEL[e.value] ?? html(e.value))))
-          .join('、')}</td></tr>`,
+        `<tr><td class="l" data-v="${html(d.name)}">${techChip(d)}</td><td class="l" data-v="${CATEGORIES.indexOf(d.category)}">${CATEGORY_LABEL[d.category] ?? html(d.category)}</td><td class="l">${d.version === 'unknown' ? '<span class="muted">不明</span>' : html(d.version)}</td>${sortCell('num', d.confidence, `${Math.round(d.confidence * 100)}%`)}<td class="l prose-cell">${tableDescription(
+          d.evidence.map((e) => (e.kind === 'generator' ? `meta generator：${e.value}` : (EVIDENCE_LABEL[e.value] ?? e.value))).join('、'),
+        )}</td></tr>`,
     )
     .join('');
 
@@ -253,7 +255,7 @@ const detectionRows = (r: TechRecord) =>
 export function techDomainPage(domain: string, name: string | null, record: TechRecord | null, known: boolean, viewer: TechViewer) {
   const title = name ?? domain;
   const check = viewer.signedIn
-    ? `<form class="inline" method="post" action="/tech/${html(domain)}/check"><button type="submit">${record ? '重新檢查' : '立即檢查'}</button></form>`
+    ? `<form class="inline" method="post" action="/tech/${html(domain)}/check"><button type="submit">${record ? '重新掃描首頁' : '掃描首頁'}</button></form>`
     : viewer.loginEnabled
       ? `<a href="/auth/google?next=${encodeURIComponent(`/tech/${domain}/`)}">登入後${record ? '重新檢查' : '立即檢查'}</a>`
       : '';
@@ -282,7 +284,7 @@ ${section(
       dek: `${favicon(domain, title)}<a href="https://${html(domain)}/" rel="noopener">${displayHtml(domain)} ↗</a>${known ? `<span class="sep" aria-hidden="true">·</span><a href="/site/${html(domain)}/">流量資料</a>` : ''}`,
       actions: `${check}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
     },
-    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${displayHtml(domain)}</span></nav>${flash}${body}`,
+    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${displayHtml(domain)}</span></nav>${flash}<p class="note">資料來源：直接讀取這個網站的首頁以辨識技術，使用 Similarweb 額度：否。手動掃描同一網域至少間隔 ${techConfig().manualCacheHours} 小時；此頁與 JSON 顯示已儲存的結果。</p>${body}`,
     {
       nav: 'tech',
       method: `${techMethod(PRODUCTS.size)}${record ? methodPart('偵測到的技術', '<p>「依據」是哪一類規則比對到，不是頁面內容。</p>') : ''}`,
@@ -295,7 +297,7 @@ export function techSection(domain: string, record: TechRecord | null) {
   if (!record)
     return section(
       '網站技術',
-      `<p class="note">首頁還沒檢查過，排程輪到時會檢查。<a href="/tech/${html(domain)}/">技術頁</a></p>`,
+      `<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。首頁還沒檢查過，排程輪到時會檢查。<a href="/tech/${html(domain)}/">技術頁</a></p>`,
       ' id="tech"',
     );
   const byCategory = CATEGORIES.map((k) => [k, record.detections.filter((d) => d.category === k)] as const).filter(
@@ -306,7 +308,7 @@ export function techSection(domain: string, record: TechRecord | null) {
     : `<p class="body">${record.observedAt ? '首頁沒有清單內任何技術的痕跡（未辨識）。' : `還沒有成功讀到首頁（${ERROR_LABEL[record.errorCode as TechErrorCode] ?? STATUS_LABEL[record.status]}）。`}</p>`;
   return section(
     '網站技術',
-    `${list}<p class="note">${record.observedAt ? `${twDate(record.observedAt)} 從首頁偵測${record.origin === 'blog' ? '（blog.observe.tw 的結果）' : ''}。` : ''}<a href="/tech/${html(domain)}/">版本、依據與檢查紀錄</a></p>`,
+    `${list}<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。${record.observedAt ? `${twDate(record.observedAt)} 從首頁偵測${record.origin === 'blog' ? '（blog.observe.tw 的結果）' : ''}。` : ''}<a href="/tech/${html(domain)}/">版本、依據與檢查紀錄</a></p>`,
     ' id="tech"',
   );
 }

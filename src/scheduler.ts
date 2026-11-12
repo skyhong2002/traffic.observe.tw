@@ -1,12 +1,23 @@
+import {
+  type CollectionEntry,
+  collectionMonth,
+  collectionMonths,
+  loadCollection,
+  recordCollectionAttempt,
+  syncCollections,
+  validCollectionMonth,
+} from './collection.ts';
 import { type Pool, rows } from './db.ts';
 import { fetchPolicy, policyNote } from './fetch-policy.ts';
-import { fetchSummary, isRefusal, parseDomainTraffic, requestSimilarweb, TrafficFetchError } from './similarweb.ts';
+import { finishRecovery, refuseProvider, reserveRecovery } from './provider-backoff.ts';
+import { fetchSummary, isRefusal, parseDomainTraffic, requestSimilarweb, responseMetadata, TrafficFetchError } from './similarweb.ts';
 import { saveTraffic } from './store.ts';
 
 // The one place that sends requests to data.similarweb.com. This machine has
 // one IP. Every run shares an optional weekly budget, sends requests 3 s apart,
 // and stops at the first 401/403/429. While last month's profile is unavailable,
 // probe at most once per day instead of spending the week's allowance hourly.
+// Never-attempted domains still get their first fetch, even if only older months are available.
 
 const DAY = 86_400_000;
 /** A domain being fetched is held this long, so two runs never send it twice. */
@@ -27,15 +38,30 @@ export function runConfig(env: Record<string, string | undefined> = process.env)
     const value = Number(env[name]);
     return env[name] !== undefined && env[name] !== '' && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
   };
+  const target = env.TRAFFIC_TARGET_MONTH;
+  if (target && target !== 'auto' && !validCollectionMonth(target)) throw Error('Invalid TRAFFIC_TARGET_MONTH');
   return {
     /** Requests one run may send; 0 sends none. */
     budget: num('TRAFFIC_RUN_BUDGET', 0),
     /** Optional local cap; auto uses response-driven backoff, 0 disables requests. */
     weeklyBudget: env.TRAFFIC_WEEKLY_BUDGET === 'auto' ? null : num('TRAFFIC_WEEKLY_BUDGET', 15),
+    collectionEnabled: env.TRAFFIC_COLLECTION_ENABLED === '1',
+    targetMonth: target && target !== 'auto' ? target : null,
+    coreDomains: num('TRAFFIC_CORE_DOMAINS', 100),
+    collectionMaxAttempts: Math.max(1, num('TRAFFIC_COLLECTION_MAX_ATTEMPTS', 3)),
+    collectionRetryHours: Math.max(1, num('TRAFFIC_COLLECTION_RETRY_HOURS', 72)),
+    hourlyBudget: num('TRAFFIC_HOURLY_BUDGET', 15),
+    minIntervalSeconds: num('TRAFFIC_MIN_INTERVAL_SECONDS', 0),
     /** Before last month's profile appears, allow at most one request per interval. */
     probeIntervalHours: Math.max(1, num('TRAFFIC_PROBE_INTERVAL_HOURS', 24)),
     /** A 429 without Retry-After does not establish when the server will reset. */
     quotaCooldownHours: Math.max(1, num('TRAFFIC_QUOTA_COOLDOWN_HOURS', 168)),
+    adaptiveBackoff: env.TRAFFIC_ADAPTIVE_BACKOFF === '1',
+    backoffBaseHours: Math.max(1, num('TRAFFIC_BACKOFF_BASE_HOURS', 2)),
+    backoffMaxHours: Math.max(1, num('TRAFFIC_BACKOFF_BASE_HOURS', 2), num('TRAFFIC_BACKOFF_MAX_HOURS', 24)),
+    recoveryIntervalMinutes: Math.max(1, num('TRAFFIC_RECOVERY_INTERVAL_MINUTES', 15)),
+    recoverySuccesses: Math.max(1, num('TRAFFIC_RECOVERY_SUCCESSES', 3)),
+    recoveryDailyBudget: Math.max(1, num('TRAFFIC_RECOVERY_DAILY_BUDGET', 3)),
     /** After a refusal nothing is sent for this long (tag's limit lifted after ~11 minutes). */
     cooldownMinutes: num('TRAFFIC_REFUSAL_COOLDOWN_MINUTES', 50),
     /** Requesters in priority order; earlier ones are fetched first. Editors' hand-added domains (manual) come last. */
@@ -60,6 +86,7 @@ export interface Candidate {
   lastSuccess: number;
   nextAttempt: number;
   latestProfile: string | null;
+  collection?: CollectionEntry;
 }
 
 /** The 1st of `now`'s month (UTC), plus `months`. */
@@ -76,9 +103,9 @@ export const previousMonth = (now: Date) => {
  * domain comes due together at the start of a month); or a watched
  * domain still missing last month's profile (Similarweb only ever returns the
  * latest month's channels and countries, so a month not caught is lost), tried
- * every three days. Domains in backoff (next_attempt_at) wait. Order: watched
- * domains tried before but still missing last month first (that month is lost
- * once the next one is out), then never tried, then the rest; each group by
+ * every three days. Domains in backoff (next_attempt_at) wait. Order: never-tried
+ * domains first, then watched domains still missing last month (that month is
+ * lost once the next one is out), then the rest; each group by
  * requester priority, then the oldest success. Only `catchUp` of the domains
  * missing last month are kept (catchUpQuota): before Similarweb has it for a
  * site, fetching it again only gets the month before.
@@ -87,25 +114,34 @@ export function dueQueue(candidates: Candidate[], now = new Date(), catchUp = In
   const t = now.getTime();
   const last = previousMonth(now);
   const reason = (c: Candidate): DueReason | null => {
+    if (c.collection) return c.collection.automatic ? 'collection' : null;
     if (c.nextAttempt > t) return null;
     if (c.pendingSince !== null) return 'lookup';
     if (!c.watched) return null;
     if (c.lastSuccess < monthStart(now).getTime()) return c.lastSuccess ? 'refresh' : 'new';
     return (c.latestProfile ?? '') < last && t - c.lastAttempt >= CATCH_UP ? 'catch-up' : null;
   };
-  const group = (c: Candidate) => (!c.lastAttempt ? 1 : c.watched && (c.latestProfile ?? '') < last ? 0 : 2);
+  const group = (c: Candidate) => (!c.lastAttempt ? 0 : c.watched && (c.latestProfile ?? '') < last ? 1 : 2);
   let left = catchUp;
   return candidates
     .map((c) => ({ ...c, reason: reason(c) }))
     .filter((c): c is Candidate & { reason: DueReason } => c.reason !== null)
-    .sort(
-      (a, b) =>
-        group(a) - group(b) || a.tier - b.tier || Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) || a.lastSuccess - b.lastSuccess,
+    .sort((a, b) =>
+      a.collection && b.collection
+        ? 0
+        : a.collection
+          ? -1
+          : b.collection
+            ? 1
+            : group(a) - group(b) ||
+              a.tier - b.tier ||
+              Number(a.lastSuccess > 0) - Number(b.lastSuccess > 0) ||
+              a.lastSuccess - b.lastSuccess,
     )
-    .filter((c) => group(c) !== 0 || left-- > 0);
+    .filter((c) => c.collection || group(c) !== 1 || left-- > 0);
 }
 /** Why a domain is due: never fetched, not yet fetched this month, last month's profile still missing, or a one-off lookup. */
-export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup';
+export type DueReason = 'new' | 'refresh' | 'catch-up' | 'lookup' | 'collection';
 
 export const dueDomains = (candidates: Candidate[], now = new Date(), catchUp = Infinity) =>
   dueQueue(candidates, now, catchUp).map((c) => c.domain);
@@ -134,7 +170,7 @@ export const catchUpQuota = (share: MonthShare, budget: number) =>
 
 const time = (d: Date | null) => d?.getTime() ?? 0;
 
-export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Candidate[]> {
+export async function loadCandidates(pool: Pool, config: RunConfig, now = new Date()): Promise<Candidate[]> {
   const list = await rows<{
     domain: string;
     requester: string;
@@ -171,7 +207,51 @@ export async function loadCandidates(pool: Pool, config: RunConfig): Promise<Can
       c.pendingSince = Math.min(c.pendingSince ?? Infinity, r.requested_at.getTime());
     out.set(r.domain, c);
   }
-  return [...out.values()];
+  if (!config.collectionEnabled) return [...out.values()];
+  const collection = await loadCollection(pool, config, collectionMonth(config, now), now);
+  const enriched: Candidate[] = [];
+  // Preserve the collection's importance/first-pass/retry allocation order.
+  for (const entry of [...collection.queue, ...collection.entries.filter((e) => !e.automatic)]) {
+    const candidate = out.get(entry.domain) ?? {
+      domain: entry.domain,
+      tier: config.priority.length,
+      watched: true,
+      pendingSince: null,
+      lastAttempt: 0,
+      lastSuccess: 0,
+      nextAttempt: 0,
+      latestProfile: null,
+    };
+    enriched.push({ ...candidate, collection: entry });
+    out.delete(entry.domain);
+  }
+  // The live response can still fill older visits. Older missing profiles stay
+  // visible for manual entry once the provider has advanced to another month.
+  const months = (await collectionMonths(pool, config, now)).filter(
+    (m) => m < collection.month && m >= previousMonth(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1))),
+  );
+  for (const month of months) {
+    const older = await loadCollection(pool, config, month, now);
+    for (const entry of older.queue) {
+      const index = enriched.findIndex((c) => c.domain === entry.domain);
+      if (index >= 0 && !enriched[index].collection?.automatic) {
+        enriched[index] = { ...enriched[index], collection: entry };
+      } else if (index < 0) {
+        enriched.push({
+          domain: entry.domain,
+          tier: config.priority.length,
+          watched: true,
+          pendingSince: null,
+          lastAttempt: 0,
+          lastSuccess: 0,
+          nextAttempt: 0,
+          latestProfile: null,
+          collection: entry,
+        });
+      }
+    }
+  }
+  return [...enriched, ...out.values()];
 }
 
 /** Runs refused in a row, without an answer, before the queue's times stop being a forecast. */
@@ -203,7 +283,7 @@ const WORKER_SILENT = 3 * 3_600_000;
  * anything got no answer (refused or failed). Empty when fine or turned off.
  */
 export async function fetchProblems(pool: Pool, config: RunConfig, now = new Date()) {
-  if (config.budget <= 0 || config.weeklyBudget === 0) return [];
+  if (config.budget <= 0 || config.weeklyBudget === 0 || config.hourlyBudget === 0) return [];
   const problems: string[] = [];
   const [last] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(started_at) AS at FROM runs');
   if (!last?.at || now.getTime() - last.at.getTime() > WORKER_SILENT)
@@ -259,7 +339,27 @@ export async function runOnce(
     const [[lock]] = (await conn.query("SELECT GET_LOCK('traffic-similarweb', 0) AS got")) as unknown as [[{ got: number }]];
     if (lock.got !== 1) return { skipped: 'another run holds the lock' };
     const started = now();
-    const policy = await fetchPolicy(pool, config, started);
+    if (config.collectionEnabled) await syncCollections(pool, config, started);
+    const candidates = await loadCandidates(pool, config, started);
+    const initial = new Set(candidates.filter((c) => !c.lastAttempt && c.nextAttempt <= started.getTime()).map((c) => c.domain));
+    if (only?.length) {
+      const attempted = new Set(
+        (
+          await rows<{ domain: string }>(pool, 'SELECT domain FROM fetch_state WHERE domain IN (?) AND last_attempt_at IS NOT NULL', [only])
+        ).map((r) => r.domain),
+      );
+      for (const domain of only) if (!attempted.has(domain)) initial.add(domain);
+    }
+    const due = only
+      ? [...new Set(only)].filter(
+          (domain) =>
+            !config.collectionEnabled ||
+            !candidates.find((c) => c.domain === domain)?.collection ||
+            candidates.find((c) => c.domain === domain)?.collection?.automatic,
+        )
+      : dueDomains(candidates, started, catchUpQuota(await lastMonthShare(pool, started), config.budget));
+    const firstFetches = due.filter((domain) => initial.has(domain));
+    const policy = await fetchPolicy(pool, config, started, firstFetches.length);
     const skipped = policyNote(policy);
     if (skipped) {
       // Even an intentional wait is a worker heartbeat for /readyz.
@@ -271,9 +371,13 @@ export async function runOnce(
       ]);
       return { skipped };
     }
-    const due =
-      only ?? dueDomains(await loadCandidates(pool, config), now(), catchUpQuota(await lastMonthShare(pool, now()), config.budget));
-    const batch = due.slice(0, policy.maxPerRun);
+    // A first fetch also checks for the latest month; do not spend another probe
+    // on a known domain while this batch can fill missing history instead.
+    const batch = (!config.collectionEnabled && policy.waitingForMonth && firstFetches.length ? firstFetches : due).slice(
+      0,
+      policy.maxPerRun,
+    );
+    const targetMonth = collectionMonth(config, started);
     const [run] = (await pool.query('INSERT INTO runs (started_at, budget) VALUES (?, ?)', [started, config.budget])) as unknown as [
       { insertId: number },
     ];
@@ -288,8 +392,9 @@ export async function runOnce(
       }
       if (index) await delay(pauseMs);
       const at = now();
+      const requestMonth = candidates.find((c) => c.domain === domain)?.collection?.month ?? targetMonth;
       // Recheck under the lock: an interval, week, or month can change mid-run.
-      const current = await fetchPolicy(pool, config, at);
+      const current = await fetchPolicy(pool, config, at, initial.has(domain) ? 1 : 0);
       const hold = policyNote(current);
       if (hold) {
         tally.note = hold;
@@ -297,20 +402,54 @@ export async function runOnce(
       }
       await upsertState(pool, domain, { last_attempt_at: at, next_attempt_at: new Date(at.getTime() + CLAIM) });
       // Reserve before the network call. A crash/timeout still consumes allowance.
-      const [send] = (await pool.query('INSERT INTO sends (domain, at, outcome) VALUES (?, ?, ?)', [domain, at, 'pending'])) as unknown as [
-        { insertId: number },
-      ];
+      const [send] = (await pool.query(
+        'INSERT INTO sends (domain, at, outcome, target_month, recovery_probe, response_meta) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          domain,
+          at,
+          'pending',
+          config.collectionEnabled ? requestMonth : null,
+          current.recovery ? 1 : 0,
+          JSON.stringify({ egressRoute: 'direct', httpClient: 'node-fetch' }),
+        ],
+      )) as unknown as [{ insertId: number }];
       tally.sent++;
+      if (current.recovery) await reserveRecovery(pool, config, at);
       let data: Record<string, unknown>;
       try {
-        data = await requestSimilarweb(domain, request, at);
+        // Record the actual HTTP response before parsing, including success and malformed JSON.
+        // Transport adapters may replace the default route/client on this reservation first.
+        const observedRequest = (async (input: string, init: RequestInit) => {
+          const response = await request(input, init);
+          await pool.query("UPDATE sends SET http_status=?,response_meta=JSON_MERGE_PATCH(COALESCE(response_meta,'{}'),?) WHERE id=?", [
+            response.status,
+            JSON.stringify(responseMetadata(response)),
+            send.insertId,
+          ]);
+          return response;
+        }) as typeof fetch;
+        data = await requestSimilarweb(domain, observedRequest, at);
       } catch (error) {
         const status = error instanceof TrafficFetchError ? error.status : null;
         const message = (error instanceof Error ? error.message : String(error)).slice(0, 255);
         if (isRefusal(error)) {
-          await pool.query('UPDATE sends SET outcome = ?, http_status = ? WHERE id = ?', ['refused', error.httpStatus, send.insertId]);
+          const adaptive = config.adaptiveBackoff ? await refuseProvider(pool, config, error, at) : null;
+          await pool.query(
+            "UPDATE sends SET outcome = ?, http_status = ?, response_meta = JSON_MERGE_PATCH(COALESCE(response_meta,'{}'),?) WHERE id = ?",
+            [
+              'refused',
+              error.httpStatus,
+              JSON.stringify({
+                ...error.responseMeta,
+                retrySource: adaptive?.source ?? (error.retryAt ? 'provider' : 'local-policy'),
+                refusalStreak: adaptive?.refusals ?? null,
+              }),
+              send.insertId,
+            ],
+          );
           // Not this domain's fault: it keeps its place and goes first after the cooldown.
           const retryAt =
+            adaptive?.until ??
             error.retryAt ??
             new Date(at.getTime() + (status === 429 ? config.quotaCooldownHours * 3_600_000 : config.cooldownMinutes * 60_000));
           await upsertState(pool, domain, { refused_at: at, retry_after_at: retryAt, next_attempt_at: null, last_error: message });
@@ -318,8 +457,14 @@ export async function runOnce(
           tally.note = message;
           break;
         }
-        await pool.query('UPDATE sends SET outcome = ?, http_status = ? WHERE id = ?', ['error', status, send.insertId]);
+        await pool.query('UPDATE sends SET outcome = ?, http_status = COALESCE(?,http_status) WHERE id = ?', [
+          'error',
+          status,
+          send.insertId,
+        ]);
         await recordFailure(pool, domain, at, message);
+        if (current.recovery) await finishRecovery(pool, config, at, false);
+        if (config.collectionEnabled) await recordCollectionAttempt(pool, requestMonth, domain, at, 'error');
         tally.failed++;
         // Repeated HTTP/network errors mean the provider is down; stop until the next run.
         if (++consecutive >= 3) {
@@ -330,10 +475,26 @@ export async function runOnce(
       }
       consecutive = 0;
       const summary = fetchSummary(data, domain);
+      let collectionOutcome = 'no-data';
       try {
         const traffic = parseDomainTraffic(data, domain, at);
         await saveTraffic(pool, [traffic]);
-        await pool.query('UPDATE sends SET outcome = ?, http_status = 200 WHERE id = ?', ['ok', send.insertId]);
+        await pool.query(
+          `UPDATE sends SET outcome = ?, http_status = 200,
+           response_meta=JSON_MERGE_PATCH(COALESCE(response_meta,'{}'),?) WHERE id = ?`,
+          [
+            'ok',
+            JSON.stringify({
+              latestMonth:
+                traffic.monthly
+                  .map((m) => m.month)
+                  .sort()
+                  .at(-1) ?? null,
+              latestProfileMonth: Object.keys(traffic.profiles).sort().at(-1) ?? null,
+            }),
+            send.insertId,
+          ],
+        );
         await upsertState(pool, domain, {
           last_response_at: at,
           last_success_at: at,
@@ -343,6 +504,7 @@ export async function runOnce(
           result: JSON.stringify(summary),
         });
         tally.ok++;
+        collectionOutcome = traffic.monthly.every((m) => m.month < requestMonth) ? 'old-month' : 'response';
       } catch (error) {
         // Answered without usable visits: normal for small sites.
         await pool.query('UPDATE sends SET outcome = ?, http_status = 200 WHERE id = ?', ['no-data', send.insertId]);
@@ -350,6 +512,8 @@ export async function runOnce(
         await recordFailure(pool, domain, at, (error instanceof Error ? error.message : String(error)).slice(0, 255));
         tally.failed++;
       }
+      if (current.recovery) await finishRecovery(pool, config, at, collectionOutcome !== 'no-data');
+      if (config.collectionEnabled) await recordCollectionAttempt(pool, requestMonth, domain, at, collectionOutcome);
     }
     await pool.query('UPDATE runs SET finished_at = ?, sent = ?, ok = ?, failed = ?, refused = ?, note = ? WHERE id = ?', [
       now(),

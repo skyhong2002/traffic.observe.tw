@@ -108,15 +108,47 @@ export class TrafficFetchError extends Error {
   status: number;
   retryAt: Date | null;
   httpStatus: number;
-  constructor(status: number, message: string, retryAt: Date | null = null, httpStatus = status) {
+  responseMeta: Record<string, string | null>;
+  constructor(
+    status: number,
+    message: string,
+    retryAt: Date | null = null,
+    httpStatus = status,
+    responseMeta: Record<string, string | null> = {},
+  ) {
     super(message);
     this.status = status;
     this.retryAt = retryAt;
     this.httpStatus = httpStatus;
+    this.responseMeta = responseMeta;
   }
 }
 export const isRefusal = (error: unknown): error is TrafficFetchError =>
   error instanceof TrafficFetchError && [401, 403, 429].includes(error.status);
+
+/** Whitelisted response headers only. Provider identifies the delivery network, not the refusal's cause. */
+export function responseMetadata(response: Response): Record<string, string | null> {
+  const meta = Object.fromEntries(
+    [
+      'retry-after',
+      'date',
+      'ratelimit-limit',
+      'ratelimit-remaining',
+      'ratelimit-reset',
+      'x-ratelimit-limit',
+      'x-ratelimit-remaining',
+      'x-ratelimit-reset',
+      'x-cache',
+      'x-amz-cf-pop',
+      'content-type',
+    ].map((key) => [key, response.headers.get(key)?.slice(0, 256) ?? null]),
+  );
+  const cloudfront = Boolean(
+    meta['x-amz-cf-pop'] ||
+      /cloudfront/i.test(`${response.headers.get('server') ?? ''} ${response.headers.get('via') ?? ''} ${meta['x-cache'] ?? ''}`),
+  );
+  return { ...meta, diagnosticsVersion: '1', provider: cloudfront ? 'CloudFront' : null };
+}
 
 /** Retry-After can be seconds or an HTTP date. Ignore invalid/past values. */
 export function retryAfter(value: string | null, now: Date): Date | null {
@@ -161,9 +193,21 @@ export async function requestSimilarweb(domain: string, request = fetch, now = n
     redirect: 'error',
   });
   const retryAt = retryAfter(response.headers.get('retry-after'), now);
-  if (!response.ok) throw new TrafficFetchError(response.status, `Similarweb HTTP ${response.status}`, retryAt);
-  const data = (await response.json()) as Record<string, unknown>;
-  if (data?.exceeded === true) throw new TrafficFetchError(429, 'Similarweb usage quota exceeded (HTTP 200)', retryAt, 200);
+  const responseMeta = responseMetadata(response);
+  if (!response.ok)
+    throw new TrafficFetchError(response.status, `Similarweb HTTP ${response.status}`, retryAt, response.status, responseMeta);
+  let data: Record<string, unknown>;
+  try {
+    data = (await response.json()) as Record<string, unknown>;
+  } catch {
+    // JSON parser errors may echo an upstream body fragment; never persist that text.
+    throw new TrafficFetchError(response.status, 'Similarweb returned invalid JSON', retryAt, response.status, responseMeta);
+  }
+  if (data?.exceeded === true)
+    throw new TrafficFetchError(429, 'Similarweb usage quota exceeded (HTTP 200)', retryAt, 200, {
+      ...responseMeta,
+      reason: 'quota-exceeded',
+    });
   return data;
 }
 

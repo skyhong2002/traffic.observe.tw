@@ -10,6 +10,7 @@ import { type Candidate, type SimilarListing, taiwanClue } from './similarsites.
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
+import { taiwanVisits } from './taiwan-estimate.ts';
 import type { TopicOverview } from './topics.ts';
 import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } from './traffic-access.ts';
 
@@ -91,7 +92,7 @@ const NAV: Array<[string, string, Nav[]]> = [
   ['/', '流量排行', ['report', 'table']],
   ['/tag/', '標籤概況', ['topics']],
   ['/tech/', '網站技術', ['tech']],
-  ['/status/', '抓取狀態', ['status']],
+  ['/status/', '資料更新狀態', ['status']],
   ['/watch/', '追蹤網域', ['watch', 'discover']],
 ];
 const SECTIONS: Array<[string, Array<[Exclude<Nav, null>, string, string]>]> = [
@@ -128,7 +129,7 @@ const FOOTER_NAV: Array<[string, Array<[Nav, string, string]>]> = [
   [
     '資料與狀態',
     [
-      ['status', '/status/', '抓取狀態'],
+      ['status', '/status/', '資料更新狀態'],
       ['watch', '/watch/', '追蹤網域'],
       [null, '/api/', 'API'],
     ],
@@ -314,9 +315,19 @@ ${tips ? TIP_SCRIPT : ''}${SITE_CARD_SCRIPT}</body></html>`;
 
 export const section = (title: string, inner: string, extra = '') => `<section class="block"${extra}><h2>${title}</h2>${inner}</section>`;
 
-/** Every server-rendered table sorts by its headers in the browser (tables.js). */
-export const table = (head: string, rows: string, empty: string, cols: number, id = '') =>
-  `<div class="scroll"><table data-sortable${id ? ` id="${id}"` : ''}><thead><tr>${head}</tr></thead><tbody>${
+/** Descriptive cells show their full text and wrap inside a `.prose-cell`. */
+export const tableDescription = (text: string) => html(text);
+
+/** Server-paginated tables keep their server order and must not be paged again in the browser. */
+export const table = (
+  head: string,
+  rows: string,
+  empty: string,
+  cols: number,
+  id = '',
+  { sortable = true, pin = true, className = '' }: { sortable?: boolean; pin?: boolean; className?: string } = {},
+) =>
+  `<div class="scroll"><table${sortable ? ' data-sortable' : ''}${pin ? '' : ' data-pin="none"'}${className ? ` class="${html(className)}"` : ''}${id ? ` id="${id}"` : ''}><thead><tr>${head}</tr></thead><tbody>${
     rows || `<tr><td colspan="${cols}" class="l empty">${empty}</td></tr>`
   }</tbody></table></div>`;
 export interface Chip {
@@ -418,7 +429,11 @@ export function rankingPage(
   source: string | null = null,
   sources: Array<{ requester: string; domains: number }> = [],
   exclude: string[] = [],
-  { from = null, show = 'share', unit = 'share' }: { from?: string | null; show?: 'share' | 'change'; unit?: 'share' | 'count' } = {},
+  {
+    from = null,
+    show = 'share',
+    unit = 'share',
+  }: { from?: string | null; show?: 'share' | 'change'; unit?: 'share' | 'count' | 'tw' } = {},
 ) {
   // Choosing a value reloads the page; the button is there for browsers without JavaScript.
   const select = (name: string, label: string, options: string) =>
@@ -428,13 +443,13 @@ export function rankingPage(
     topic?: string | null;
     source?: string | null;
     exclude?: string[];
-    unit?: 'share' | 'count';
+    unit?: 'share' | 'count' | 'tw';
     show?: 'share' | 'change';
   }) => {
     const p = new URLSearchParams({ month });
     if (from) p.set('from', from);
     if ((q.show ?? show) === 'change') p.set('show', 'change');
-    if ((q.unit ?? unit) === 'count') p.set('unit', 'count');
+    if ((q.unit ?? unit) !== 'share') p.set('unit', q.unit ?? unit);
     const t = q.topic === undefined ? topic : q.topic;
     const src = q.source === undefined ? source : q.source;
     const out = q.exclude ?? exclude;
@@ -467,8 +482,14 @@ export function rankingPage(
         )}`
       : ''
   }${toggle('數值', [
-    ['%', tableHref({ unit: 'share' }), unit === 'share', '各來源占造訪的比例'],
-    ['次數', tableHref({ unit: 'count' }), unit === 'count', '造訪量 × 占比換算的造訪次數'],
+    [
+      '占比 %',
+      tableHref({ unit: 'share' }),
+      unit === 'share',
+      '全站訪客的導流比例（Similarweb 不分國家）；「台灣」欄是台灣訪客占全站的比例',
+    ],
+    ['台灣次數', tableHref({ unit: 'tw' }), unit === 'tw', '台灣造訪 × 占比換算的造訪次數（估算：假設台灣訪客的導流組成與全站相同）'],
+    ['全球次數', tableHref({ unit: 'count' }), unit === 'count', '流量 × 占比換算的全站造訪次數；搜尋即試算表的「搜尋S」'],
   ])}${
     from
       ? toggle('顯示', [
@@ -476,7 +497,7 @@ export function rankingPage(
           ['差距', tableHref({ show: 'change' }), show === 'change', '與比較月份相差多少'],
         ])
       : ''
-  }${show === 'change' ? '<input type="hidden" name="show" value="change">' : ''}${unit === 'count' ? '<input type="hidden" name="unit" value="count">' : ''}${topic ? `<input type="hidden" name="topic" value="${html(topic)}">` : ''}<input type="hidden" name="exclude" value="${html(exclude.join(','))}">${source ? `<input type="hidden" name="source" value="${html(source)}">` : ''}<noscript><button type="submit">套用</button></noscript></form>`;
+  }${show === 'change' ? '<input type="hidden" name="show" value="change">' : ''}${unit !== 'share' ? `<input type="hidden" name="unit" value="${unit}">` : ''}${topic ? `<input type="hidden" name="topic" value="${html(topic)}">` : ''}<input type="hidden" name="exclude" value="${html(exclude.join(','))}">${source ? `<input type="hidden" name="source" value="${html(source)}">` : ''}<noscript><button type="submit">套用</button></noscript></form>`;
   const chips = `${chipRow(
     '追蹤來源',
     { href: html(tableHref({ source: null })), text: '全部來源', on: !source },
@@ -517,7 +538,9 @@ export function rankingPage(
   }> = [
     { head: '搜尋', title: '自然搜尋（不含搜尋廣告）', digits: 1, now: (s) => s.searchShare, before: (s) => s.prevSearchShare },
     { head: 'AI', title: 'AI 工具導流', digits: 2, now: (s) => s.aiShare, before: (s) => s.prevAiShare },
-    { head: '台灣', title: '台灣訪客', digits: 1, now: (s) => s.taiwanShare, before: (s) => s.prevTaiwanShare ?? null },
+    ...(unit === 'tw'
+      ? []
+      : [{ head: '台灣', title: '台灣訪客', digits: 1, now: (s: Row) => s.taiwanShare, before: (s: Row) => s.prevTaiwanShare ?? null }]),
     ...TABLE_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key, head]) => {
       const [, , title] = CHANNELS.find(([k]) => k === key) as (typeof CHANNELS)[number];
       return {
@@ -534,10 +557,13 @@ export function rankingPage(
   const shareCell = (s: Row, c: (typeof shareCols)[number]) => {
     const now = c.now(s);
     const before = c.before(s);
-    if (unit === 'count') {
-      const visits = now !== null && s.visits !== null ? s.visits * now : null;
-      if (show === 'share') return volCell(visits);
-      const earlier = before !== null && s.prevVisits !== null ? s.prevVisits * before : null;
+    if (unit !== 'share') {
+      // 台灣次數 starts from 台灣造訪 (visits × Taiwan share in use) and keeps its ≈ / < mark.
+      const base = unit === 'tw' ? s.taiwanVisits : s.visits;
+      const prevBase = unit === 'tw' ? taiwanVisits(s.prevVisits, s.prevTaiwanShareUsed) : s.prevVisits;
+      const visits = now !== null && base !== null ? base * now : null;
+      if (show === 'share') return unit === 'tw' ? taiwanVisitsCell({ ...s, taiwanVisits: visits }) : volCell(visits);
+      const earlier = before !== null && prevBase !== null ? prevBase * before : null;
       const change = visits !== null && earlier !== null ? visits - earlier : null;
       return sortCell(
         'num',
@@ -587,7 +613,7 @@ ${table(
   6 + shareCols.length,
   'ranking',
 )}
-<p class="note table-note">名次依「台灣造訪」（流量 × 台灣占比；沒有台灣占比的網站排在最後）。台灣造訪、流量與「次數」是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「%」是占全部造訪的比例，「次數」是流量 × 比例換算的造訪次數（搜尋次數即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
+<p class="note table-note">名次依「台灣造訪」（流量 × 台灣占比；沒有台灣占比的網站排在最後）。台灣造訪、流量與次數都是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「占比 %」是占全站造訪的比例（Similarweb 的導流組成不分國家）；「台灣次數」是台灣造訪 × 比例，屬於估算，假設台灣訪客的導流組成與全站相同，台灣占比低的網站誤差較大；「全球次數」是流量 × 比例（搜尋即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
     { nav: 'table' },
   );
 }
@@ -859,11 +885,12 @@ const DUE_LABEL: Record<string, string> = {
   refresh: '本月還沒更新',
   'catch-up': '還缺上個月的資料',
   lookup: '單次查詢',
+  collection: '月份資料缺漏',
 };
 const KIND_LABEL: Record<string, string> = { watch: '定期追蹤', traffic: '單次查詢（流量）', similar_sites: '單次查詢（相似網站）' };
 
 // Similarweb's channels and categories in plain words. Categories missing here read as Similarweb writes them.
-const CHANNELS: Array<[TrafficChannel, string, string]> = [
+export const CHANNELS: Array<[TrafficChannel, string, string]> = [
   ['Direct', '直接造訪', '輸入網址、書籤或 App 開啟'],
   ['SearchOrganic', '自然搜尋', 'Google 等搜尋結果，不含廣告'],
   ['SearchPaid', '搜尋廣告', '搜尋結果上的付費廣告'],
@@ -1310,7 +1337,7 @@ ${
     : ''
 }
 ${tech}
-${section('追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${fetchState}</p>`)}`,
+${section('Similarweb 追蹤與抓取', `<p class="body">${watchers}</p><p class="note">${fetchState}</p>`)}`,
     {
       tips: true,
       method: `${TRAFFIC_METHOD}${methodPart(
@@ -1360,7 +1387,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
   const runs = status.runs
     .map(
       (r) =>
-        `<tr>${sortCell('l', r.startedAt, tw(r.startedAt))}<td class="num">${r.budget}</td><td class="num">${r.sent}</td><td class="num">${r.ok}</td><td class="num">${r.failed}</td><td class="l">${r.refused ? '<span class="down">▼ 被拒</span> ' : ''}${html(r.note)}</td></tr>`,
+        `<tr>${sortCell('l', r.startedAt, tw(r.startedAt))}<td class="l">${r.sent ? 'Similarweb 資料請求' : '排程檢查（只讀本站）'}</td><td class="num">${r.budget}</td><td class="num">${r.sent}</td><td class="num">${r.ok}</td><td class="num">${r.failed}</td><td class="l prose-cell">${r.refused ? '<span class="down">▼ 被拒</span> ' : ''}${tableDescription(`${r.sent ? '' : '未向 Similarweb 送出請求。'}${r.note ?? ''}`)}</td></tr>`,
     )
     .join('');
   const sent24 = Object.values(status.last24h).reduce((a, b) => a + b, 0);
@@ -1381,14 +1408,26 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
       ? 'Similarweb 自動抓取已暫停，既有資料仍可查詢。'
       : policy.reason === 'weekly-limit'
         ? `本週請求額度已用完；最早於 ${tw(policy.resumeAt)} 後恢復。`
-        : policy.reason === 'provider-cooldown'
-          ? `Similarweb 拒絕請求，暫停至 ${tw(policy.resumeAt)}。`
-          : policy.reason === 'waiting-for-month'
-            ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料；下一次探查不早於 ${tw(policy.resumeAt)}。`
-            : '';
+        : policy.reason === 'recovery-probe-limit'
+          ? `已達本機恢復探查上限；不早於 ${tw(policy.resumeAt)} 再查一站。`
+          : policy.reason === 'hourly-limit'
+            ? `本機過去一小時請求上限已達；不早於 ${tw(policy.resumeAt)} 再試。`
+            : policy.reason === 'request-spacing'
+              ? `請求間隔等待中；不早於 ${tw(policy.resumeAt)} 送出。`
+              : policy.reason === 'provider-cooldown'
+                ? policy.recovery?.source === 'provider'
+                  ? `遵守 Similarweb 指定的等待時間，不早於 ${tw(policy.resumeAt)} 再查一站。`
+                  : policy.recovery?.source === 'local-recovery'
+                    ? `Similarweb 恢復觀察中，已連續成功 ${policy.recovery.successes} 次；下一站不早於 ${tw(policy.resumeAt)}。`
+                    : policy.recovery
+                      ? `Similarweb 拒絕或探查未成功，依本機退避設定等到 ${tw(policy.resumeAt)} 再查一站；這不是官方解封時間。`
+                      : `Similarweb 拒絕請求，暫停至 ${tw(policy.resumeAt)}。`
+                : policy.reason === 'waiting-for-month'
+                  ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料；下一次探查不早於 ${tw(policy.resumeAt)}。`
+                  : '';
   const queueRows = q.map(
     (e) =>
-      `<tr${policy.maxPerRun && e.position <= policy.maxPerRun && e.expectedAt ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${DUE_LABEL[e.reason] ?? html(e.reason)}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${policy.reason === 'disabled' ? '已暫停' : '未定'}</span>`)}</tr>`,
+      `<tr${policy.maxPerRun && e.position <= policy.maxPerRun && e.expectedAt ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${e.importance ? `${html(e.importance)}・${html(e.targetMonth)} 缺漏` : (DUE_LABEL[e.reason] ?? html(e.reason))}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${policy.reason === 'disabled' ? '已暫停' : '未定'}</span>`)}</tr>`,
   );
   const queueHead =
     '<th class="rank" aria-sort="ascending" title="抓取順序">#</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>';
@@ -1402,31 +1441,64 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
               ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${policy.maxPerRun} 個（底色標示）。`
               : '目前暫停送出，表格是等候順序。'
       }排程之後到期的網域會依同樣規則接在後面。${
-        policy.waitingForMonth
-          ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料，每 ${policy.probeIntervalHours} 小時最多探查一次。`
-          : status.lastMonth.catchUpPerRun >= status.budget
-            ? ''
-            : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
+        status.collection
+          ? policy.waitingForMonth
+            ? `尚未取得目標月份組成時，每 ${policy.probeIntervalHours} 小時最多探查一次；取得後依重要性與共用限速補抓。`
+            : '已完成的網域會移出該月份佇列，缺漏依重要性與重試規則安排。'
+          : policy.waitingForMonth
+            ? `新網域先抓目前可用的月份，每輪最多 ${status.budget} 個；已抓過的網域在尚未取得 ${monthLabel(policy.targetMonth)} 組成資料時，每 ${policy.probeIntervalHours} 小時最多探查一次。新網域的請求也算探查，取得新月份後恢復每月更新。`
+            : status.lastMonth.catchUpPerRun >= status.budget
+              ? ''
+              : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
       }</p>`
     : '<p>目前沒有到期的網域。</p>';
+  const activity = status.activities;
+  const activityRows = [
+    `<tr><td class="l">Similarweb 流量資料</td><td class="l">data.similarweb.com</td><td>會（實際送出時）</td><td class="l prose-cell">${html(`可送出時至少間隔 ${policy.minIntervalSeconds} 秒，過去一小時最多 ${policy.hourly.limit} 次；冷卻／等待發布時每小時只檢查排程`)}</td><td class="l prose-cell">${html(`近 24 小時 ${activity.similarweb.last24hRequests} 次請求；最近送出 ${tw(activity.similarweb.lastRequestAt) || '尚無'}`)}</td></tr>`,
+    `<tr><td class="l"><a href="/tech/">網站技術掃描</a></td><td class="l">各網站首頁</td><td>否</td><td class="l prose-cell">${html(`每 ${activity.websiteTechnology.intervalHours} 小時最多一批、每批最多 ${activity.websiteTechnology.maxDomainsPerBatch} 站，站間至少 ${activity.websiteTechnology.pauseSeconds} 秒；成功後 30 天才再自動掃描`)}</td><td class="l prose-cell">${html(`近 24 小時自動掃描 ${activity.websiteTechnology.last24hAutomaticDomainScans} 站次；最近批次 ${tw(activity.websiteTechnology.lastRunAt) || '尚無'}`)}</td></tr>`,
+    `<tr><td class="l">Cloudflare Radar 排名</td><td class="l">api.cloudflare.com</td><td>否</td><td class="l prose-cell">${html(`每天一次、請求間至少 ${activity.cloudflareRadar.pauseSeconds} 秒，只補尚未嘗試且沒有排名的網域`)}</td><td class="l prose-cell">${html(`近 24 小時 ${activity.cloudflareRadar.last24hRequests} 次 API 請求`)}</td></tr>`,
+    `<tr><td class="l">查看本站頁面／資料 API</td><td class="l">本站已儲存資料</td><td>否</td><td class="l prose-cell">${html(`按需查看；程式自動查詢建議每小時一次`)}</td><td class="l prose-cell">${html(`狀態、流量與技術查詢只讀資料，不觸發上述抓取`)}</td></tr>`,
+  ].join('');
+  const activitiesSection = section(
+    '請求來源與用途',
+    `<p>Similarweb 額度只與向 Similarweb 送出的資料請求有關。網站技術掃描、Radar 與本站資料查詢分別列在下方。</p>${table('<th class="l">工作</th><th class="l">請求對象</th><th>使用 Similarweb 額度</th><th class="l">頻率</th><th class="l">實際活動</th>', activityRows, '', 5, '', { pin: false })}`,
+  );
   const weeklyStat =
     policy.weekly.limit === null
-      ? `<span>本週請求</span><b>${policy.weekly.used}</b><small>依實際回應退避；伺服器週額度未確認</small>`
-      : `<span>本機每週請求額度</span><b>${policy.weekly.used} / ${policy.weekly.limit}</b><small>剩餘 ${policy.weekly.remaining} 次・${tw(policy.weekly.resetsAt)} 重置</small>`;
+      ? `<span>本週 Similarweb 請求</span><b>${policy.weekly.used}</b><small>依實際回應退避；伺服器週額度未確認</small>`
+      : `<span>Similarweb 本機每週上限</span><b>${policy.weekly.used} / ${policy.weekly.limit}</b><small>剩餘 ${policy.weekly.remaining} 次・${tw(policy.weekly.resetsAt)} 重置</small>`;
   const stats = `<div class="stats"><div>${weeklyStat}</div>
 <div><span>最新流量月份</span><b>${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'}</b><small>最新組成：${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</small></div>
-<div><span>每輪上限</span><b>${status.budget}</b><small>${status.budget ? '每小時檢查排程，依探查間隔及退避狀態送出' : '0：目前不送出任何請求'}</small></div>
+<div><span>Similarweb 每輪上限</span><b>${status.budget}</b><small>${status.budget ? (policy.minIntervalSeconds ? `可送出時至少間隔 ${policy.minIntervalSeconds} 秒；等待中每小時只檢查排程` : '每小時檢查排程，依探查間隔及退避狀態送出') : '0：目前不送出任何請求'}</small></div>
 <div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small><a href="#queue">看排程</a></small></div>
-<div><span>近 24 小時請求</span><b>${sent24}</b><small>${
+<div><span>近 24 小時 Similarweb 請求</span><b>${sent24}</b><small>${
     Object.entries(status.last24h)
       .map(([k, v]) => `${html(k)} ${v}`)
       .join('・') || '沒有請求'
   }</small></div></div>`;
+  const experiment = status.egressExperiment;
+  const egressLabels = { direct: '台灣（原出口）', 'vessel-tokyo': '日本', 'vessel-singapore': '新加坡' };
+  const egressSection = experiment
+    ? section(
+        'Similarweb 出口實驗',
+        `<p>已預留 ${experiment.trials.length} / ${experiment.limit} 次；${experiment.nextRoute ? `下一個出口：${egressLabels[experiment.nextRoute]}。` : '這輪出口比較已用完。'}實驗只使用原定恢復探查，共用全部限速與冷卻，收到拒絕不會立即換出口。每個出口最多一筆，這輪只能觀察連通性與實際收到的資料，不能據此推算各出口額度。</p>${table(
+          '<th class="l">出口</th><th class="l">網域</th><th>時間</th><th>回應</th><th>流量月份</th><th>組成月份</th>',
+          experiment.trials
+            .map(
+              (trial) =>
+                `<tr><td class="l">${trial.egressRoute ? egressLabels[trial.egressRoute] : '未知'}</td><td class="l">${html(trial.domain)}</td><td>${tw(trial.at)}</td><td>${trial.httpStatus ?? '—'} / ${html(trial.outcome)}</td><td>${trial.latestMonth ? monthLabel(trial.latestMonth) : '—'}</td><td>${trial.latestProfileMonth ? monthLabel(trial.latestProfileMonth) : '—'}</td></tr>`,
+            )
+            .join(''),
+          '等待既有冷卻到期，尚未發出實驗請求。',
+          6,
+        )}`,
+      )
+    : '';
   return layout(
-    '抓取狀態',
+    '資料更新狀態',
     {
-      title: '抓取狀態',
-      dek: 'Similarweb 的更新進度與接下來的抓取排程。',
+      title: '資料更新狀態',
+      dek: '分別查看 Similarweb 流量請求、網站技術掃描、Radar 與本站資料查詢。',
       actions: '<a href="/api/v1/status">JSON</a>',
     },
     `${
@@ -1437,9 +1509,42 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
           : status.coolingDownUntil
             ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>`
             : ''
-    }${stats}
-${section(status.budget ? '下一輪抓取' : '等候抓取', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
+    }${activitiesSection}${stats}${egressSection}
+${policy.recovery ? section('Similarweb 恢復探查', `<p>目前 ${html(policy.recovery.phase)}，連續 429 ${policy.recovery.refusals} 次，連續有效回應 ${policy.recovery.successes} / ${policy.recovery.requiredSuccesses} 次。過去 24 小時已用 ${policy.recovery.used} / ${policy.recovery.limit} 次恢復探查；每次只取一個待補網域，成功後至少隔 ${policy.recovery.intervalMinutes} 分鐘再觀察，確認穩定後才恢復一般限速。探查本身會用到 Similarweb 請求額度。</p><p>有有效 Retry-After 優先遵守；未提供時依本機 2 → 4 → 8 → 16 → 24 小時基礎退避，另加 0–10% 延遲。等待期間只讀本站排程，不會反覆打 Similarweb。<a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">429 規範</a></p>`) : ''}
+${status.collection ? section('月份收集進度', `<p>${monthLabel(status.collection.month)}：${status.collection.complete} / ${status.collection.total} 個完整，${status.collection.withVisits} 個有造訪量，${status.collection.partial} 個仍缺組成或互動資料，${status.collection.manualNeeded} 個需要補登。<a href="/status/collection/?month=${status.collection.month}">查看逐站缺漏與設定重要網域</a></p><p>所有入口共用本機過去一小時 ${policy.hourly.limit} 次上限（非已確認的伺服器額度）；請求至少間隔 ${policy.minIntervalSeconds} 秒。</p>`) : ''}
+${section(status.budget ? 'Similarweb 待抓佇列' : 'Similarweb 等候佇列', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
 ${manualSection}
+${section(
+  'Similarweb 實際請求診斷',
+  `<p>只顯示已保存的請求；未知欄位不代表成功。CloudFront 表示回應經過該服務，單憑它不能確認拒絕原因。舊紀錄沒有保存標頭時，無法事後補判。</p>${table(
+    '<th class="l">時間</th><th class="l">網域</th><th class="l">出口／傳輸</th><th>HTTP／結果</th><th class="l">回應證據</th><th>流量／組成月份</th>',
+    status.requests
+      .map((request) => {
+        const route =
+          request.egressRoute === 'direct'
+            ? '台灣（原出口）'
+            : request.egressRoute === 'vessel-tokyo'
+              ? '日本'
+              : request.egressRoute === 'vessel-singapore'
+                ? '新加坡'
+                : '未記錄';
+        const evidence = [
+          request.diagnosticsRecorded ? (request.provider ?? '未辨識 CDN') : '舊紀錄：未保存診斷標頭',
+          request.cache,
+          request.pop,
+          request.retryAfter ? `Retry-After: ${request.retryAfter}` : null,
+          request.quotaExceeded ? 'quota exceeded' : null,
+        ]
+          .filter(Boolean)
+          .map((text) => html(text!))
+          .join(' · ');
+        return `<tr><td>${tw(request.at)}</td><td class="l">${html(request.domain)}</td><td class="l">${route} / ${html(request.httpClient ?? '未記錄')}</td><td>${request.httpStatus ?? '—'} / ${html(request.outcome)}</td><td class="l prose-cell"><div>${evidence}</div></td><td>${request.latestMonth ? monthLabel(request.latestMonth) : '—'} / ${request.latestProfileMonth ? monthLabel(request.latestProfileMonth) : '—'}</td></tr>`;
+      })
+      .join(''),
+    '尚無實際請求。',
+    6,
+  )}`,
+)}
 ${section(
   '排程方式與追蹤來源',
   `${table(
@@ -1455,12 +1560,14 @@ ${section(
   )}`,
 )}
 ${section(
-  '最近批次',
+  'Similarweb 請求與排程檢查紀錄',
   table(
-    '<th class="l" aria-sort="descending">開始</th><th class="num">上限</th><th class="num">送出</th><th class="num">成功</th><th class="num">失敗</th><th class="l">備註</th>',
+    '<th class="l" aria-sort="descending">時間</th><th class="l">活動</th><th class="num">上限</th><th class="num">Similarweb 請求</th><th class="num">成功</th><th class="num">失敗</th><th class="l">備註</th>',
     runs,
     '尚未執行。',
-    6,
+    7,
+    '',
+    { pin: false },
   ),
 )}`,
     {
@@ -1474,7 +1581,9 @@ ${section(
           : ''
       }${methodPart(
         '排程方式與追蹤來源',
-        `<p>優先序：${priority.map(requesterLabel).join(' → ')}。每小時一輪；預計時間假設中途沒有被 Similarweb 擋，也沒有新網域插隊。</p>`,
+        status.collection
+          ? '<p>必抓 → 核心 → 台灣 → 其他；同級依上月台灣流量安排第一輪，每五個可送名額保留一個延後重試。完成後移出該月份佇列。</p>'
+          : `<p>優先序：${priority.map(requesterLabel).join(' → ')}。每小時一輪；預計時間假設中途沒有被 Similarweb 擋，也沒有新網域插隊。</p>`,
       )}`,
     },
   );
@@ -1594,7 +1703,7 @@ export function watchPage({
     w: WatchRow,
     removable: boolean,
   ) => `<tr><td class="l" data-v="${html(w.domain)}"><span class="site-identity">${favicon(w.domain, w.domain)}<a class="site-name" href="/site/${html(w.domain)}/">${displayHtml(w.domain)}</a></span></td>
-<td class="l">${w.note && w.note !== w.domain ? html(w.note) : ''}</td>
+<td class="l prose-cell" data-v="${html(w.note ?? '')}">${tableDescription(w.note && w.note !== w.domain ? w.note : '')}</td>
 ${sortCell('num', w.latestVisits, w.latestMonth ? `${vol(w.latestVisits === null ? null : w.latestVisits / 1e6)} <span class="muted">${monthLabel(w.latestMonth)}</span>` : '')}
 ${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l', w.requestedAt.toISOString(), `<span class="site-domain">${tw(w.requestedAt.toISOString())}</span>`)}${editor ? `<td class="l"><span class="radar">${html(w.addedBy)}</span></td>` : ''}
 <td>${removable ? `<form class="inline" method="post" action="/watch/remove" onsubmit="return confirm('停止追蹤 ${displayHtml(w.domain)}？')"><input type="hidden" name="domain" value="${html(w.domain)}"><button type="submit" class="quiet">移除</button></form>` : ''}</td></tr>`;
@@ -1626,7 +1735,7 @@ ${sortCell('l', w.lastSuccessAt?.toISOString() ?? null, state(w))}${sortCell('l'
 ${listSection}`,
     {
       nav: 'watch',
-      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 每小時依排程抓取，每月 1 日所有追蹤中的網域一起到期、依序排隊更新；Cloudflare Radar 目前只補抓沒有排名且從未嘗試的網域，既有排名暫停更新。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
+      method: `${TRAFFIC_METHOD}${methodPart('更新方式與其他來源', `<p>Similarweb 依缺漏佇列、限速與冷卻決定是否送出資料請求；每小時的排程檢查可完全不送出請求。網站技術掃描與 Cloudflare Radar 使用獨立的每日排程，不使用 Similarweb 額度；Radar 只補尚未嘗試且沒有排名的網域。Similarweb 只提供最新一個月的搜尋與 AI 占比，開始追蹤後才會逐月保存。</p><p>其他來源：${services.map((o) => `<a href="/watch/?list=${encodeURIComponent(o.requester)}#list">${requesterLabel(o.requester)} ${o.domains} 個</a>`).join('、') || '沒有'}。這些清單由各服務自己維護。</p>`)}`,
     },
   );
 }

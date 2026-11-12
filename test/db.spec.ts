@@ -257,6 +257,9 @@ describe.skipIf(!url)('with a database', () => {
 
   it('shares the daily probe interval with manual calls and removes it once the month appears', async () => {
     const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: 'auto' });
+    await pool.query('INSERT INTO fetch_state (domain, last_attempt_at) VALUES ?', [
+      ['a.tw', 'b.tw'].map((domain) => [domain, new Date('2026-10-21T10:00:00Z')]),
+    ]);
     await pool.query('INSERT INTO sends (domain, at, outcome) VALUES ?', [
       Array.from({ length: 106 }, () => ['used.tw', new Date('2026-11-05T07:35:00Z'), 'ok']),
     ]);
@@ -285,6 +288,106 @@ describe.skipIf(!url)('with a database', () => {
     await pool.query("UPDATE traffic_profiles SET month = '202610'");
     const fourth = fakeFetch();
     expect(await runOnce(pool, { ...options, request: fourth.request })).toMatchObject({ sent: 2 });
+  });
+
+  it('fills new domains with September history during a probe wait, then resumes refreshes when October appears', async () => {
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '2', TRAFFIC_WEEKLY_BUDGET: 'auto' });
+    const at = new Date('2026-11-10T07:00:00Z');
+    const before = new Date('2026-11-10T06:00:00Z');
+    await pool.query('INSERT INTO watches (requester, domain, kind, requested_at) VALUES ?', [
+      [
+        ['tag', 'old.tw', 'watch', before],
+        ['blog', 'new-a.tw', 'watch', before],
+        ['sheet', 'new-b.tw', 'watch', before],
+        ['manual', 'new-c.tw', 'watch', before],
+      ],
+    ]);
+    await pool.query('INSERT INTO fetch_state (domain, last_attempt_at, last_success_at) VALUES (?, ?, ?)', [
+      'old.tw',
+      before,
+      new Date('2026-10-21T10:00:00Z'),
+    ]);
+    await pool.query("INSERT INTO sends (domain, at, outcome) VALUES ('old.tw', ?, 'ok')", [before]);
+    expect(await fetchPolicy(pool, config, at)).toMatchObject({ reason: null, maxPerRun: 2, waitingForMonth: true, initialPending: 3 });
+    const status = await serviceStatus(pool, config, at);
+    expect(status.queue.map((e) => [e.domain, e.expectedAt])).toEqual([
+      ['new-a.tw', '2026-11-10T07:35:00.000Z'],
+      ['new-b.tw', '2026-11-10T07:35:00.000Z'],
+      ['new-c.tw', '2026-11-10T08:35:00.000Z'],
+      ['old.tw', null],
+    ]);
+    expect(statusPage(status)).toContain('新網域先抓目前可用的月份');
+    const first = fakeFetch();
+    expect(await runOnce(pool, { config, request: first.request, now: () => at, pauseMs: 0 })).toMatchObject({ sent: 2, ok: 2 });
+    expect(first.sent).toEqual(['new-a.tw', 'new-b.tw']);
+    const second = fakeFetch();
+    expect(await runOnce(pool, { config, request: second.request, now: () => at, pauseMs: 0 })).toMatchObject({ sent: 1, ok: 1 });
+    expect(second.sent).toEqual(['new-c.tw']);
+    expect(await rows(pool, "SELECT domain, visits FROM traffic_months WHERE month = '202609' ORDER BY domain")).toEqual([
+      { domain: 'new-a.tw', visits: 1_200_000 },
+      { domain: 'new-b.tw', visits: 1_200_000 },
+      { domain: 'new-c.tw', visits: 1_200_000 },
+    ]);
+    const held = fakeFetch();
+    expect(await runOnce(pool, { config, request: held.request, now: () => at })).toMatchObject({
+      skipped: expect.stringContaining('next probe'),
+    });
+    expect(held.sent).toEqual([]);
+    expect(await fetchPolicy(pool, config, at)).toMatchObject({ reason: 'waiting-for-month', initialPending: 0 });
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('manual', 'latest.tw', 'watch', ?)", [at]);
+    const latestSent: string[] = [];
+    const latest = (async (input: string) => {
+      const domain = new URL(input).searchParams.get('domain') as string;
+      latestSent.push(domain);
+      const data = {
+        ...similarweb(domain),
+        EstimatedMonthlyVisits: { '2026-08-01': 1_100_000, '2026-09-01': 1_200_000, '2026-10-01': 1_300_000 },
+        Engagments: { ...similarweb(domain).Engagments, Month: '10' },
+      };
+      return new Response(JSON.stringify(data));
+    }) as unknown as typeof fetch;
+    expect(await runOnce(pool, { config, request: latest, now: () => at, pauseMs: 0 })).toMatchObject({ sent: 1 });
+    expect(await rows(pool, "SELECT month, visits FROM traffic_months WHERE domain = 'latest.tw' ORDER BY month")).toEqual([
+      { month: '202608', visits: 1_100_000 },
+      { month: '202609', visits: 1_200_000 },
+      { month: '202610', visits: 1_300_000 },
+    ]);
+    expect(await fetchPolicy(pool, config, at)).toMatchObject({
+      reason: null,
+      waitingForMonth: false,
+      maxPerRun: 2,
+      latestMonth: '202610',
+      latestProfileMonth: '202610',
+    });
+    await pool.query("INSERT INTO watches (requester, domain, kind, requested_at) VALUES ('manual', 'newer.tw', 'watch', ?)", [at]);
+    expect(await runOnce(pool, { config, request: latest, now: () => at, pauseMs: 0 })).toMatchObject({ sent: 2 });
+    expect(latestSent).toEqual(['latest.tw', 'newer.tw', 'old.tw']);
+  });
+
+  it('lets manual first fetches fill history while preserving the shared weekly allowance and daily probe wait', async () => {
+    const config = runConfig({ TRAFFIC_RUN_BUDGET: '5', TRAFFIC_WEEKLY_BUDGET: '3' });
+    const at = new Date('2026-11-10T07:00:00Z');
+    await pool.query("INSERT INTO sends (domain, at, outcome) VALUES ('used.tw', ?, 'ok')", [at]);
+    const first = fakeFetch();
+    expect(
+      await runOnce(pool, { config, only: ['a.tw', 'b.tw', 'c.tw'], request: first.request, now: () => at, pauseMs: 0 }),
+    ).toMatchObject({
+      sent: 2,
+      ok: 2,
+    });
+    expect(first.sent).toEqual(['a.tw', 'b.tw']);
+    const exhausted = fakeFetch();
+    expect(await runOnce(pool, { config, only: ['c.tw'], request: exhausted.request, now: () => at })).toMatchObject({
+      skipped: expect.stringContaining('weekly request limit'),
+    });
+    expect(exhausted.sent).toEqual([]);
+    const again = fakeFetch();
+    expect(
+      await runOnce(pool, { config: { ...config, weeklyBudget: null }, only: ['a.tw'], request: again.request, now: () => at }),
+    ).toMatchObject({
+      skipped: expect.stringContaining('next probe'),
+    });
+    expect(again.sent).toEqual([]);
   });
 
   it('persists a seven-day quota cooldown across a weekly reset, without marking the site as no-data', async () => {
@@ -1262,10 +1365,20 @@ describe.skipIf(!url)('with a database', () => {
         },
       });
     }) as unknown as typeof fetch;
-    const go = (at: Date) => runRadar(pool, { token: 'radar-token', request, now: () => at, pauseMs: 0 });
+    const radarPauses: number[] = [];
+    const go = (at: Date) =>
+      runRadar(pool, {
+        token: 'radar-token',
+        request,
+        now: () => at,
+        delay: async (ms) => {
+          radarPauses.push(ms);
+        },
+      });
     expect(await runRadar(pool, { token: null })).toEqual({ skipped: 'no CLOUDFLARE_RADAR_API_TOKEN' });
     expect(await go(now)).toMatchObject({ due: 3, sent: 3, ok: 3, blocked: false });
     expect(sent.sort()).toEqual(['a.com.tw', 'b.com.tw', 'c.com.tw']);
+    expect(radarPauses).toEqual([10_000, 10_000]);
     // Existing data is never refreshed, even months later.
     expect(await go(new Date(now.getTime() + 90 * 86_400_000))).toMatchObject({ due: 0, sent: 0 });
     const ranks = await rows<{ domain: string; rank: number | null; bucket: number | null; bucket_lower_bound: number | null }>(

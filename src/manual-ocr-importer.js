@@ -134,7 +134,7 @@ function showReview(result) {
   confirmed.type = 'checkbox';
   confirmation.append(
     confirmed,
-    document.createTextNode(' 我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，範圍為 Worldwide／All traffic。'),
+    document.createTextNode(' 我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，勾選資料為全球／全裝置範圍。'),
   );
   review.append(confirmation);
   const apply = text('button', '填入勾選欄位');

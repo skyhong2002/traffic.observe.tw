@@ -1,5 +1,5 @@
-// Similarweb's English Worldwide / All traffic screenshots. Coordinates keep
-// chart axes and country changes separate from the values being copied.
+// Similarweb's English platform and extension screenshots. Coordinates keep
+// chart axes, country changes and device-limited sections out of copied values.
 const countries = {
   Taiwan: 'TW',
   'United States': 'US',
@@ -42,12 +42,12 @@ export const screenshotFields = {
 };
 const channels = [
   ['Direct', /\bDirect\b/i],
-  ['search', /\b(?:Org\.?|Organic)\s*Search\b/i],
-  ['SearchPaid', /\bPaid\s*Search\b/i],
+  ['search', /\b(?:Org\.?|Organic)\s*Search\b/i, /\bSearch\s*Organic\b/i],
+  ['SearchPaid', /\bPaid\s*Search\b/i, /\bSearch\s*Paid\b/i],
   ['Referrals', /\bReferrals?\b/i],
   ['DisplayAds', /\bDisplay(?:\s*Ads)?\b/i],
-  ['SocialOrganic', /\b(?:Org\.?|Organic)\s*Social\b/i],
-  ['SocialPaid', /\bPaid\s*Social\b/i],
+  ['SocialOrganic', /\b(?:Org\.?|Organic)\s*Social\b/i, /\bSocial\s*Organic\b/i],
+  ['SocialPaid', /\bPaid\s*Social\b/i, /\bSocial\s*Paid\b/i],
   ['ai', /\bGen\s*A[Il1]\b/i],
   ['Mail', /\bEmail\b/i],
   ['Affiliate', /\bAffiliates?\b/i],
@@ -94,8 +94,8 @@ const percent = (word) => /^\d+(?:\.\d+)?%$/.test(word.text) && Number(word.text
 const bounded = (row, word) => row.words.some((w) => /^[<>≤≥]$/.test(w.text) && w.x < word.x && word.x - w.x - w.w < word.h);
 
 export function parseScreenshot(tsv) {
-  const rows = rowsOf(tsv),
-    fields = {},
+  let rows = rowsOf(tsv);
+  const fields = {},
     conflicts = new Set(),
     warnings = [],
     months = new Set();
@@ -107,9 +107,21 @@ export function parseScreenshot(tsv) {
       /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s*(20\d{2})\b/gi,
     ))
     months.add(match[2] + String(monthNames.indexOf(match[1].slice(0, 3).toLowerCase()) + 1).padStart(2, '0'));
-  if (/\b(?:Desktop|Mobile)\s*(?:Web|traffic|only)?\b/i.test(text))
-    return { fields, months: [...months], warnings: ['這張截圖顯示 Desktop 或 Mobile 範圍，請改用 Worldwide／All traffic 截圖。'] };
-  if (!/\bWorldwide\b/i.test(text) || !/\bAll\s*traffic\b/i.test(text))
+  const deviceRows = rows.filter((r) => /\b(?:Desktop|Mobile)\s*(?:Web|traffic|only)?\b/i.test(r.text));
+  if (deviceRows.length) {
+    const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
+    const geography = rows.find((r) => /\bTop\s*5\s*Countries\b/i.test(r.text));
+    // The extension's country card is separate from its Desktop Only source
+    // card. Keep the former only when the device filter is clearly below it.
+    if (sources && geography && geography.center < sources.center && deviceRows.every((r) => r.center > sources.center)) {
+      rows = rows.filter((r) => r.center < sources.center);
+      warnings.push('流量來源為 Desktop Only／Mobile Only，已略過該區塊；上方國家資料仍可核對填入。');
+    } else {
+      return { fields, months: [...months], warnings: ['這張截圖顯示 Desktop 或 Mobile 範圍，請改用 Worldwide／All traffic 截圖。'] };
+    }
+  }
+  const usableText = rows.map((r) => r.text).join('\n');
+  if (!/\bWorldwide\b/i.test(usableText) || !/\bAll\s*traffic\b/i.test(usableText))
     warnings.push('截圖未完整辨識出 Worldwide／All traffic，請核對範圍。');
   const put = (key, word, row) => {
     if (conflicts.has(key)) return;
@@ -126,7 +138,7 @@ export function parseScreenshot(tsv) {
   };
   for (const [key, pattern, valuePattern] of [
     ['visits', /\b(?:Monthly|Total)\s*visits\b/i, /^\d+(?:\.\d+)?[KMB]$/i],
-    ['pages', /\bPages\s*\/\s*visit\b/i, /^\d+(?:\.\d+)?$/],
+    ['pages', /\bPages\s*(?:\/|per)\s*visit\b/i, /^\d+(?:\.\d+)?$/],
     ['duration', /\bVisit\s*duration\b/i, /^\d+:[0-5]\d(?::[0-5]\d)?$/],
     ['bounce', /\bBounce\s*rate\b/i, /^\d+(?:\.\d+)?%$/],
   ]) {
@@ -138,13 +150,18 @@ export function parseScreenshot(tsv) {
     }
   }
   const countryShares = [];
-  const geography = rows.find((r) => /\bCountry\b.*Traffic\s*share/i.test(r.text));
-  for (const row of geography ? rows.filter((r) => r.center > geography.center) : []) {
+  const geography = rows.find((r) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b/i.test(r.text));
+  const geographyEnd = rows.find((r) => geography && r.center > geography.center && /\bSee\s*more\s*countries\b/i.test(r.text));
+  for (const row of geography ? rows.filter((r) => r.center > geography.center && (!geographyEnd || r.center < geographyEnd.center)) : []) {
     for (const [name, code] of Object.entries(countries)) {
       const label = phrase(row, new RegExp(`\\b${name}\\b`, 'i'));
       if (!label) continue;
       const value = row.words.find((w) => w.x > label.right && percent(w));
-      if (!value || value.confidence < 80 || bounded(row, value)) continue;
+      if (!value) continue;
+      if (value.confidence < 80 || bounded(row, value)) {
+        warnings.push(`國家占比（${name}）不夠清楚或含有界限，請手動核對。`);
+        continue;
+      }
       countryShares.push({ code, value: value.text.slice(0, -1) });
       if (code === 'TW') put('taiwan', value, row);
     }
@@ -176,6 +193,20 @@ export function parseScreenshot(tsv) {
       });
       break;
     }
+  const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
+  if (sources) {
+    const sourceRows = rows.filter((r) => r.center > sources.center);
+    const scope = sourceRows.map((r) => r.text).join('\n');
+    if (/\bWorldwide\b/i.test(scope) && /\bAll\s*traffic\b/i.test(scope))
+      for (const row of sourceRows)
+        for (const [key, pattern, extensionPattern = pattern] of channels) {
+          const label = phrase(row, extensionPattern);
+          if (!label) continue;
+          const value = row.words.find((w) => w.x > label.right && percent(w));
+          if (value) put(key, value, row);
+        }
+    else warnings.push('流量來源未辨識出 Worldwide／All traffic，已略過該區塊。');
+  }
   return { fields, months: [...months], warnings: [...new Set(warnings)] };
 }
 

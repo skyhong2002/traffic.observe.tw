@@ -186,7 +186,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 <ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol>
 <section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
 <h3 id="manual-import-heading">從截圖填入</h3>
-<p class="note">選擇同一網站、同一月份的 Similarweb 英文版截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器。先核對結果，再選擇要填入的欄位。</p>
+<p class="note">選擇同一網站、同一月份的 Similarweb 英文版網站或瀏覽器外掛截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器，也沒有 AI token 費用。Desktop Only／Mobile Only 的流量來源會略過，國家資料可另外核對填入。先核對結果，再選擇要填入的欄位。</p>
 <label for="manual-screenshots">選擇截圖</label><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple>
 <button type="button" data-recognize>辨識截圖</button>
 <p role="status" aria-live="polite" data-progress></p><div data-review></div>

@@ -28,7 +28,7 @@ const candidate = (domain: string, over: Partial<Candidate> = {}): Candidate => 
 });
 
 describe('dueDomains', () => {
-  it('orders missing last month first, then never tried, each group by requester priority, then the oldest success', () => {
+  it('orders never tried first, then missing last month, each group by requester priority, then the oldest success', () => {
     const t = now.getTime();
     const month = previousMonth(now);
     const due = dueDomains(
@@ -47,7 +47,7 @@ describe('dueDomains', () => {
       ],
       now,
     );
-    expect(due).toEqual(['sheet-behind.tw', 'tag-new.tw', 'blog.tw', 'sheet-new.tw', 'tag-old.tw', 'sheet-old.tw']);
+    expect(due).toEqual(['tag-new.tw', 'blog.tw', 'sheet-new.tw', 'sheet-behind.tw', 'tag-old.tw', 'sheet-old.tw']);
   });
 
   it('skips fresh domains, backoffs and answered one-off lookups', () => {
@@ -80,8 +80,8 @@ describe('dueDomains', () => {
     const t = now.getTime();
     const behind = { lastSuccess: t - 5 * DAY, lastAttempt: t - 5 * DAY, latestProfile: '202608' };
     const list = [candidate('a.tw', behind), candidate('b.tw', behind), candidate('new.tw', { tier: 1 })];
-    expect(dueDomains(list, now, 1)).toEqual(['a.tw', 'new.tw']);
-    expect(dueDomains(list, now)).toEqual(['a.tw', 'b.tw', 'new.tw']);
+    expect(dueDomains(list, now, 1)).toEqual(['new.tw', 'a.tw']);
+    expect(dueDomains(list, now)).toEqual(['new.tw', 'a.tw', 'b.tw']);
   });
 
   it('scales the catch-up quota with how many recent answers had last month', () => {

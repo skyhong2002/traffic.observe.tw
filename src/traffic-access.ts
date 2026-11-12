@@ -10,7 +10,7 @@ export const twoDigits = (value: number) => Number(value.toPrecision(2));
 export const trafficNumber = (value: number, digits: number) => (limitedTraffic() ? String(twoDigits(value)) : value.toFixed(digits));
 
 const METRICS =
-  /^(latestVisits|visits|prevVisits|taiwanVisits|searchVisits|aiVisits|growth|searchShare|prevSearchShare|aiShare|prevAiShare|taiwanShare|prevTaiwanShare|taiwanShareUsed|prevTaiwanShareUsed|taiwanShareMax|similarweb|manual|sheet|share|bounceRate|pagesPerVisit|timeOnSite)$/;
+  /^(latestVisits|visits|prevVisits|taiwanVisits|searchVisits|aiVisits|taiwanSearchVisits|taiwanAiVisits|growth|searchShare|prevSearchShare|aiShare|prevAiShare|taiwanShare|prevTaiwanShare|taiwanShareUsed|prevTaiwanShareUsed|taiwanShareMax|similarweb|manual|sheet|share|bounceRate|pagesPerVisit|timeOnSite)$/;
 
 /** A fresh public projection: preserve IDs, dates, ranks and counts, strip hidden breakdowns. */
 export function publicTraffic<T>(data: T): T {

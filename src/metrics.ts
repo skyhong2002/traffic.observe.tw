@@ -206,15 +206,21 @@ export function ranking<T extends SiteMonth>(view: T[], topic: string | null) {
   const rank = places(inTopic);
   const prev = (s: T) => ({ tw: taiwanVisits(s.prevVisits, s.prevTaiwanShareUsed), visits: s.prevVisits });
   const prevRank = places(inTopic.filter((s) => s.prevVisits !== null).sort((a, b) => byTaiwanVisits(prev(a), prev(b))));
-  return inTopic.map((s) => ({
-    ...s,
-    taiwanVisits: taiwanVisits(s.visits, s.taiwanShareUsed),
-    rank: rank.get(s.domain) ?? null,
-    prevRank: prevRank.get(s.domain) ?? null,
-    growth: s.prevVisits ? (s.visits ?? 0) / s.prevVisits - 1 : null,
-    searchVisits: s.searchShare !== null && s.visits !== null ? s.visits * s.searchShare : null,
-    aiVisits: s.aiShare !== null && s.visits !== null ? s.visits * s.aiShare : null,
-  }));
+  return inTopic.map((s) => {
+    const tw = taiwanVisits(s.visits, s.taiwanShareUsed);
+    return {
+      ...s,
+      taiwanVisits: tw,
+      rank: rank.get(s.domain) ?? null,
+      prevRank: prevRank.get(s.domain) ?? null,
+      growth: s.prevVisits ? (s.visits ?? 0) / s.prevVisits - 1 : null,
+      searchVisits: s.searchShare !== null && s.visits !== null ? s.visits * s.searchShare : null,
+      aiVisits: s.aiShare !== null && s.visits !== null ? s.visits * s.aiShare : null,
+      // Estimates: Similarweb's channel mix covers every visitor, so this assumes Taiwan's visitors share it.
+      taiwanSearchVisits: s.searchShare !== null && tw !== null ? tw * s.searchShare : null,
+      taiwanAiVisits: s.aiShare !== null && tw !== null ? tw * s.aiShare : null,
+    };
+  });
 }
 
 const ratio = (a: number, b: number) => (b > 0 ? a / b : null);

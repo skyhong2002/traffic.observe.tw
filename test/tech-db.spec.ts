@@ -1,8 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
+import { runConfig } from '../src/scheduler.ts';
+import { serviceStatus } from '../src/status.ts';
 import { setRulesForTest, WAPPALYZER_NAMES } from '../src/tech.ts';
-import { dueDomains, loadTech, type PageFetcher, runTech, ScanFailure, saveObservation } from '../src/tech-scan.ts';
+import { checkNow, dueDomains, loadTech, type PageFetcher, runTech, ScanFailure, saveObservation, techConfig } from '../src/tech-scan.ts';
 import { compileVocabulary } from '../src/wappalyzer.ts';
 
 // Against a scratch database (TRAFFIC_TEST_DB_URL); every table is dropped first.
@@ -68,6 +70,102 @@ describe.skipIf(!url)('technology scans with a database', () => {
     const news = (await loadTech(pool, ['news.com.tw'])).get('news.com.tw');
     expect(news).toMatchObject({ status: 'blocked', errorCode: 'waf', observedAt: NOW.toISOString(), origin: 'traffic' });
     expect(news?.detections.map((d) => [d.id, d.version])).toEqual([['wordpress', '6.8']]);
+  });
+
+  it('persists the daily batch interval and paces different homepages ten seconds apart', async () => {
+    const f = fake({ 'news.com.tw': 'WordPress 6.8', 'me.blog.tw': 'Hugo 1.0' });
+    const pauses: number[] = [];
+    expect(
+      await runTech(pool, {
+        rules,
+        fetchPage: f.fetchPage,
+        now: () => NOW,
+        delay: async (ms) => {
+          pauses.push(ms);
+        },
+      }),
+    ).toMatchObject({ sent: 2 });
+    expect(pauses).toEqual([techConfig().pauseSeconds * 1000]);
+    f.sent.length = 0;
+    expect(await runTech(pool, { rules, fetchPage: f.fetchPage, now: () => new Date(NOW.getTime() + 23 * 3_600_000) })).toMatchObject({
+      skipped: 'website technology batch interval',
+      nextRunAt: '2026-10-26T00:00:00.000Z',
+    });
+    expect(f.sent).toEqual([]);
+    expect((await rows(pool, 'SELECT * FROM tech_runs')).length).toBe(1);
+    await runTech(pool, { rules, fetchPage: f.fetchPage, now: () => new Date(NOW.getTime() + 24 * 3_600_000) });
+    expect((await rows(pool, 'SELECT * FROM tech_runs')).length).toBe(2);
+    expect(f.sent).toEqual([]); // A new daily batch does not override each domain's 30-day refresh.
+  });
+
+  it('shares a full-day homepage cache and a global lock between manual and automatic scans', async () => {
+    const f = fake({ 'news.com.tw': 'WordPress 6.8' });
+    expect(await checkNow(pool, 'news.com.tw', { rules, fetchPage: f.fetchPage, now: NOW })).toMatchObject({ fresh: true });
+    expect(
+      await checkNow(pool, 'news.com.tw', { rules, fetchPage: f.fetchPage, now: new Date(NOW.getTime() + 23 * 3_600_000) }),
+    ).toMatchObject({ fresh: false });
+    expect(f.sent).toEqual(['news.com.tw']);
+    const conn = await pool.getConnection();
+    await conn.query("SELECT GET_LOCK('traffic-tech',0)");
+    try {
+      expect(
+        await checkNow(pool, 'news.com.tw', { rules, fetchPage: f.fetchPage, now: new Date(NOW.getTime() + 24 * 3_600_000) }),
+      ).toMatchObject({ error: 'busy' });
+      expect(await runTech(pool, { rules, fetchPage: f.fetchPage, now: () => new Date(NOW.getTime() + 24 * 3_600_000) })).toMatchObject({
+        skipped: 'another run holds the lock',
+      });
+    } finally {
+      await conn.query("SELECT RELEASE_LOCK('traffic-tech')");
+      conn.release();
+    }
+    expect(f.sent).toEqual(['news.com.tw']);
+    expect(
+      await checkNow(pool, 'news.com.tw', { rules, fetchPage: f.fetchPage, now: new Date(NOW.getTime() + 24 * 3_600_000) }),
+    ).toMatchObject({ fresh: true });
+    expect(f.sent).toHaveLength(2);
+    expect(await rows(pool, 'SELECT * FROM sends')).toEqual([]);
+  });
+
+  it('distinguishes stored-data checks, Similarweb requests and homepage scans in public status', async () => {
+    await runTech(pool, {
+      rules,
+      fetchPage: fake({ 'news.com.tw': 'WordPress 6.8', 'me.blog.tw': 'Hugo 1.0' }).fetchPage,
+      now: () => NOW,
+      pauseMs: 0,
+    });
+    const requestAt = new Date(NOW.getTime() - 3_600_000);
+    await pool.query("INSERT INTO sends(domain,at,outcome) VALUES ('news.com.tw',?,'ok')", [requestAt]);
+    await pool.query("INSERT INTO runs(started_at,finished_at,budget,sent,ok,note) VALUES (?,?,15,1,1,NULL),(?,?,15,0,0,'cooling down')", [
+      requestAt,
+      requestAt,
+      NOW,
+      NOW,
+    ]);
+    const state = await serviceStatus(pool, runConfig({ TRAFFIC_RUN_BUDGET: '15' }), NOW);
+    expect(state.activities.similarweb).toMatchObject({
+      usesSimilarwebQuota: true,
+      last24hRequests: 1,
+      lastRequestAt: requestAt.toISOString(),
+      lastScheduleCheckAt: NOW.toISOString(),
+    });
+    expect(state.activities.websiteTechnology).toMatchObject({
+      usesSimilarwebQuota: false,
+      destination: '各網站首頁',
+      last24hAutomaticDomainScans: 2,
+    });
+    expect(state.activities.cloudflareRadar.usesSimilarwebQuota).toBe(false);
+    expect(state.activities.storedDataApi).toMatchObject({
+      usesSimilarwebQuota: false,
+      triggersUpstreamFetch: false,
+      recommendedPollSeconds: 3600,
+    });
+    expect(state.runs[0]).toMatchObject({ activity: 'schedule-check', destination: 'local-database', sent: 0, usesSimilarwebQuota: false });
+    expect(state.runs[1]).toMatchObject({
+      activity: 'provider-request',
+      destination: 'data.similarweb.com',
+      sent: 1,
+      usesSimilarwebQuota: true,
+    });
   });
 
   it('never lets an older attempt overwrite a newer one', async () => {

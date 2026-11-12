@@ -18,8 +18,9 @@
         tables.delete(table);
         continue;
       }
-      const { scroller, shell, head } = entry;
+      const { scroller, shell, head, hint } = entry;
       const max = scroller.scrollWidth - scroller.clientWidth;
+      hint.hidden = max <= 1;
       // Only compact when enough overflow remains after the 152 → 88px shrink.
       // Include the width already removed so the decision stays stable while
       // animating. Otherwise a barely overflowing table alternates sizes and
@@ -71,16 +72,24 @@
       const scroller = table.parentElement;
       const shell = document.createElement('div');
       shell.className = 'table-frame';
+      const hint = document.createElement('p');
+      hint.className = 'table-scroll-hint';
+      hint.textContent = '左右捲動查看其餘欄位';
+      hint.hidden = true;
+      scroller.before(hint);
       scroller.before(shell);
       shell.append(scroller);
       scroller.tabIndex = 0;
       scroller.setAttribute('role', 'region');
-      scroller.setAttribute('aria-label', `${table.closest('[aria-label]')?.getAttribute('aria-label') || '資料表'}，可左右捲動`);
+      scroller.setAttribute(
+        'aria-label',
+        `${table.closest('[aria-label]')?.getAttribute('aria-label') || table.closest('section')?.querySelector('h2')?.textContent || '資料表'}，可左右捲動`,
+      );
       table.classList.add('data-table');
       const head = table.tHead;
       head.classList.add('table-head-follow');
       const headers = [...head.rows[0].cells];
-      const lead = headers.findIndex((cell) => cell.classList.contains('l'));
+      const lead = table.dataset.pin === 'none' ? -1 : headers.findIndex((cell) => cell.classList.contains('l'));
       const hasRank = lead === 1 && !!table.tBodies[0]?.rows[0]?.cells[0]?.classList.contains('rank');
       if (hasRank) table.classList.add('with-rank');
       const pin = { lead, hasRank, width: headers.length };
@@ -92,7 +101,7 @@
       }
       scroller.addEventListener('scroll', schedule, { passive: true });
       resize.observe(table);
-      tables.set(table, { scroller, shell, head, pin });
+      tables.set(table, { scroller, shell, head, pin, hint });
     }
     schedule();
   }

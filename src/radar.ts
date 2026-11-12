@@ -132,6 +132,11 @@ export async function loadRadar(pool: Pool, domains?: string[]) {
   return out;
 }
 
+export function radarConfig(env: Record<string, string | undefined> = process.env) {
+  const value = Number(env.TRAFFIC_RADAR_PAUSE_SECONDS);
+  return { pauseSeconds: Number.isSafeInteger(value) && value >= 1 && value <= 3600 ? value : 10 };
+}
+
 /** Fill watched domains with no stored ranking and no previous attempt. No refreshes or retries. */
 export async function runRadar(
   pool: Pool,
@@ -139,7 +144,7 @@ export async function runRadar(
     token = radarToken(),
     request = fetch,
     now = () => new Date(),
-    pauseMs = 1000,
+    pauseMs = radarConfig().pauseSeconds * 1000,
     deadlineMs = 25 * 60_000,
     delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
   }: {

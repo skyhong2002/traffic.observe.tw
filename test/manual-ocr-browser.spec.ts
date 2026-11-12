@@ -8,15 +8,20 @@ import { manualPage } from '../src/metadata-pages.ts';
 import { STYLE } from '../src/style.ts';
 
 it.skipIf(!existsSync(chromium.executablePath()))(
-  'recognizes actual stock screenshots locally, reviews changes and preserves drafts',
+  'recognizes platform and extension screenshots locally, reviews changes and preserves drafts',
   async () => {
     const server = Fastify();
     registerManualOcr(server);
     server.get('/style.css', async (_request, reply) => reply.type('text/css').send(STYLE));
-    server.get('/site/tw.stock.yahoo.com/manual/', async (_request, reply) =>
+    server.get<{ Params: { domain: string } }>('/site/:domain/manual/', async (request, reply) =>
       reply
         .type('text/html')
-        .send(manualPage({ domain: 'tw.stock.yahoo.com', name: 'Yahoo 股市' }, { months: [], choices: ['202610', '202609'], free: [] })),
+        .send(
+          manualPage(
+            { domain: request.params.domain, name: request.params.domain },
+            { months: [], choices: ['202610', '202609'], free: [] },
+          ),
+        ),
     );
     // No traffic data or production database is used by this browser test.
     const origin = await server.listen({ host: '127.0.0.1', port: 0 });
@@ -63,6 +68,36 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.reload();
       expect(await page.locator('#manual-visits').inputValue()).toBe('29.54M');
       expect(await page.locator('#manual-search').inputValue()).toBe('35.20');
+
+      await page.goto(origin + '/site/matsu.idv.tw/manual/');
+      await page
+        .locator('#manual-screenshots')
+        .setInputFiles(
+          ['extension-engagement', 'extension-geography'].map((name) =>
+            fileURLToPath(new URL(`./fixtures/manual-ocr/${name}.png`, import.meta.url)),
+          ),
+        );
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      const extensionReview = await page.locator('[data-review]').innerText();
+      expect(extensionReview).toContain('416.5K');
+      expect(extensionReview).toContain('97.02');
+      expect(extensionReview).toContain('Desktop Only');
+      expect(extensionReview).toContain('Germany');
+      expect(extensionReview).not.toContain('60.69');
+      expect(await page.getByRole('checkbox', { name: '填入直接造訪', exact: true }).count()).toBe(0);
+      expect(await page.locator('#manual-visits').inputValue()).toBe('');
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('#manual-visits').inputValue()).toBe('416.5K');
+      expect(await page.locator('#manual-pages').inputValue()).toBe('3.34');
+      expect(await page.locator('#manual-duration').inputValue()).toBe('00:05:40');
+      expect(await page.locator('#manual-bounce').inputValue()).toBe('44.43');
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('97.02');
+      expect(await page.locator('#manual-countries').inputValue()).toBe('TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3');
+      expect(await page.locator('#manual-Direct').inputValue()).toBe('');
+      expect(await page.locator('#manual-search').inputValue()).toBe('');
+      expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
       expect(external).toEqual([]);
       expect(errors).toEqual([]);
       // An interrupted model download must leave the form editable and allow retry.
@@ -86,5 +121,5 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await server.close();
     }
   },
-  45_000,
+  60_000,
 );

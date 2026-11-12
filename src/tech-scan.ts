@@ -466,13 +466,21 @@ export const dueDomains = async (pool: Pool, now: Date, limit: number) =>
     )
   ).map((r) => r.domain);
 
-export const techConfig = (env: Record<string, string | undefined> = process.env) => ({
-  /** Homepages a run may fetch; 0 turns the scans off. */
-  budget: Math.max(0, Math.min(500, Number(env.TRAFFIC_TECH_BUDGET ?? 60) || 0)),
-});
+export function techConfig(env: Record<string, string | undefined> = process.env) {
+  const num = (key: string, fallback: number, min: number, max: number) => {
+    const n = Number(env[key]);
+    return env[key] !== undefined && env[key] !== '' && Number.isSafeInteger(n) && n >= min && n <= max ? n : fallback;
+  };
+  return {
+    budget: num('TRAFFIC_TECH_BUDGET', 100, 0, 500),
+    intervalHours: num('TRAFFIC_TECH_INTERVAL_HOURS', 24, 1, 720),
+    pauseSeconds: num('TRAFFIC_TECH_PAUSE_SECONDS', 10, 1, 3600),
+    manualCacheHours: num('TRAFFIC_TECH_MANUAL_CACHE_HOURS', 24, 1, 720),
+  };
+}
 
 /**
- * One hourly batch, one domain at a time, a pause between. Stops at the budget, the time limit or when `stopping`
+ * One daily batch, one domain at a time, a pause between. Stops at the budget, the time limit or when `stopping`
  * says the worker is shutting down. Without installed rules nothing is fetched: an observation made without them
  * would claim 未辨識 for every site. A named lock keeps runs apart.
  */
@@ -484,8 +492,9 @@ export async function runTech(
     fallback,
     now = () => new Date(),
     budget = techConfig().budget,
-    pauseMs = 1000,
-    deadlineMs = 8 * 60_000,
+    pauseMs = techConfig().pauseSeconds * 1000,
+    intervalHours = techConfig().intervalHours,
+    deadlineMs = 30 * 60_000,
     stopping = () => false,
     delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
   }: {
@@ -496,6 +505,7 @@ export async function runTech(
     now?: () => Date;
     budget?: number;
     pauseMs?: number;
+    intervalHours?: number;
     deadlineMs?: number;
     stopping?: () => boolean;
     delay?: (ms: number) => Promise<void>;
@@ -507,6 +517,9 @@ export async function runTech(
   try {
     const [[lock]] = (await conn.query("SELECT GET_LOCK('traffic-tech', 0) AS got")) as unknown as [[{ got: number }]];
     if (lock.got !== 1) return { skipped: 'another run holds the lock' };
+    const [last] = await rows<{ at: Date | null }>(pool, 'SELECT MAX(started_at) AS at FROM tech_runs');
+    const nextAt = last?.at ? new Date(last.at.getTime() + intervalHours * 3_600_000) : null;
+    if (nextAt && nextAt > now()) return { skipped: 'website technology batch interval', nextRunAt: nextAt.toISOString() };
     const due = await dueDomains(pool, now(), budget);
     const [run] = (await pool.query('INSERT INTO tech_runs (started_at, due) VALUES (?, ?)', [now(), due.length])) as unknown as [
       { insertId: number },
@@ -552,7 +565,7 @@ export const lastTechRun = async (pool: Pool) =>
     )
   )[0] ?? null;
 
-/** A domain anyone asked about on /tech/: checked now unless an attempt is under ten minutes old. */
+/** Explicit homepage scan; shared cache and lock prevent repeated manual/automatic visits. */
 export async function checkNow(
   pool: Pool,
   raw: unknown,
@@ -566,8 +579,24 @@ export async function checkNow(
   const domain = publicDomain(raw);
   if (!domain) return { error: 'invalid_domain' as const };
   if (!rules) return { error: 'no_rules' as const };
-  const before = (await loadTech(pool, [domain])).get(domain);
-  if (before && now.getTime() - Date.parse(before.lastAttemptAt) < 10 * 60_000) return { domain, record: before, fresh: false };
-  await saveObservation(pool, domain, await scanDomain(domain, rules, fetchPage, now, fallback));
-  return { domain, record: (await loadTech(pool, [domain])).get(domain) as TechRecord, fresh: true };
+  const cached = async () => {
+    const before = (await loadTech(pool, [domain])).get(domain);
+    return before && now.getTime() - Date.parse(before.lastAttemptAt) < techConfig().manualCacheHours * 3_600_000
+      ? { domain, record: before, fresh: false }
+      : null;
+  };
+  const before = await cached();
+  if (before) return before;
+  const conn = await pool.getConnection();
+  try {
+    const [[lock]] = (await conn.query("SELECT GET_LOCK('traffic-tech', 0) AS got")) as unknown as [[{ got: number }]];
+    if (lock.got !== 1) return { error: 'busy' as const };
+    const existing = await cached();
+    if (existing) return existing;
+    await saveObservation(pool, domain, await scanDomain(domain, rules, fetchPage, now, fallback));
+    return { domain, record: (await loadTech(pool, [domain])).get(domain) as TechRecord, fresh: true };
+  } finally {
+    await conn.query("SELECT RELEASE_LOCK('traffic-tech')").catch(() => undefined);
+    conn.release();
+  }
 }

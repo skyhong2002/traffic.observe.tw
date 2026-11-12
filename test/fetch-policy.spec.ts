@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { utcWeek } from '../src/fetch-policy.ts';
 import { runConfig } from '../src/scheduler.ts';
-import { requestSimilarweb, retryAfter, TrafficFetchError } from '../src/similarweb.ts';
+import { requestSimilarweb, responseMetadata, retryAfter, TrafficFetchError } from '../src/similarweb.ts';
 
 describe('Similarweb request policy', () => {
   it('resets on UTC Monday, including year boundaries and Taipei Monday morning', () => {
@@ -46,5 +46,31 @@ describe('Similarweb request policy', () => {
     });
     const refused = (async () => new Response('', { status: 429 })) as typeof fetch;
     await expect(requestSimilarweb('example.com', refused, now)).rejects.toBeInstanceOf(TrafficFetchError);
+  });
+
+  it('keeps only safe CloudFront diagnostics and never captures body or request identifiers', () => {
+    const meta = responseMetadata(
+      new Response('secret provider body', {
+        status: 403,
+        headers: {
+          server: 'CloudFront',
+          'x-cache': 'Error from cloudfront',
+          'x-amz-cf-pop': 'NRT57-P1',
+          'x-amz-cf-id': 'request-id-must-not-be-saved',
+          'set-cookie': 'credential=must-not-be-saved',
+          'content-type': 'application/json',
+        },
+      }),
+    );
+    expect(meta).toMatchObject({
+      diagnosticsVersion: '1',
+      provider: 'CloudFront',
+      'x-cache': 'Error from cloudfront',
+      'x-amz-cf-pop': 'NRT57-P1',
+    });
+    expect(JSON.stringify(meta)).not.toContain('secret');
+    expect(JSON.stringify(meta)).not.toContain('request-id');
+    expect(JSON.stringify(meta)).not.toContain('credential');
+    expect(meta).not.toHaveProperty('x-amz-cf-id');
   });
 });
