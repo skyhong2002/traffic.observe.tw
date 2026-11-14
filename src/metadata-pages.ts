@@ -155,7 +155,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
   const detailValues = manualDetailValues(saved);
   const value = (key: keyof NonNullable<ManualForm['draft']>, fromSaved: string) => html(form.draft ? (d[key] ?? '') : fromSaved);
   const field = (key: string, label: string, where: string, placeholder: string, fromSaved: string, unit = '') =>
-    `<div class="field"><label for="manual-${key}">${label}</label><span class="input-unit"><input id="manual-${key}" name="${key}"${invalid(key)} value="${value(key, fromSaved)}" placeholder="${placeholder}" inputmode="${['visits', 'countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
+    `<div class="field"><label for="manual-${key}">${label}</label><span class="input-unit"><input id="manual-${key}" name="${key}"${invalid(key)} value="${value(key, fromSaved)}" placeholder="${placeholder ? `例如 ${placeholder}` : ''}" inputmode="${['visits', 'countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
   const free = form.free.length
     ? form.free.map((f) => `${monthLabel(f.month)} ${f.estimated ? '有估算' : '<b>無估算</b>'}`).join('・')
     : '還沒有向 Similarweb 抓過';
@@ -188,7 +188,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 <section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
 <ol class="ocr-steps" aria-label="截圖匯入步驟"><li data-step="select" aria-current="step"><span>1</span> 選擇截圖</li><li data-step="review"><span>2</span> 對照與核對</li><li data-step="save"><span>3</span> 填入後儲存</li></ol>
 <div class="ocr-upload-head"><div><h3 id="manual-import-heading">從截圖填入</h3><p class="note">同一網站、同一月份的英文版截圖；網站或外掛皆可。</p></div><span class="ocr-local-badge">本機辨識・圖片不上傳</span></div>
-<div class="ocr-upload" data-dropzone><div><label for="manual-screenshots">選擇截圖，也可以拖曳到這裡</label><p class="note">概況、國家、流量來源 · 最多 4 張 · PNG / JPG / WebP · 每張 10 MB</p><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple></div><button type="button" class="primary" data-recognize>辨識截圖</button></div>
+<div class="ocr-upload" data-dropzone><div><p class="ocr-upload-label">加入截圖，也可以拖曳到這裡</p><p class="note">概況、國家、流量來源 · 最多 4 張 · PNG / JPG / WebP · 每張 10 MB</p><label class="ocr-choose" for="manual-screenshots">選擇／加入截圖</label><input class="ocr-file-input" type="file" aria-label="選擇／加入截圖" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple></div><button type="button" class="primary" data-recognize>辨識截圖</button></div>
 <div class="ocr-files" data-files></div>
 <p class="ocr-progress" role="status" aria-live="polite" data-progress></p><div data-review></div>
 <details class="ocr-help"><summary>辨識範圍與資料處理</summary><p class="note">辨識在瀏覽器內完成，沒有 AI token 費用。Desktop Only 渠道填入獨立的桌面限定欄位，Mobile Only 目前不支援。已有內容預設保留；辨識結果需核對並按「儲存」才會生效。</p></details>
@@ -218,7 +218,7 @@ ${manualChannels.map(([key, label]) => field(key, label, 'Marketing channels →
 <div class="field-grid">${manualDesktopChannels.map(([key, label]) => field(`desktop_${key}`, `桌面限定・${label}`, 'Traffic Sources → Worldwide／Desktop Only', '0.00', detailValues[`desktop_${key}`] ?? '', '%')).join('')}</div>
 </details>
 <h3>互動與排名（選填）</h3><div class="field-grid">${manualDetailFields.map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit)).join('')}</div>
-<div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
+<div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="例如：&#10;TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
 <details class="manual-breakdowns"${form.error ? ' open' : ''}><summary>平台詳細分布（選填）</summary>
 <p class="note">請確認各表使用相同月份、Worldwide 與 All traffic 範圍。各表的占比分母不同。每行填「名稱 | 占比 | 變化」，變化可省略；名稱未提供時填 ?。保留平台的 &lt;0.01%、&gt;5000%、New，不自行換算。</p>
 <div class="field-grid manual-basics">${breakdownTotals.map(([key, label]) => field(key, label, key === 'socialTotal' ? '占全站造訪；不等同自然社群' : '占全站造訪', '<0.01%', detailValues[key] ?? '')).join('')}</div>

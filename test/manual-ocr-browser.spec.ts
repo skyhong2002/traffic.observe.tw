@@ -55,6 +55,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByRole('button', { name: '填入勾選欄位' }).isDisabled()).toBe(true);
       await page.setViewportSize({ width: 390, height: 844 });
       expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+      await page.getByRole('textbox', { name: '核對月造訪量', exact: true }).fill('29.54M');
+      expect(await page.getByRole('checkbox', { name: '填入月造訪量', exact: true }).isChecked()).toBe(false);
       await page.getByRole('checkbox', { name: '填入月造訪量', exact: true }).check();
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
@@ -104,6 +106,9 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       // by Desktop Only sources. It must also work when selected by itself.
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(origin + '/site/s3.com.tw/manual/');
+      await page.locator('#manual-screenshots').setInputFiles({ name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('invalid') });
+      expect(await page.locator('[data-progress]').innerText()).toContain('bad.txt');
+      expect(await page.getByRole('button', { name: '辨識截圖', exact: true }).isDisabled()).toBe(true);
       await page
         .locator('#manual-screenshots')
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography.png', import.meta.url)));
@@ -125,6 +130,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page
         .locator('#manual-screenshots')
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-engagement.png', import.meta.url)));
+      await page.getByRole('button', { name: '更改截圖並重新核對' }).click();
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
@@ -152,6 +158,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         await fresh.getByRole('button', { name: '定位台灣占比', exact: true }).click();
         expect(await fresh.locator('.ocr-marker.is-active').count()).toBeGreaterThan(0);
         expect(await fresh.locator('.ocr-image-stage > img').getAttribute('alt')).toContain(names[names.length - 1]);
+        await fresh.locator('.ocr-image-stage > img').evaluate((el) => el.decode());
         const box = await fresh.locator('.ocr-marker.is-active').first().boundingBox();
         const imageBox = await fresh.locator('.ocr-image-stage > img').boundingBox();
         expect(box && imageBox && Math.abs(box.y - imageBox.y) / imageBox.height).toBeLessThan(0.2);
@@ -231,19 +238,30 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await context.addInitScript((tsv) => {
         Object.assign(globalThis, {
           Tesseract: {
-            createWorker: async () => ({
-              setParameters: async () => {},
-              recognize: async () => ({ data: { tsv } }),
-              terminate: async () => {},
-            }),
+            createWorker: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 350));
+              return {
+                setParameters: async () => {},
+                recognize: async () => ({ data: { tsv } }),
+                terminate: async () => {},
+              };
+            },
           },
         });
       }, missing);
       const page = await context.newPage();
+      page.setDefaultTimeout(5000);
       await page.goto(origin + '/site/s3.com.tw/manual/');
+      await page.locator('#manual-screenshots').setInputFiles({ name: 'bad.txt', mimeType: 'text/plain', buffer: Buffer.from('invalid') });
+      expect(await page.locator('[data-progress]').innerText()).toContain('bad.txt');
+      expect(await page.getByRole('button', { name: '辨識截圖', exact: true }).isDisabled()).toBe(true);
       await page
         .locator('#manual-screenshots')
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography-telegram.jpg', import.meta.url)));
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('button', { name: '取消辨識', exact: true }).click();
+      expect(await page.locator('[data-progress]').innerText()).toContain('已取消');
+      expect(await page.locator('.ocr-file').count()).toBe(1);
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor();
       expect(await page.locator('.ocr-notices').innerText()).toContain('台灣占比未讀到');
@@ -256,18 +274,27 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await taiwan.fill('93.23');
+      await page.getByRole('button', { name: /移除截圖 1/ }).click();
+      expect(await page.getByRole('button', { name: '保留目前核對' }).isVisible()).toBe(true);
+      await page.getByRole('button', { name: '保留目前核對' }).click();
+      expect(await taiwan.inputValue()).toBe('93.23');
       expect(await page.getByRole('checkbox', { name: '填入聯盟行銷', exact: true }).count()).toBe(0);
       expect(await page.getByRole('checkbox', { name: '填入桌面限定・聯盟行銷', exact: true }).isChecked()).toBe(false);
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('TW 92.23\nUS 2.13');
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
-      expect(await page.locator('[data-progress]').innerText()).toContain('不一致');
+      expect(await page.locator('.ocr-apply-error').innerText()).toContain('不一致');
+      expect(await taiwan.getAttribute('aria-describedby')).toBe('ocr-status-taiwan');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('US 2.13\nHK 1.59\nID 0.58\nMY 0.57');
-      await page.locator('#manual-desktop_Direct').fill('13.99');
+      await page.locator('[data-desktop-channels] > summary').click();
+      await page.locator('#manual-desktop_Direct').fill('12.99');
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('[data-progress]').innerText()).toContain('已變更');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
-      await page.locator('#manual-desktop_Direct').fill('');
+      await page.getByRole('button', { name: '更新目前內容，保留核對修正' }).click();
+      expect(await taiwan.inputValue()).toBe('93.23');
+      expect(await page.getByRole('checkbox', { name: '填入桌面限定・直接造訪', exact: true }).isChecked()).toBe(false);
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
@@ -281,6 +308,17 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-results').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
       await page.setViewportSize({ width: 390, height: 844 });
       expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+      await page.getByRole('button', { name: '定位桌面限定・自然搜尋', exact: true }).click();
+      expect(await page.locator('.ocr-field-row.is-active .ocr-inline-evidence canvas').isVisible()).toBe(true);
+      expect(await page.locator('.ocr-results').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(false);
+      await page.setViewportSize({ width: 390, height: 420 });
+      await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).focus();
+      expect(await page.locator('.ocr-field-row.is-active .ocr-inline-evidence canvas').isVisible()).toBe(true);
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      const cropBox = await page.locator('.ocr-field-row.is-active .ocr-inline-evidence canvas').boundingBox();
+      const editorBox = await page.locator('.ocr-field-row.is-active .ocr-edit-value input').boundingBox();
+      expect(cropBox && cropBox.y >= 0 && cropBox.y + cropBox.height <= 420).toBe(true);
+      expect(editorBox && editorBox.y >= 0 && editorBox.y + editorBox.height <= 420).toBe(true);
       page.on('dialog', (dialog) => dialog.accept());
       await page.reload();
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
