@@ -208,11 +208,11 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 ${field('visits', '月造訪量', 'Traffic &amp; engagement → Total visits', '60.10M', saved ? millions(saved.visits) : '')}
 ${field('taiwan', '台灣', 'Geography → Taiwan', '61.57', saved ? percentInput(saved.taiwanShare) : '', '%')}
 </div>
-<h3>全裝置流量來源占比（選填）</h3><div class="field-grid">
+<details class="manual-breakdowns" data-all-channels${form.error ? ' open' : ''}><summary>全裝置流量來源占比（選填）</summary><div class="field-grid">
 ${field('search', '自然搜尋', 'Marketing channels → Org. Search', '36.45', saved ? percentInput(saved.searchShare) : '', '%')}
 ${field('ai', 'Gen AI', 'Marketing channels → Gen AI', '0.37', saved ? percentInput(saved.aiShare) : '', '%')}
 ${manualChannels.map(([key, label]) => field(key, label, 'Marketing channels → ' + label, '0.00', percentInput(saved?.channels[key] ?? null), '%')).join('')}
-</div>
+</div></details>
 <details class="manual-breakdowns" data-desktop-channels${form.error || Object.entries({ ...detailValues, ...d }).some(([key, v]) => key.startsWith('desktop_') && v) ? ' open' : ''}><summary>桌面限定流量來源（Desktop Only，選填）</summary>
 <p class="note">占桌面造訪的比例，與上方全裝置渠道分開保存。沒有桌面造訪量時，只顯示占比，不以全裝置月造訪量換算次數。</p>
 <div class="field-grid">${manualDesktopChannels.map(([key, label]) => field(`desktop_${key}`, `桌面限定・${label}`, 'Traffic Sources → Worldwide／Desktop Only', '0.00', detailValues[`desktop_${key}`] ?? '', '%')).join('')}</div>

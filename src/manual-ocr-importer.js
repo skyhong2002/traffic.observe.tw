@@ -114,7 +114,7 @@ function createCountryHelper(getTarget, onSelect = () => {}, prefix = '') {
   }
   countryHelper.append(insert, helperStatus);
   countryHelper.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' || event.target.tagName !== 'INPUT') return;
+    if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.target.tagName !== 'INPUT') return;
     event.preventDefault();
     if (event.target === countrySearch) (picker.value ? share : picker).focus();
     else if (event.target === share) insert.click();
@@ -277,7 +277,7 @@ form.addEventListener('input', renderFormCountries);
 form.addEventListener('change', renderFormCountries);
 form.addEventListener('manual:values-changed', renderFormCountries);
 formCountryRows.addEventListener('keydown', (event) => {
-  if (event.key !== 'Enter' || event.target.tagName !== 'INPUT') return;
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229 || event.target.tagName !== 'INPUT') return;
   event.preventDefault();
   const inputs = [...formCountryRows.querySelectorAll('input')];
   const next = inputs[inputs.indexOf(event.target) + 1];
@@ -306,6 +306,7 @@ let reviewFormChange;
 const saveBar = form.querySelector('.manual-save-bar');
 const saveHint = saveBar.querySelector('span');
 const defaultSaveHint = saveHint.textContent;
+let formValidationMessage = '';
 const saveWarning = document.createElement('div');
 saveWarning.className = 'ocr-save-warning';
 saveWarning.hidden = true;
@@ -313,11 +314,57 @@ saveBar.after(saveWarning);
 function updateSaveHandoff(pending) {
   pendingReview = pending;
   form.dispatchEvent(new CustomEvent('manual:review-state', { detail: { pending } }));
-  saveHint.textContent = pending ? '先完成上方截圖核對並填入，再儲存此月份。' : defaultSaveHint;
+  saveHint.textContent = pending ? '先完成上方截圖核對並填入，再儲存此月份。' : formValidationMessage || defaultSaveHint;
   saveHint.hidden = false;
   for (const button of form.querySelectorAll('[type=submit]')) button.classList.toggle('primary', !pending);
   saveWarning.hidden = true;
 }
+const formValueChecks = Object.keys(screenshotFields)
+  .filter((key) => !['countries', 'taiwan'].includes(key))
+  .map((key) => {
+    const control = form.elements.namedItem(key);
+    const error = text('p', '', 'ocr-form-value-error');
+    error.id = 'manual-value-error-' + key;
+    error.setAttribute('role', 'status');
+    error.hidden = true;
+    (control.closest('.input-unit') || control).after(error);
+    describe(control, error.id);
+    return { key, control, error, serverInvalid: control.getAttribute('aria-invalid') === 'true', serverValue: control.value };
+  });
+function validateFormValues(event) {
+  const errors = new Map(formValueChecks.map(({ key, control }) => [key, valueError(key, control.value.trim())]));
+  for (const desktop of [false, true]) {
+    const entries = formValueChecks.filter(
+      ({ key }) => key.startsWith('desktop_') === desktop && !['visits', 'pages', 'duration', 'bounce'].includes(key),
+    );
+    const total = entries.reduce((sum, { control }) => sum + Number(control.value || 0), 0);
+    if (entries.some(({ control }) => control.value) && !desktop) form.querySelector('[data-all-channels]').open = true;
+    if (!entries.some(({ key }) => errors.get(key)) && total > 100.1) {
+      const target = entries.find(({ control }) => control === event?.target) || entries.find(({ control }) => control.value);
+      errors.set(target.key, (desktop ? '桌面限定' : '全裝置') + '流量來源合計 ' + total.toFixed(2) + '%，超過 100%，請核對這一組占比。');
+    }
+  }
+  for (const entry of formValueChecks) {
+    const { key, control, error } = entry;
+    if (control.value !== entry.serverValue) entry.serverInvalid = false;
+    const message = errors.get(key);
+    control.setCustomValidity(message);
+    control.setAttribute('aria-invalid', String(Boolean(message || entry.serverInvalid)));
+    error.hidden = !message;
+    error.textContent = message;
+  }
+  const first = formValueChecks.find(({ key }) => errors.get(key));
+  formValidationMessage = first
+    ? '請先修正「' + screenshotFields[first.key] + '」旁的提示，再儲存此月份。'
+    : formTaiwanWarning.textContent
+      ? '請先修正台灣占比旁的提示，再儲存此月份。'
+      : '';
+  if (!pendingReview) saveHint.textContent = formValidationMessage || defaultSaveHint;
+}
+form.addEventListener('input', validateFormValues);
+form.addEventListener('change', validateFormValues);
+form.addEventListener('manual:values-changed', validateFormValues);
+validateFormValues();
 form.addEventListener(
   'submit',
   (event) => {
@@ -726,6 +773,7 @@ function showReview(result) {
   heading.append(title, count);
   review.append(heading);
   let countryNotice;
+  let scopeStatus;
   const warnings = [...result.warnings];
   const scopeIssues = warnings
     .filter((warning) => /未完整辨識出 Worldwide/.test(warning))
@@ -738,7 +786,6 @@ function showReview(result) {
           : '全球／全裝置';
       return image + '的' + missing + '篩選未讀到' + (/桌面渠道已確認/.test(warning) ? '（渠道已確認桌面限定）' : '');
     });
-  if (scopeIssues.length) review.append(text('p', scopeIssues.join('；') + '，請對照原圖確認。', 'ocr-scope-summary'));
   if (!result.months.length) warnings.push('未讀到月份，目前使用表單月份 ' + targetLabel + '，請確認。');
   if (missingTaiwan) warnings.unshift('台灣占比未讀到，請對照原圖手動補上；不會用其他國家的剩餘占比推算。');
   if (warnings.length) {
@@ -753,12 +800,15 @@ function showReview(result) {
           .filter(Boolean),
       ),
     ];
-    const summary = text(
-      'summary',
+    const summary = document.createElement('summary');
+    scopeStatus = text(
+      'span',
       (!result.months.length ? '月份沿用表單，請確認。' : '') +
-        (scopeImages.length ? scopeImages.length + ' 張截圖的範圍需人工確認' : '範圍與辨識提示'),
+        (scopeImages.length ? scopeImages.length + ' 張截圖的全球／全裝置篩選未讀到，請核對' : '範圍與辨識提示'),
     );
-    notice.append(summary);
+    summary.append(scopeStatus);
+    if (scopeIssues.length) notice.append(text('p', scopeIssues.join('；') + '，請對照原圖確認。'));
+    notice.prepend(summary);
     if (!result.months.length) notice.append(text('p', '未讀到月份：沿用表單 ' + targetLabel + '，請確認與截圖相符。'));
     if (countryIncomplete) {
       countryNotice = text('span', missingTaiwan ? '・台灣未讀到' : '・國家待補正');
@@ -1273,6 +1323,8 @@ function showReview(result) {
       const conflict = result.warnings.some((warning) => warning.includes('不同截圖的' + screenshotFields[key] + '不一致'));
       const needsReview = !value || (key === 'countries' && countryIncomplete);
       check.checked = Boolean(value) && !before[key] && !needsReview;
+      const retainedTaiwan = key === 'taiwan' && /^TW\s+(\d+(?:\.\d+)?)$/m.exec(before.countries || '');
+      if (retainedTaiwan && !before.taiwan && Number(retainedTaiwan[1]) !== Number(value)) check.checked = false;
       check.setAttribute('aria-label', '填入' + screenshotFields[key]);
       const content = text('div', '', 'ocr-field-content');
       const sourceButton = text('button', screenshotFields[key], 'ocr-field-label');
@@ -1531,7 +1583,11 @@ function showReview(result) {
             partialLabel.hidden = !partial || applied;
             const omissions = missing.length ? '不含 ' + missing.map((code) => countryDisplayNames.of(code)).join('、') : '可能有未列國家';
             partialText.textContent =
-              '我已對照原圖，仍決定只填入這份不完整列表（' + omissions + '；合計 ' + coverage.toFixed(2) + '%）。缺少國家不會自動補上。';
+              '我已對照原圖，仍決定只填入這份不完整列表（' +
+              omissions +
+              '；此列表已讀到的合計 ' +
+              coverage.toFixed(2) +
+              '%）。缺少國家不會自動補上。';
             choice.needsReview = !choice.value || Boolean(partial && !acceptPartial.checked);
             choice.partialAccepted = Boolean(partial && acceptPartial.checked);
             if (choice.unmatched) choice.unmatched.hidden = !partial;
@@ -1673,13 +1729,12 @@ function showReview(result) {
     confirmed = document.createElement('input');
   confirmed.type = 'checkbox';
   confirmation.className = 'ocr-confirmation';
-  confirmation.append(
-    confirmed,
-    document.createTextNode(
-      ' 我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，以及各欄標示的全裝置／桌面限定範圍。' + '',
-    ),
+  const confirmationCopy = text(
+    'span',
+    '我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，以及各欄標示的全裝置／桌面限定範圍。',
   );
-  if (scopeIssues.length) confirmation.append(text('small', scopeIssues.join('；') + '。我已核對這些未讀到的篩選。'));
+  if (scopeIssues.length) confirmationCopy.append(text('small', '上方標示未讀到的篩選已對照原圖核對。'));
+  confirmation.append(confirmed, confirmationCopy);
   const actionLine = text('div', '', 'ocr-review-actions');
   const apply = text('button', '填入勾選欄位', 'primary');
   apply.id = 'ocr-apply';
@@ -1712,6 +1767,7 @@ function showReview(result) {
         choice.renderCountryRows?.();
       }
     }
+    Object.assign(before, latest);
     localError.hidden = true;
     refresh.hidden = true;
     apply.hidden = false;
@@ -1912,6 +1968,13 @@ function showReview(result) {
   }
   function updateSelection() {
     localError.hidden = true;
+    if (scopeStatus && scopeIssues.length) {
+      scopeStatus.textContent =
+        confirmed.checked || applied
+          ? '已確認 ' + scopeIssues.length + ' 張截圖的網站、月份與範圍'
+          : scopeIssues.length + ' 張截圖的全球／全裝置篩選未讀到，請核對';
+      scopeStatus.classList.toggle('ocr-scope-pending', !confirmed.checked && !applied);
+    }
     for (const choice of choices) {
       choice.updateCountry?.();
       if (choice.namedError)
@@ -2044,6 +2107,9 @@ function showReview(result) {
                 comparisonValue(choice.key, choice.value) +
                 choice.unit
             : '與目前不同，保留原值；勾選才覆寫';
+        const retainedTaiwan = choice.key === 'taiwan' && /^TW\s+(\d+(?:\.\d+)?)$/m.exec(before.countries || '');
+        if (retainedTaiwan && !choice.before && !choice.check.checked && Number(retainedTaiwan[1]) !== Number(choice.value))
+          choice.status.textContent = '國家列表已有台灣 ' + retainedTaiwan[1] + '%，預設保留；勾選後可比較採用值。';
         if (choice.refreshed) choice.status.textContent = '表單剛變更；' + choice.status.textContent;
       }
       choice.row.classList.toggle('is-selected', choice.check.checked);
@@ -2140,7 +2206,7 @@ function showReview(result) {
       }
     }
     const latest = current();
-    const changed = (selected.length ? selected : choices).filter((c) => latest[c.key] !== c.before);
+    const changed = choices.filter((c) => latest[c.key] !== c.before);
     if (changed.length) {
       fail(
         '核對期間表單內容已變更：' +

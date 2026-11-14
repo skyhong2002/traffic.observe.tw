@@ -522,6 +522,10 @@
   line-height: 1.7;
   cursor: pointer;
 }
+.ocr-confirmation > span {
+  flex: 1;
+  min-width: 0;
+}
 .ocr-confirmation > input {
   flex: none;
   margin: 3px 0 0;
@@ -1525,12 +1529,8 @@
   margin: 8px 0 0;
   font-size: 14px;
 }
-.ocr-scope-summary {
-  padding: 8px 16px;
-  margin: 0;
-  border-left: 3px solid #ffd08a;
+.ocr-scope-pending {
   color: #ffd08a;
-  font-size: 14px;
 }
 .ocr-confirmation small {
   display: block;
@@ -1634,4 +1634,16 @@
   gap: 8px;
   margin-bottom: 12px;
   font-size: 14px;
+}
+
+.ocr-form-value-error {
+  color: #ff8d9b;
+  margin: 6px 0 0;
+  font-size: 14px;
+}
+.ocr-form-value-error[hidden] {
+  display: none;
+}
+.manual-form input[aria-invalid="true"] {
+  border-color: #ff8d9b;
 }

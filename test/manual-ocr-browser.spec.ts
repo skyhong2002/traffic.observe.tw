@@ -133,9 +133,20 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.evaluate("document.querySelector('.manual-form').checkValidity()")).toBe(true);
       await page.locator('.manual-form .ocr-country-helper summary').click();
       await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('Japan');
+      const composition = await page.evaluate(`(() => {
+        const input = document.activeElement;
+        const enter = new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true });
+        input.dispatchEvent(enter);
+        return { prevented: enter.defaultPrevented, sameFocus: input === document.activeElement };
+      })()`);
+      expect(composition).toEqual({ prevented: false, sameFocus: true });
       await page.keyboard.press('Enter');
       expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('表單新增國家占比');
       await page.getByLabel('表單新增國家占比', { exact: true }).fill('0.01');
+      await page.evaluate(
+        `document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true, cancelable: true }))`,
+      );
+      expect(await page.locator('#manual-countries').inputValue()).not.toContain('JP 0.01');
       await page.keyboard.press('Enter');
       expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.01');
       await page.getByLabel('表單國家列表・台灣占比', { exact: true }).focus();
@@ -178,7 +189,19 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('textbox', { name: '國家列表・美國占比', exact: true }).fill('2.14');
       expect(await page.locator('#ocr-edit-countries').inputValue()).toContain('US 2.14');
       await page.getByRole('textbox', { name: '國家列表・美國占比', exact: true }).fill('2.13');
+      await page.locator('#manual-desktop_SearchOrganic').fill('41');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.locator('#ocr-apply').click();
+      await page.getByRole('button', { name: '更新目前內容，保留核對修正' }).click();
+      expect(await page.locator('.ocr-count').innerText()).not.toContain('數值疑點 0');
+      expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('102.28%');
+      await page.locator('#manual-desktop_SearchOrganic').fill('40');
+      // Refresh changed contents once more, returning to the canonical kept40 case.
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.locator('#ocr-apply').click();
+      await page.getByRole('button', { name: '更新目前內容，保留核對修正' }).click();
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('101.28%');
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('101.28%');
       expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('40%');
@@ -188,6 +211,16 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
+      expect(await page.locator('[data-all-channels]').getAttribute('open')).toBeNull();
+      await page.locator('#manual-desktop_SearchOrganic').fill('40');
+      expect(await page.locator('#manual-desktop_SearchOrganic').getAttribute('aria-invalid')).toBe('true');
+      expect(await page.locator('#manual-value-error-desktop_SearchOrganic').innerText()).toContain('101.28%');
+      expect(await page.locator('.manual-save-bar').innerText()).toContain('請先修正');
+      await page.locator('#manual-desktop_SearchOrganic').fill('38.72');
+      await page.locator('#manual-bounce').fill('250');
+      expect(await page.locator('#manual-bounce').getAttribute('aria-invalid')).toBe('true');
+      await page.locator('#manual-bounce').fill('');
+      expect(await page.locator('#manual-bounce').getAttribute('aria-invalid')).toBe('false');
       await page.locator('#manual-taiwan').fill('93.22');
       expect(await page.locator('#manual-country-consistency').innerText()).toContain('不一致');
       expect(await page.locator('#manual-taiwan').evaluate((el) => el.validity.customError)).toBe(true);
@@ -338,6 +371,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         );
       await preserved.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await preserved.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      expect(await preserved.locator('.ocr-count').innerText()).toContain('數值疑點 0');
+      expect(await preserved.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(false);
+      expect(await preserved.locator('#ocr-status-taiwan').innerText()).toContain('國家列表已有台灣 93.22%');
+      await preserved.getByRole('checkbox', { name: '填入台灣占比', exact: true }).check();
       expect(await preserved.locator('.ocr-count').innerText()).toContain('數值疑點 1');
       expect(await preserved.locator('#ocr-cross-taiwan').innerText()).toContain('勾選的台灣占比 93.23%');
       expect(await preserved.locator('#ocr-cross-taiwan').innerText()).toContain('表單保留的國家列表・台灣 93.22%');
