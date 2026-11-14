@@ -1554,3 +1554,35 @@
 .manual-form > .field:has(#manual-countries) > :is(.ocr-country-rows, .ocr-country-helper) {
   max-width: 480px;
 }
+.ocr-partial-repair {
+  max-width: 480px;
+  margin: 12px 0;
+}
+.ocr-partial-repair canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.ocr-partial-repair > p {
+  font-size: 14px;
+}
+.ocr-country-entry-error {
+  grid-column: 1 / -1;
+  color: #ff8d9b;
+  font-size: 14px;
+}
+.ocr-country-entry-error[hidden] {
+  display: none;
+}
+.ocr-country-row input[aria-invalid="true"] {
+  border-color: #ff7085;
+  background: #302024;
+}
+.ocr-country-undo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}

@@ -13,6 +13,8 @@ describe('Similarweb screenshot extraction', () => {
       ['Macao', 'MO'],
       ['Macau', 'MO'],
       ['Congo - Kinshasa', 'CD'],
+      ['Myanmar', 'MM'],
+      ['Bosnia and Herzegovina', 'BA'],
     ]) {
       expect(parseScreenshot(source.replace(/\tTaiwan/g, '\t' + name), true).fields.countries).toContain(code + ' 93.23');
     }

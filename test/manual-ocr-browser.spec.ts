@@ -144,6 +144,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
+      await page.locator('#manual-taiwan').fill('93.22');
+      expect(await page.locator('#manual-country-consistency').innerText()).toContain('不一致');
+      expect(await page.locator('#manual-taiwan').evaluate((el) => el.validity.customError)).toBe(true);
+      await page.locator('#manual-taiwan').fill('93.23');
+      expect(await page.locator('#manual-taiwan').evaluate((el) => el.validity.customError)).toBe(false);
       expect(await page.getByLabel('表單國家列表・美國占比', { exact: true }).inputValue()).toBe('2.13');
       await page.getByLabel('表單國家列表・美國占比', { exact: true }).fill('2.14');
       expect(await page.locator('#manual-countries').inputValue()).toContain('US 2.14');
@@ -188,6 +193,9 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByLabel('表單國家列表・日本占比', { exact: true }).inputValue()).toBe('0.1');
       await page.getByRole('button', { name: '移除表單國家列表中的日本', exact: true }).click();
       expect(await page.locator('#manual-countries').inputValue()).not.toContain('JP');
+      await page.getByRole('button', { name: '復原移除日本', exact: true }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.1');
+      await page.getByRole('button', { name: '移除表單國家列表中的日本', exact: true }).click();
       // Fresh tabs avoid drafts masking an omitted country. Test the normal
       // engagement-first order and the compressed image that loses the Taiwan label.
       for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg'], ['s3-geography-telegram.jpg']]) {
@@ -601,6 +609,20 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('[data-field=countries] .ocr-full-image').focus();
       await page.setViewportSize({ width: 1024, height: 700 });
       expect(await page.evaluate('document.activeElement?.classList.contains("ocr-full-image")')).toBe(true);
+      await page.getByRole('button', { name: '移除國家列表中的墨西哥', exact: true }).click();
+      await countryCheck.uncheck();
+      const skipCountries = page.getByRole('checkbox', { name: /我選擇略過未完成欄位/ });
+      await skipCountries.check();
+      await page.locator('#ocr-apply').click();
+      expect(await page.locator('#manual-countries').inputValue()).toBe('');
+      await page.getByRole('button', { name: '帶入已讀到的 4 個國家，繼續補正', exact: true }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toContain('HK 1.59');
+      expect(await page.locator('.ocr-partial-repair canvas').count()).toBeGreaterThan(0);
+      await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('United States');
+      await page.getByLabel('表單新增國家占比', { exact: true }).fill('2.13');
+      await page.getByRole('button', { name: '加入或更新表單國家', exact: true }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toContain('US 2.13');
+      expect(posts).toEqual([]);
       await context.close();
 
       const identical = await browser.newContext();

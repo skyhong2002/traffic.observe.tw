@@ -29,7 +29,18 @@ export const screenshotSelectableCountryCodes =
   );
 const englishCountryNames = new Intl.DisplayNames(['en'], { type: 'region' });
 for (const code of screenshotSelectableCountryCodes) countries[englishCountryNames.of(code)] = code;
-Object.assign(countries, { Macau: 'MO', Macao: 'MO', 'South Korea': 'KR', 'North Korea': 'KP', 'Czech Republic': 'CZ', Turkey: 'TR' });
+Object.assign(countries, {
+  Macau: 'MO',
+  Macao: 'MO',
+  'South Korea': 'KR',
+  'North Korea': 'KP',
+  'Czech Republic': 'CZ',
+  Turkey: 'TR',
+  Myanmar: 'MM',
+  'Bosnia and Herzegovina': 'BA',
+  'Ivory Coast': 'CI',
+  'Democratic Republic of the Congo': 'CD',
+});
 const countryPatterns = Object.entries(countries)
   .sort(([a], [b]) => b.length - a.length)
   .map(([name, code]) => [name, code, new RegExp('\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i')]);
