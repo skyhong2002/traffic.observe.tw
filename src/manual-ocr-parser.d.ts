@@ -18,6 +18,7 @@ export interface ScreenshotResult {
   uncertainSources?: Record<string, ScreenshotSource[]>;
   countryContexts?: ScreenshotSource[];
 }
+export const screenshotSelectableCountryCodes: string[];
 export const screenshotCountryCodes: Record<string, string>;
 export const screenshotFields: Record<string, string>;
 export function refineScreenshotNumbers(

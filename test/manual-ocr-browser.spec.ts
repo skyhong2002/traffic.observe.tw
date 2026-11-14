@@ -319,7 +319,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('[data-field=taiwan] .ocr-full-image').click();
       expect(await page.locator('.ocr-original-dialog').isVisible()).toBe(true);
       await page.getByRole('button', { name: '返回台灣占比補正' }).click();
-      await page.waitForFunction('document.activeElement.dataset.field === "taiwan"');
+      await page.waitForFunction('document.activeElement.classList.contains("ocr-full-image")');
       // A submit attempt is intercepted before the form's submitting flag changes.
       const blocked = await page.evaluate(`(() => {
         const form = document.querySelector('.manual-form');
@@ -473,7 +473,9 @@ it.skipIf(!existsSync(chromium.executablePath()))(
     registerManualOcr(server);
     server.get('/style.css', async (_, reply) => reply.type('text/css').send(STYLE));
     server.get('/site/s3.com.tw/manual/', async (_, reply) =>
-      reply.type('text/html').send(manualPage({ domain: 's3.com.tw', name: '小三美日' }, { months: [], choices: ['202610'], free: [] })),
+      reply
+        .type('text/html')
+        .send(manualPage({ domain: 's3.com.tw', name: '小三美日' }, { months: [], choices: ['202610', '202609'], free: [] })),
     );
     const origin = await server.listen({ host: '127.0.0.1', port: 0 });
     const browser = await chromium.launch({ headless: true });
@@ -516,9 +518,14 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-countries').inputValue()).toBe('');
       expect(await page.locator('#ocr-status-countries').innerText()).toContain('漏辨識');
       await partial.check();
+      expect(await page.locator('.ocr-notices').innerText()).toContain('只填部分國家');
       await page.locator('#ocr-edit-desktop_SearchOrganic').fill('38.71');
       expect(await partial.isChecked()).toBe(true);
       await page.locator('[data-field=countries] .ocr-country-helper summary').click();
+      expect(await page.locator('.ocr-country-helper option[value=ZZ]').count()).toBe(0);
+      expect(await page.locator('.ocr-country-helper option[value=EU]').count()).toBe(0);
+      await page.getByLabel('搜尋國家名稱或代碼', { exact: true }).fill('Mexico');
+      expect(await page.locator('.ocr-country-helper option').count()).toBe(2);
       await page.getByLabel('選擇國家名稱', { exact: true }).selectOption('MX');
       await page.getByLabel('新增國家占比', { exact: true }).fill('2.13');
       await page.getByRole('button', { name: '加入或更新國家', exact: true }).click();
@@ -553,8 +560,12 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-engagement.png', import.meta.url)));
       await same.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await same.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      await same.locator('#manual-month').selectOption('202609');
+      await same.locator('#manual-visits').fill('100K');
+      expect(await same.locator('.ocr-month-notice').innerText()).toContain('2026/09');
       await same.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await same.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await same.locator('#ocr-apply-status').innerText()).toContain('已切換至 2026/10');
       const before = await same.locator('#manual-visits').inputValue();
       await same.getByRole('button', { name: '重新辨識', exact: true }).click();
       await same.getByRole('button', { name: '更改截圖並重新核對', exact: true }).click();
@@ -566,6 +577,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await same.locator('#manual-visits').inputValue()).toBe(before);
       expect(await same.locator('#manual-draft-status').innerText()).not.toContain('截圖核對尚未填入');
       expect(await same.locator('#ocr-apply-status').innerText()).toContain('表單內容未更動');
+      await same.locator('#manual-month').selectOption('202609');
+      expect(await same.locator('#manual-visits').inputValue()).toBe('100K');
       expect(posts).toEqual([]);
       await identical.close();
     } finally {
