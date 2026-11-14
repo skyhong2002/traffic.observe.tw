@@ -344,6 +344,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+      expect(await page.locator('.ocr-preflight').innerText()).toContain('台灣占比');
+      await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).fill('38.71');
+      expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+      expect(await page.locator('#ocr-status-taiwan').innerText()).toContain('0–100');
+      await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).fill('38.72');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       const leaving = page.waitForEvent('dialog');
       await page.evaluate('setTimeout(() => location.reload(), 0)');
@@ -389,11 +394,16 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
       expect(await page.evaluate('document.activeElement?.textContent')).toBe('前往表單儲存 ↓');
       expect(await page.locator('#manual-taiwan').getAttribute('data-ocr-filled')).toBe('true');
-      await page.locator('.manual-form .ocr-form-source').filter({ hasText: '手動補正' }).click();
+      await page.getByRole('button', { name: '到表單補登 1 項 →', exact: true }).click();
+      expect(await page.evaluate('document.activeElement?.id')).toBe('manual-desktop_Affiliate');
+      expect(await page.locator('#manual-desktop_Affiliate').getAttribute('readonly')).toBeNull();
+      expect(await page.locator('.manual-form .ocr-country-helper').count()).toBe(1);
+      await page.locator('.manual-form .ocr-form-source').filter({ hasText: '台灣占比' }).click();
       expect(await page.locator('.ocr-field-row.is-active').getAttribute('data-field')).toBe('taiwan');
       await page.getByRole('button', { name: '桌面限定流量來源 10', exact: true }).click();
-      expect(await page.locator('.ocr-results').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+      expect(await page.locator('.ocr-results').evaluate((el) => getComputedStyle(el).overflowY)).toBe('visible');
       await page.setViewportSize({ width: 390, height: 844 });
+      expect(await page.locator('.ocr-workspace').evaluate((el) => el.firstElementChild?.classList.contains('ocr-results'))).toBe(true);
       expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
       await page.getByRole('button', { name: '定位桌面限定・自然搜尋', exact: true }).click();
       expect(await page.locator('.ocr-field-row.is-active .ocr-inline-evidence canvas').isVisible()).toBe(true);
@@ -497,6 +507,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         });
       }, missing);
       const page = await context.newPage();
+      page.setDefaultTimeout(5000);
       const posts: string[] = [];
       page.on('request', (request) => {
         if (request.method() === 'POST') posts.push(request.url());
