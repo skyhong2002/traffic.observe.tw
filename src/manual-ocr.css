@@ -1398,6 +1398,64 @@
 .ocr-country-helper[hidden] {
   display: none;
 }
+.ocr-country-rows {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+.ocr-country-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 15px;
+}
+.ocr-country-share {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+.ocr-country-share input {
+  width: 100px;
+  min-height: 44px;
+  font-size: 16px;
+  text-align: right;
+}
+.ocr-country-raw > summary {
+  min-height: 44px;
+  padding-block: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.ocr-helper-field {
+  display: grid;
+  gap: 4px;
+  font-size: 14px;
+}
+.ocr-crop-note {
+  display: block;
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.manual-form:has(.ocr-save-warning:not([hidden])) #manual-draft-status {
+  display: none;
+}
+@media (max-width: 760px) {
+  .ocr-section-nav > button:not(.ocr-category-button) {
+    display: none;
+  }
+  .ocr-section-nav > button:not([hidden]):last-child {
+    display: block;
+  }
+  .ocr-category-select {
+    width: 100%;
+  }
+  .manual-form :is(button, select, summary) {
+    min-height: 44px;
+  }
+}
 .ocr-preflight {
   margin-bottom: 12px;
   font-size: 14px;
