@@ -8,7 +8,7 @@ export const MANUAL_FORM_SCRIPT = `<script>
   const discard = document.getElementById('manual-discard');
   const prefix = 'manual-draft:' + form.getAttribute('action') + ':';
   const drafts = new Map();
-  let active = month.value, submitting = false, storageOK = true;
+  let active = month.value, submitting = false, storageOK = true, reviewPending = false;
   const read = (key) => {
     if (drafts.has(key)) return drafts.get(key);
     try { return JSON.parse(sessionStorage.getItem(prefix + key)); }
@@ -25,7 +25,7 @@ export const MANUAL_FORM_SCRIPT = `<script>
   const dirty = () => fields.some((f) => f.value !== (option()?.dataset[f.name.toLowerCase()] ?? ''));
   const notify = (restored = false) => {
     const changed = dirty();
-    status.textContent = changed
+    status.textContent = reviewPending ? '截圖核對尚未填入；請先核對並填入，再儲存。' + (changed ? ' 表單另有未儲存的草稿。' : '') : changed
       ? (restored ? '已還原此月份的草稿。' : '') + (storageOK ? '尚未儲存；草稿暫存在此分頁，按「儲存」成功後才會生效。' : '尚未儲存；瀏覽器無法暫存草稿，請先完成儲存再離開。')
       : '目前沒有尚未儲存的變更。';
     discard.hidden = !changed;
@@ -64,6 +64,7 @@ export const MANUAL_FORM_SCRIPT = `<script>
     active = month.value;
     fill(read(active));
   }
+  form.addEventListener('manual:review-state', (event) => { reviewPending = event.detail.pending; notify(); });
   form.addEventListener('input', remember);
   form.addEventListener('change', (event) => {
     if (event.target !== month) { remember(); return; }

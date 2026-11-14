@@ -233,7 +233,8 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   border-block: 1px solid var(--axis);
   align-items: stretch;
-  height: clamp(560px, calc(100dvh - 240px), 820px);
+  --ocr-workspace-height: clamp(560px, calc(100dvh - 240px), 820px);
+  height: var(--ocr-workspace-height);
 }
 .ocr-viewer,
 .ocr-results {
@@ -1168,5 +1169,116 @@
 @media (max-width: 760px) {
   .ocr-bulk-tools summary {
     min-height: 44px;
+  }
+}
+
+.ocr-source-disclosure {
+  min-height: 0;
+}
+.ocr-source-disclosure > summary {
+  display: none;
+}
+.ocr-source-disclosure > .ocr-viewer {
+  height: var(--ocr-workspace-height);
+}
+.ocr-category-select,
+.ocr-start-review {
+  display: none;
+}
+.ocr-after-field {
+  display: none;
+}
+.ocr-results.is-single-field .ocr-after-field {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 0;
+}
+.ocr-adopt-source {
+  font-size: 13px;
+  min-height: 36px;
+}
+.ocr-crop-head:has(.ocr-adopt-source) {
+  flex-wrap: wrap;
+}
+.ocr-notices {
+  background: transparent;
+}
+.ocr-dialog-marker {
+  box-shadow: none;
+}
+@media (max-width: 760px) {
+  .ocr-source-disclosure {
+    padding: 0 12px;
+  }
+  .ocr-source-disclosure > summary {
+    display: list-item;
+    min-height: 44px;
+    padding: 10px 0;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .ocr-source-disclosure > .ocr-viewer {
+    height: min(55dvh, 480px);
+    padding-inline: 0;
+  }
+  .ocr-source-disclosure:not([open]) > .ocr-viewer {
+    display: none;
+  }
+  .ocr-category-button {
+    display: none;
+  }
+  .ocr-category-select {
+    display: block;
+    flex: 1;
+    min-width: 140px;
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .ocr-start-review {
+    display: block;
+    min-height: 44px;
+  }
+  .ocr-adopt-source,
+  .ocr-after-field button {
+    min-height: 44px;
+  }
+  .ocr-review-heading {
+    padding-bottom: 8px;
+  }
+}
+@media (max-width: 760px) and (max-height: 550px) {
+  .ocr-inline-evidence.is-country-evidence canvas {
+    max-height: 150px;
+  }
+  .ocr-edit-value textarea {
+    height: 100px;
+  }
+}
+
+@media (max-width: 760px) {
+  .ocr-workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .ocr-results {
+    order: 0;
+  }
+  .ocr-source-disclosure {
+    order: 1;
+  }
+  .ocr-results.is-single-field:not(.is-applied) > .ocr-results-hint {
+    display: none;
+  }
+  .ocr-results.is-single-field .ocr-field-group {
+    margin-top: 8px;
+  }
+  .ocr-results.is-single-field .ocr-after-field {
+    padding-bottom: 0;
+  }
+  .ocr-review-heading .ocr-target {
+    font-size: 13px;
+  }
+  .ocr-review-heading h3 {
+    margin-bottom: 4px;
   }
 }

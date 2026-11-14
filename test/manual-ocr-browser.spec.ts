@@ -82,7 +82,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       expect(await page.getByRole('button', { name: '顯示全部欄位' }).isVisible()).toBe(true);
-      await page.getByRole('button', { name: '下一欄', exact: true }).click();
+      expect(await page.locator('.ocr-source-disclosure').getAttribute('open')).toBeNull();
+      await page.locator('.ocr-field-row.is-active input:not([type=checkbox]), .ocr-field-row.is-active textarea').focus();
+      await page.keyboard.press('Tab');
+      expect(await page.evaluate('document.activeElement?.textContent')).toBe('核對下一欄 →');
+      await page.keyboard.press('Enter');
       expect(await page.locator('.ocr-field-position').innerText()).toContain('第 2');
       await page.getByRole('button', { name: '顯示全部欄位' }).click();
       const extensionReview = await page.locator('[data-review]').innerText();
@@ -312,12 +316,13 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         return { blocked: attempt.defaultPrevented, reached };
       })()`);
       expect(blocked).toEqual({ blocked: true, reached: false });
+      expect(await page.locator('#manual-draft-status').innerText()).toContain('截圖核對尚未填入');
       expect(await page.locator('.ocr-save-warning').innerText()).toContain('尚未儲存');
       await page.getByRole('button', { name: '返回核對並填入' }).click();
       // A normal selection checkbox cannot dismiss a known incomplete-country warning.
       await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).check();
       expect(await page.locator('.ocr-partial-confirmation').innerText()).toContain('TW、US');
-      expect(await page.locator('.ocr-count').innerText()).toContain('辨識疑點');
+      expect(await page.locator('.ocr-count').innerText()).toContain('數值疑點');
       await taiwan.fill('101');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
@@ -421,6 +426,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect((await overlap.locator('[data-field=visits] .ocr-crop-head').allTextContents()).join(' ')).toContain('482.4K');
       expect(await overlap.locator('[data-field=visits] .ocr-crop-head').allTextContents()).toHaveLength(2);
       expect(await overlap.locator('[data-field=visits]').innerText()).toContain('482.5K');
+      expect(await overlap.locator('#ocr-status-visits').innerText()).toContain('不一致');
+      await overlap.getByRole('button', { name: '採用截圖 1 的 482.4K', exact: true }).click();
+      expect(await overlap.locator('#ocr-edit-visits').inputValue()).toBe('482.4K');
+      expect(await overlap.getByRole('checkbox', { name: '填入月造訪量', exact: true }).isChecked()).toBe(true);
       await conflictContext.close();
     } finally {
       await browser.close();

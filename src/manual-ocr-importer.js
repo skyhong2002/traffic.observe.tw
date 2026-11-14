@@ -28,6 +28,7 @@ saveWarning.hidden = true;
 saveBar.after(saveWarning);
 function updateSaveHandoff(pending) {
   pendingReview = pending;
+  form.dispatchEvent(new CustomEvent('manual:review-state', { detail: { pending } }));
   saveHint.textContent = pending ? '截圖核對尚未填入。請先返回核對，避免遺失修正。' : defaultSaveHint;
   for (const button of form.querySelectorAll('[type=submit]')) button.classList.toggle('primary', !pending);
   saveWarning.hidden = true;
@@ -415,11 +416,7 @@ function showReview(result) {
   const title = text('div');
   title.append(
     text('h3', '核對辨識結果'),
-    text(
-      'p',
-      host.dataset.domain + ' · ' + targetLabel + (result.months.length ? '（截圖月份）' : '（沿用表單，請確認）') + ' · 網站需人工確認',
-      'ocr-target',
-    ),
+    text('p', host.dataset.domain + ' · ' + targetLabel + (result.months.length ? '（截圖月份）' : '（沿用表單，請確認）'), 'ocr-target'),
   );
   const count = text('span', '', 'ocr-count');
   heading.append(title, count);
@@ -438,10 +435,8 @@ function showReview(result) {
           .filter(Boolean),
       ),
     ];
-    if (scopeImages.length) {
-      for (const warning of warnings.filter((item) => /未完整辨識出 Worldwide/.test(item)))
-        notice.append(text('p', warning.replace('截圖未完整辨識出 Worldwide／All traffic，', '')));
-    }
+    if (scopeImages.length)
+      notice.append(text('p', '範圍待確認：截圖 ' + scopeImages.join('、') + '。請核對全球／全裝置；桌面渠道分開儲存。'));
     if (!result.months.length) notice.append(text('p', '未讀到月份：沿用表單 ' + targetLabel + '，請確認與截圖相符。'));
     if (countryIncomplete) {
       countryNotice = text('p', (missingTaiwan ? '台灣占比未讀到；' : '') + '國家表尚未完整讀到，請在「國家分布」補齊或明確接受現有列表。');
@@ -484,7 +479,11 @@ function showReview(result) {
   viewport.append(stage);
   const focusLabel = text('p', '點選右側欄位，查看對應截圖與橘色標記。', 'ocr-focus-label');
   viewer.append(viewerHead, tabs, caption, controls, viewport, focusLabel);
-  workspace.append(viewer);
+  const sourceDisclosure = document.createElement('details');
+  sourceDisclosure.className = 'ocr-source-disclosure';
+  sourceDisclosure.open = !matchMedia('(max-width: 760px)').matches;
+  sourceDisclosure.append(text('summary', '查看完整原圖與切換截圖'), viewer);
+  workspace.append(sourceDisclosure);
   const right = text('section', '', 'ocr-results');
   right.setAttribute('aria-label', '辨識欄位與填入位置');
   const resultHead = text('div', '', 'ocr-panel-head');
@@ -495,6 +494,11 @@ function showReview(result) {
   workspace.append(right);
   const navigation = text('nav', '', 'ocr-section-nav');
   navigation.setAttribute('aria-label', '核對欄位分類');
+  const categorySelect = document.createElement('select');
+  categorySelect.className = 'ocr-category-select';
+  categorySelect.setAttribute('aria-label', '跳到核對分類');
+  categorySelect.addEventListener('change', () => revealChoice(choices.find((choice) => choice.key === categorySelect.value)));
+  navigation.append(categorySelect);
   review.append(navigation, workspace);
   const current = () => {
     const detail = { month: targetMonth, values: null };
@@ -529,12 +533,15 @@ function showReview(result) {
     setMode();
   });
   phoneQuery.addEventListener('change', () => {
+    sourceDisclosure.open = !phoneQuery.matches;
     if (!modeChosen) {
       singleField = phoneQuery.matches;
       setMode();
     }
   });
   setMode();
+  let nextAfter;
+  const stepButtons = [];
   let activeKey = '',
     activeImage = 0,
     applied = false,
@@ -566,6 +573,16 @@ function showReview(result) {
   }
   function selectField(key, move = true, imageIndex) {
     activeKey = key;
+    const currentIndex = choices.findIndex((choice) => choice.key === key);
+    if (nextAfter) nextAfter.textContent = currentIndex === choices.length - 1 ? '完成逐欄核對 →' : '核對下一欄 →';
+    for (const [step, direction] of stepButtons) {
+      step.disabled = direction === -1 && currentIndex === 0;
+      if (direction === 1) step.textContent = currentIndex === choices.length - 1 ? '前往確認' : '下一欄';
+    }
+    for (const option of categorySelect.options) {
+      const group = choices.find((choice) => choice.key === option.value)?.row.parentElement;
+      if (group === choices[currentIndex]?.row.parentElement) categorySelect.value = option.value;
+    }
     fieldPosition.textContent = '第 ' + (choices.findIndex((choice) => choice.key === key) + 1) + '／' + choices.length + ' 欄';
     const regions = regionsFor(key);
     if (imageIndex !== undefined) activeImage = imageIndex;
@@ -682,6 +699,16 @@ function showReview(result) {
       sourceImage.src = source.url;
       const cropHead = text('div', '', 'ocr-crop-head');
       cropHead.append(text('span', '截圖 ' + (index + 1) + ' · ' + (list[0].context || '原圖局部')));
+      if (choice.conflict && !applied && choice.key !== 'countries') {
+        const adopt = text('button', '採用截圖 ' + (index + 1) + ' 的 ' + list[0].value, 'ocr-adopt-source');
+        adopt.type = 'button';
+        adopt.addEventListener('click', () => {
+          choice.input.value = list[0].value;
+          choice.input.dispatchEvent(new Event('input', { bubbles: true }));
+          revealChoice(choice);
+        });
+        cropHead.append(adopt);
+      }
       appendFullImageAction(cropHead, choice, index);
       choice.evidence.append(cropHead, canvas);
     }
@@ -694,7 +721,7 @@ function showReview(result) {
       dialog.className = 'ocr-original-dialog';
       dialog.setAttribute('aria-label', screenshotFields[choice.key] + '的完整來源截圖');
       const toolbar = text('div', '', 'ocr-dialog-toolbar');
-      const close = text('button', '返回' + screenshotFields[choice.key] + '補正');
+      const close = text('button', applied ? '返回核對結果' : '返回' + screenshotFields[choice.key] + '補正');
       close.type = 'button';
       const enlarge = text('button', '放大原圖');
       enlarge.type = 'button';
@@ -709,10 +736,10 @@ function showReview(result) {
       const sourceRegions = regionsFor(choice.key).filter((region) => region.image === index);
       for (const region of sourceRegions) {
         const marker = text('span', '', 'ocr-dialog-marker');
-        marker.style.left = (region.x / images[index].width) * 100 + '%';
-        marker.style.top = (region.y / images[index].height) * 100 + '%';
-        marker.style.width = (region.w / images[index].width) * 100 + '%';
-        marker.style.height = (region.h / images[index].height) * 100 + '%';
+        marker.style.left = (Math.max(0, region.x - 16) / images[index].width) * 100 + '%';
+        marker.style.top = (Math.max(0, region.y - 16) / images[index].height) * 100 + '%';
+        marker.style.width = (Math.min(images[index].width - Math.max(0, region.x - 16), region.w + 32) / images[index].width) * 100 + '%';
+        marker.style.height = ((region.h + 32) / images[index].height) * 100 + '%';
         dialogStage.append(marker);
       }
       body.append(dialogStage);
@@ -781,6 +808,11 @@ function showReview(result) {
       selectField(fields[0][0]);
       choices.find((choice) => choice.key === fields[0][0]).input.focus();
     });
+    jump.className = 'ocr-category-button';
+    const option = document.createElement('option');
+    option.value = fields[0][0];
+    option.textContent = label + '（' + fields.length + '欄）';
+    categorySelect.append(option);
     navigation.append(jump);
     section.append(text('h4', label + (label === '桌面限定流量來源' ? ' · Desktop Only' : '')));
     if (label === '桌面限定流量來源') section.append(text('p', '僅占桌面造訪，不換算全裝置次數。', 'ocr-group-note'));
@@ -790,6 +822,7 @@ function showReview(result) {
       row.dataset.field = key;
       const check = document.createElement('input');
       check.type = 'checkbox';
+      const conflict = result.warnings.some((warning) => warning.includes('不同截圖的' + screenshotFields[key] + '不一致'));
       const needsReview = !value || (key === 'countries' && countryIncomplete);
       check.checked = Boolean(value) && !before[key] && !needsReview;
       check.setAttribute('aria-label', '填入' + screenshotFields[key]);
@@ -823,7 +856,7 @@ function showReview(result) {
       input.spellcheck = false;
       if (key === 'countries') input.rows = Math.max(3, value.split('\n').length);
       else input.inputMode = ['visits', 'duration'].includes(key) ? 'text' : 'decimal';
-      if (!value) input.placeholder = '未讀到，請手動填寫';
+      if (!value) input.placeholder = conflict ? '數值不一致，請核對後選用或填寫' : '未讀到，請手動填寫';
       const unit = !['visits', 'pages', 'duration', 'countries'].includes(key) ? '%' : key === 'pages' ? '頁' : '';
       const inputWrap = text('div', '', 'ocr-edit-value');
       inputWrap.append(input);
@@ -840,13 +873,15 @@ function showReview(result) {
             ? '已有內容，預設保留'
             : value
               ? ''
-              : '未讀到，不會自動填入',
+              : conflict
+                ? '不同截圖的辨識值不一致，請對照下方原圖後選用或填寫。'
+                : '未讀到，不會自動填入',
         'ocr-field-status',
       );
       status.id = 'ocr-status-' + key;
       input.setAttribute('aria-describedby', status.id);
       check.setAttribute('aria-describedby', status.id);
-      const evidence = text('div', '', 'ocr-inline-evidence');
+      const evidence = text('div', '', 'ocr-inline-evidence' + (['taiwan', 'countries'].includes(key) ? ' is-country-evidence' : ''));
       evidence.hidden = true;
       content.append(line, evidence, editorLine, status);
       const hit = text('label', '', 'ocr-check-hit');
@@ -867,6 +902,7 @@ function showReview(result) {
         needsReview,
         unit,
         selectionTouched: false,
+        conflict,
       };
       choices.push(choice);
       sourceButton.addEventListener('click', () => revealChoice(choice));
@@ -948,6 +984,21 @@ function showReview(result) {
       });
     }
   }
+  const afterField = text('div', '', 'ocr-after-field');
+  nextAfter = text('button', '核對下一欄 →');
+  nextAfter.type = 'button';
+  function advanceField(direction) {
+    const index = choices.findIndex((choice) => choice.key === activeKey) + direction;
+    if (index >= choices.length) {
+      confirmed.focus();
+      confirmed.scrollIntoView({ block: 'center' });
+      return;
+    }
+    revealChoice(choices[Math.max(0, index)]);
+  }
+  nextAfter.addEventListener('click', () => advanceField(1));
+  afterField.append(nextAfter);
+  right.append(afterField);
   const tools = text('div', '', 'ocr-selection-tools');
   for (const [label, predicate] of [
     ['勾選空白欄位', (choice) => Boolean(choice.value) && !choice.before && !choice.needsReview],
@@ -977,12 +1028,17 @@ function showReview(result) {
     const next = unresolved[(index + 1) % unresolved.length];
     if (next) revealChoice(next);
   });
-  tools.append(jumpMissing);
+  modeBar.append(jumpMissing);
   const bulkTools = document.createElement('details');
   bulkTools.className = 'ocr-bulk-tools';
   bulkTools.open = !phoneQuery.matches;
   bulkTools.append(text('summary', '批次選取欄位'), tools);
-  modeBar.after(bulkTools);
+  const positionBulk = () => {
+    if (phoneQuery.matches) afterField.after(bulkTools);
+    else modeBar.after(bulkTools);
+  };
+  positionBulk();
+  phoneQuery.addEventListener('change', positionBulk);
   const footer = text('div', '', 'ocr-review-footer');
   const confirmation = document.createElement('label'),
     confirmed = document.createElement('input');
@@ -1054,9 +1110,9 @@ function showReview(result) {
     const step = text('button', label);
     step.type = 'button';
     step.addEventListener('click', () => {
-      const index = choices.findIndex((choice) => choice.key === activeKey);
-      revealChoice(choices[(index + offset + choices.length) % choices.length]);
+      advanceField(offset);
     });
+    stepButtons.push([step, offset]);
     modeBar.append(step);
   }
   shortcut.append(shortcutCount, shortcutButton);
@@ -1094,9 +1150,8 @@ function showReview(result) {
         : unresolved.some((c) => c.key === 'countries')
           ? '國家列表尚待補正，請對照原圖補齊。'
           : '國家辨識疑點已處理，仍請對照原圖核對數字。';
-    count.setAttribute('aria-live', 'polite');
-    count.textContent = images.length + ' 張截圖 · 共 ' + choices.length + ' 欄 · 辨識疑點 ' + unresolved.length;
-    shortcutCount.textContent = '已選 ' + selected.length + ' 欄' + (unresolved.length ? ' · 辨識疑點 ' + unresolved.length : '');
+    count.textContent = choices.length + ' 欄 · 數值疑點 ' + unresolved.length;
+    shortcutCount.textContent = '已選 ' + selected.length + ' 欄' + (unresolved.length ? ' · 數值疑點 ' + unresolved.length : '');
     jumpMissing.hidden = !unresolved.length;
     jumpMissing.textContent = '需補正 ' + unresolved.length + ' 項 →';
     selectionCount.textContent = '已選 ' + selected.length + ' / ' + choices.length;
@@ -1263,6 +1318,8 @@ function showReview(result) {
     if (selected.some(({ key }) => key.startsWith('desktop_'))) form.querySelector('[data-desktop-channels]').open = true;
     form.dispatchEvent(new Event('input', { bubbles: true }));
     applied = true;
+    right.classList.add('is-applied');
+    right.querySelector('.ocr-results-hint').textContent = '已填入表單；此處保留核對結果。需要修改時，請回到表單。';
     reviewDirty = false;
     updateSaveHandoff(false);
     updateTarget();
@@ -1292,6 +1349,10 @@ function showReview(result) {
     setStep('save');
     updateSelection();
   });
+  const startReview = text('button', '開始核對 ↓', 'primary ocr-start-review');
+  startReview.type = 'button';
+  startReview.addEventListener('click', () => revealChoice(choices.find((choice) => choice.needsReview) || choices[0]));
+  heading.append(startReview);
   renderImage();
   selectField(choices.find((choice) => choice.needsReview)?.key || choices[0].key);
   updateSelection();
