@@ -616,6 +616,10 @@ function showReview(result) {
     requestAnimationFrame(() => scrollChoice(choice));
   }
   function scrollChoice(choice) {
+    if (phoneQuery.matches && choice.countryHelper?.contains(document.activeElement)) {
+      document.activeElement.scrollIntoView({ block: 'nearest' });
+      return;
+    }
     choice.row.scrollIntoView({ block: phoneQuery.matches ? 'start' : 'nearest' });
     if (!phoneQuery.matches) return;
     const crop = choice.evidence.querySelector('canvas');

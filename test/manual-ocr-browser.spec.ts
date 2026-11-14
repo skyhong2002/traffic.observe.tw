@@ -549,7 +549,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByLabel('搜尋國家名稱或代碼', { exact: true }).fill('Mexico');
       expect(await page.locator('.ocr-country-helper option').count()).toBe(2);
       await page.getByLabel('選擇國家名稱', { exact: true }).selectOption('MX');
+      await page.setViewportSize({ width: 390, height: 420 });
       await page.getByLabel('新增國家占比', { exact: true }).fill('2.13');
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      const helperEntry = await page.getByLabel('新增國家占比', { exact: true }).boundingBox();
+      expect(helperEntry && helperEntry.y >= 0 && helperEntry.y + helperEntry.height <= 420).toBe(true);
       await page.getByRole('button', { name: '加入或更新國家', exact: true }).click();
       expect(await page.locator('#ocr-edit-countries').inputValue()).toContain('MX 2.13');
       expect(await partial.isVisible()).toBe(false);
