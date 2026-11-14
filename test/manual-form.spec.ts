@@ -40,6 +40,10 @@ function open(storage = new Map<string, string>(), overrides: Partial<ManualForm
     getAttribute: () => $('.manual-form').attr('action'),
     querySelectorAll: () => fields,
     addEventListener: (event: string, fn: Listener) => listeners.set(event, fn),
+    dispatchEvent: (event: Event) => {
+      listeners.get(event.type)?.({});
+      return true;
+    },
   };
   runInNewContext(MANUAL_FORM_SCRIPT.replace(/^<script>\n|\n<\/script>$/g, ''), {
     document: {
@@ -70,6 +74,7 @@ function open(storage = new Map<string, string>(), overrides: Partial<ManualForm
       },
     },
     URL,
+    Event,
     window: {
       location: { href: url },
       history: {
