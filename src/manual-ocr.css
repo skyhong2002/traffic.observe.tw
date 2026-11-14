@@ -481,7 +481,7 @@
 }
 .ocr-previous {
   flex: 0 1 40%;
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
   white-space: pre-line;
   overflow-wrap: anywhere;
@@ -521,7 +521,7 @@
 .ocr-help {
   padding: 14px 24px;
   border-top: 1px solid var(--grid);
-  font-size: 13px;
+  font-size: 14px;
 }
 .ocr-help p {
   margin: 8px 0 0;
@@ -707,6 +707,28 @@
   max-height: 180px;
   object-fit: contain;
   object-position: left;
+}
+.ocr-inline-evidence canvas.ocr-compact-crop {
+  width: min(100%, 360px);
+  max-height: none;
+}
+.ocr-crop-note {
+  font-size: 12px;
+}
+.ocr-crop-head:has(.ocr-crop-note) {
+  flex-wrap: wrap;
+}
+.ocr-crop-note {
+  flex-basis: 100%;
+}
+.ocr-edit-value :is(input, textarea)[readonly] {
+  caret-color: transparent;
+  color: var(--ink-2);
+  background: var(--surface);
+  border-style: dashed;
+}
+.manual-form .field {
+  scroll-margin-top: 110px;
 }
 .ocr-inline-evidence p {
   padding: 8px;
@@ -942,6 +964,7 @@
   }
   .manual-save-bar {
     padding: 10px;
+    position: static;
   }
   .manual-save-bar span {
     max-width: 22ch;
@@ -1190,7 +1213,7 @@
 }
 .ocr-results.is-single-field .ocr-after-field {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding: 10px 0;
 }
 .ocr-adopt-source {
@@ -1267,7 +1290,9 @@
     order: 1;
   }
   .ocr-results.is-single-field:not(.is-applied) > .ocr-results-hint {
-    display: none;
+    display: block;
+    font-size: 13px;
+    margin-block: 4px;
   }
   .ocr-results.is-single-field .ocr-field-group {
     margin-top: 8px;
@@ -1281,9 +1306,23 @@
   .ocr-review-heading h3 {
     margin-bottom: 4px;
   }
+  .is-reviewing .ocr-start-review {
+    display: none;
+  }
 }
 
 .manual-import [data-review] > .ocr-notices {
   border-left-color: var(--axis);
   padding-block: 8px;
+}
+@media (min-width: 761px) and (max-height: 800px) {
+  .ocr-workspace {
+    --ocr-workspace-height: clamp(330px, calc(100dvh - 300px), 500px);
+  }
+  .manual-import [data-review] > .ocr-review-heading {
+    margin-block: 12px 8px;
+  }
+  .ocr-section-nav {
+    padding-bottom: 8px;
+  }
 }

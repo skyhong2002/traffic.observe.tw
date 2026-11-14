@@ -208,7 +208,27 @@ export function parseScreenshot(tsv, includeSources = false) {
     const right = Math.max(...words.map((w) => w.x + w.w)),
       bottom = Math.max(...words.map((w) => w.y + w.h));
     const target = uncertain ? uncertainRegions : sourceRegions;
-    (target[key] ||= []).push({ value, x, y, w: right - x, h: bottom - y });
+    const numeric = [...words].reverse().find((word) => /\d/.test(word.text));
+    const labels = numeric ? words.filter((word) => word.x + word.w <= numeric.x && /[A-Za-z]/.test(word.text)) : [];
+    const bounds = (items) => {
+      const left = Math.min(...items.map((word) => word.x)),
+        top = Math.min(...items.map((word) => word.y));
+      return {
+        x: left,
+        y: top,
+        w: Math.max(...items.map((word) => word.x + word.w)) - left,
+        h: Math.max(...items.map((word) => word.y + word.h)) - top,
+      };
+    };
+    (target[key] ||= []).push({
+      value,
+      x,
+      y,
+      w: right - x,
+      h: bottom - y,
+      ...(numeric ? { valueBox: bounds([numeric, ...words.filter((word) => /^[<>≤≥~≈±]$/.test(word.text))]) } : {}),
+      ...(labels.length ? { labelBox: bounds(labels) } : {}),
+    });
   };
   const fields = {},
     conflicts = new Set(),

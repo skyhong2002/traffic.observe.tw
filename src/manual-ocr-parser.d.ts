@@ -5,6 +5,8 @@ export interface ScreenshotSource {
   w: number;
   h: number;
   image?: number;
+  valueBox?: { x: number; y: number; w: number; h: number };
+  labelBox?: { x: number; y: number; w: number; h: number };
 }
 export interface ScreenshotResult {
   fields: Record<string, string>;

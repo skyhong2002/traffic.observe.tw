@@ -42,7 +42,7 @@ form.addEventListener(
     }
     event.preventDefault();
     event.stopImmediatePropagation();
-    const message = text('p', '尚未儲存：核對區的數值與修正還沒有填入表單。');
+    const message = text('p', '尚未填入核對結果：請先填入，或放棄這次核對。');
     message.setAttribute('role', 'alert');
     const back = text('button', '返回核對並填入', 'primary');
     back.type = 'button';
@@ -439,7 +439,7 @@ function showReview(result) {
       notice.append(text('p', '範圍待確認：截圖 ' + scopeImages.join('、') + '。請核對全球／全裝置；桌面渠道分開儲存。'));
     if (!result.months.length) notice.append(text('p', '未讀到月份：沿用表單 ' + targetLabel + '，請確認與截圖相符。'));
     if (countryIncomplete) {
-      countryNotice = text('p', (missingTaiwan ? '台灣占比未讀到；' : '') + '國家表尚未完整讀到，請在「國家分布」補齊或明確接受現有列表。');
+      countryNotice = text('p', (missingTaiwan ? '台灣未讀到；' : '') + '請到「國家分布」核對缺漏。');
       notice.append(countryNotice);
     }
     const details = document.createElement('details');
@@ -566,23 +566,41 @@ function showReview(result) {
     const precise = result.sources?.[key] || [];
     const uncertain = result.uncertainSources?.[key] || [];
     if (precise.length && !(key === 'countries' && countryIncomplete)) return precise;
-    if (uncertain.length) return uncertain.map((r) => ({ ...r, context: '待核對位置 · 辨識值 ' + r.value + '，尚未採用' }));
+    if (uncertain.length)
+      return uncertain.map((r) => ({
+        ...r,
+        context:
+          '辨識值 ' + r.value + (choices.find((choice) => choice.key === key)?.adoptedImage === r.image ? ' · 已採用此來源' : ' · 待選用'),
+      }));
     if (['taiwan', 'countries'].includes(key))
       return (result.countryContexts || []).map((r) => ({ ...r, context: '國家表上下文，非精確辨識位置' }));
     return precise;
   }
   function revealChoice(choice, focusEditor = true) {
+    review.classList.add('is-reviewing');
     selectField(choice.key);
-    (focusEditor ? choice.input : choice.row).focus({ preventScroll: true });
-    requestAnimationFrame(() => choice.row.scrollIntoView({ block: 'nearest' }));
+    (focusEditor && !applied ? choice.input : choice.row).focus({ preventScroll: true });
+    requestAnimationFrame(() => scrollChoice(choice));
+  }
+  function scrollChoice(choice) {
+    choice.row.scrollIntoView({ block: 'nearest' });
+    if (!phoneQuery.matches) return;
+    const crop = choice.evidence.querySelector('canvas');
+    const top = crop?.getBoundingClientRect().top;
+    const bottom = choice.input.getBoundingClientRect().bottom;
+    const available = window.visualViewport?.height || window.innerHeight;
+    // Tall country cards need their evidence and editor together, even when
+    // the row's explanatory footer cannot also fit above a phone keyboard.
+    if (top !== undefined && bottom - top < available - 24 && bottom > available - 12) window.scrollBy(0, bottom - available + 12);
   }
   function selectField(key, move = true, imageIndex) {
     activeKey = key;
     const currentIndex = choices.findIndex((choice) => choice.key === key);
-    if (nextAfter) nextAfter.textContent = currentIndex === choices.length - 1 ? '完成逐欄核對 →' : '核對下一欄 →';
+    if (nextAfter)
+      nextAfter.textContent = currentIndex === choices.length - 1 ? (applied ? '前往表單儲存 ↓' : '完成逐欄核對 →') : '核對下一欄 →';
     for (const [step, direction] of stepButtons) {
       step.disabled = direction === -1 && currentIndex === 0;
-      if (direction === 1) step.textContent = currentIndex === choices.length - 1 ? '前往確認' : '下一欄';
+      if (direction === 1) step.textContent = currentIndex === choices.length - 1 ? (applied ? '前往表單' : '前往確認') : '下一欄';
     }
     for (const option of categorySelect.options) {
       const group = choices.find((choice) => choice.key === option.value)?.row.parentElement;
@@ -598,7 +616,7 @@ function showReview(result) {
     }
     renderEvidence();
     const active = choices.find((choice) => choice.key === key);
-    if (active?.row.contains(document.activeElement)) requestAnimationFrame(() => active.row.scrollIntoView({ block: 'nearest' }));
+    if (active?.row.contains(document.activeElement)) requestAnimationFrame(() => scrollChoice(active));
     renderImage();
     if (move)
       requestAnimationFrame(() => {
@@ -643,7 +661,7 @@ function showReview(result) {
         marker.addEventListener('click', () => {
           selectField(choice.key, false, activeImage);
           choice.input.focus({ preventScroll: true });
-          choice.row.scrollIntoView({ block: 'nearest' });
+          scrollChoice(choice);
         });
         markers.get(id)?.remove();
         markers.set(id, marker);
@@ -678,8 +696,10 @@ function showReview(result) {
       const width = Math.min(source.width - left, Math.max(...list.map((r) => r.x + r.w)) - left + 24);
       const height = Math.min(source.height - top, Math.max(...list.map((r) => r.y + r.h)) - top + 12);
       const canvas = document.createElement('canvas');
-      canvas.width = Math.round(width);
-      canvas.height = Math.round(height);
+      const compact = list.every((region) => region.valueBox);
+      canvas.width = compact ? 540 : Math.round(width);
+      canvas.height = compact ? list.length * 64 : Math.round(height);
+      if (compact) canvas.classList.add('ocr-compact-crop');
       canvas.setAttribute('role', 'img');
       canvas.setAttribute(
         'aria-label',
@@ -687,6 +707,30 @@ function showReview(result) {
       );
       const sourceImage = new Image();
       sourceImage.onload = () => {
+        if (compact) {
+          const context = canvas.getContext('2d');
+          context.fillStyle = '#fff';
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          const drawBox = (box, x, y, maxWidth) => {
+            const scale = Math.min(40 / box.h, maxWidth / box.w);
+            context.drawImage(
+              sourceImage,
+              (box.x / source.width) * sourceImage.naturalWidth,
+              (box.y / source.height) * sourceImage.naturalHeight,
+              (box.w / source.width) * sourceImage.naturalWidth,
+              (box.h / source.height) * sourceImage.naturalHeight,
+              x,
+              y + (40 - box.h * scale) / 2,
+              box.w * scale,
+              box.h * scale,
+            );
+          };
+          list.forEach((region, row) => {
+            if (region.labelBox) drawBox(region.labelBox, 12, row * 64 + 12, 310);
+            drawBox(region.valueBox, region.labelBox ? 350 : 12, row * 64 + 12, region.labelBox ? 178 : 516);
+          });
+          return;
+        }
         canvas
           .getContext('2d')
           .drawImage(
@@ -704,17 +748,27 @@ function showReview(result) {
       sourceImage.src = source.url;
       const cropHead = text('div', '', 'ocr-crop-head');
       cropHead.append(text('span', '截圖 ' + (index + 1) + ' · ' + (list[0].context || '原圖局部')));
+      if (compact) cropHead.title = '原圖欄名與數值分段放大，已省略欄間空白；完整位置請查看原圖。';
       if (choice.conflict && !applied && choice.key !== 'countries') {
-        const adopt = text('button', '採用截圖 ' + (index + 1) + ' 的 ' + list[0].value, 'ocr-adopt-source');
+        const adopted = choice.adoptedImage === index;
+        const adopt = text(
+          'button',
+          adopted ? '已採用截圖 ' + (index + 1) : '採用截圖 ' + (index + 1) + ' 的 ' + list[0].value,
+          'ocr-adopt-source',
+        );
         adopt.type = 'button';
+        adopt.setAttribute('aria-pressed', String(adopted));
         adopt.addEventListener('click', () => {
           choice.input.value = list[0].value;
           choice.input.dispatchEvent(new Event('input', { bubbles: true }));
+          choice.adoptedImage = index;
+          choice.status.textContent = '已採用截圖 ' + (index + 1) + ' 的 ' + list[0].value;
           revealChoice(choice);
         });
         cropHead.append(adopt);
       }
       appendFullImageAction(cropHead, choice, index);
+      if (compact) cropHead.append(text('span', '欄間空白已省略', 'ocr-crop-note'));
       choice.evidence.append(cropHead, canvas);
     }
   }
@@ -795,7 +849,7 @@ function showReview(result) {
     if (choice)
       requestAnimationFrame(() => {
         selectField(choice.key);
-        choice.row.scrollIntoView({ block: 'nearest' });
+        scrollChoice(choice);
       });
   };
   window.addEventListener('resize', keepFocusedFieldVisible);
@@ -896,7 +950,7 @@ function showReview(result) {
             : value
               ? ''
               : conflict
-                ? '不同截圖的辨識值不一致，請對照下方原圖後選用或填寫。'
+                ? '兩張截圖的辨識值不一致，請對照原圖局部選用或填寫。'
                 : '未讀到，不會自動填入',
         'ocr-field-status',
       );
@@ -981,6 +1035,8 @@ function showReview(result) {
           input.value = choice.value;
         }
         reviewDirty = true;
+        choice.adoptedImage = undefined;
+        if (choice.conflict) renderEvidence();
         if (countryAcknowledgement) countryAcknowledgement.checked = false;
         choice.needsReview = !choice.value;
         if (!choice.before && !choice.selectionTouched) check.checked = Boolean(choice.value);
@@ -989,7 +1045,9 @@ function showReview(result) {
             ? '修正已保留；勾選左側才會覆寫目前內容'
             : choice.value === value
               ? ''
-              : '已手動修正 · 請對照原圖';
+              : choice.value
+                ? '已手動修正 · 請對照原圖'
+                : '空白，請對照原圖填寫';
         updateSelection();
       });
       check.addEventListener('change', () => {
@@ -1001,7 +1059,7 @@ function showReview(result) {
             : choice.before
               ? '保留目前內容'
               : choice.needsReview
-                ? '請對照原圖補齊未讀到的國家。'
+                ? '空白或尚待核對，請對照原圖填寫。'
                 : '';
         updateSelection();
       });
@@ -1013,8 +1071,7 @@ function showReview(result) {
   function advanceField(direction) {
     const index = choices.findIndex((choice) => choice.key === activeKey) + direction;
     if (index >= choices.length) {
-      confirmed.focus();
-      confirmed.scrollIntoView({ block: 'center' });
+      goToHandoff();
       return;
     }
     revealChoice(choices[Math.max(0, index)], false);
@@ -1110,10 +1167,12 @@ function showReview(result) {
   const shortcutCount = text('span');
   const shortcutButton = text('button', '前往填入確認 ↓');
   shortcutButton.type = 'button';
-  shortcutButton.addEventListener('click', () => {
-    confirmed.focus();
-    confirmed.scrollIntoView({ block: 'center' });
-  });
+  function goToHandoff() {
+    const target = applied ? returnToForm || form.elements.namedItem('visits') : confirmed;
+    target.focus({ preventScroll: true });
+    (applied ? target.closest('.field') : confirmation).scrollIntoView({ block: 'center' });
+  }
+  shortcutButton.addEventListener('click', goToHandoff);
   const jumpConfirm = text('button', '前往填入確認 ↓');
   jumpConfirm.type = 'button';
   jumpConfirm.addEventListener('click', () => shortcutButton.click());
@@ -1126,17 +1185,14 @@ function showReview(result) {
     returnToForm?.closest('.field').scrollIntoView({ block: 'center' });
   });
   navigation.append(returnButton);
-  for (const [label, offset] of [
-    ['上一欄', -1],
-    ['下一欄', 1],
-  ]) {
+  for (const [label, offset] of [['上一欄', -1]]) {
     const step = text('button', label);
     step.type = 'button';
     step.addEventListener('click', () => {
       advanceField(offset);
     });
     stepButtons.push([step, offset]);
-    modeBar.append(step);
+    afterField.prepend(step);
   }
   shortcut.append(shortcutCount, shortcutButton);
   review.append(shortcut);
@@ -1144,7 +1200,7 @@ function showReview(result) {
   function fail(message, choice, invalid = true) {
     localError.textContent =
       choice && !invalid
-        ? '尚未填入。請查看「' + screenshotFields[choice.key] + '」旁的衝突說明。'
+        ? '尚未填入。請查看「' + screenshotFields[choice.key] + '」旁的待完成說明。'
         : choice && invalid
           ? '尚未填入。請修正「' + screenshotFields[choice.key] + '」欄位。'
           : message;
@@ -1169,10 +1225,10 @@ function showReview(result) {
     const unresolved = choices.filter((choice) => choice.needsReview);
     if (countryNotice)
       countryNotice.textContent = unresolved.some((c) => c.key === 'taiwan')
-        ? '台灣占比未讀到，請對照國家表補正。'
+        ? '台灣未讀到；請到「國家分布」補正。'
         : unresolved.some((c) => c.key === 'countries')
-          ? '國家列表尚待補正，請對照原圖補齊。'
-          : '國家辨識疑點已處理，仍請對照原圖核對數字。';
+          ? '國家列表尚待補正。'
+          : '國家數值已補正，請核對原圖。';
     count.textContent = choices.length + ' 欄 · 數值疑點 ' + unresolved.length;
     shortcutCount.textContent = '已選 ' + selected.length + ' 欄' + (unresolved.length ? ' · 數值疑點 ' + unresolved.length : '');
     jumpMissing.hidden = !unresolved.length;
@@ -1357,14 +1413,12 @@ function showReview(result) {
       if (choice.key === 'countries' && countryAcknowledgement) countryAcknowledgement.closest('label').hidden = true;
     }
     confirmation.hidden = true;
+    jumpConfirm.textContent = '前往表單儲存 ↓';
+    selectField(activeKey, false);
     apply.hidden = true;
     const next = text('button', '前往表單儲存 ↓', 'primary');
     next.type = 'button';
-    next.addEventListener('click', () => {
-      const target = returnToForm || form.elements.namedItem('visits');
-      target.focus({ preventScroll: true });
-      target.closest('.field').scrollIntoView({ block: 'center' });
-    });
+    next.addEventListener('click', goToHandoff);
     actionLine.prepend(next);
     next.focus({ preventScroll: true });
     applyStatus.textContent = '已填入 ' + selected.length + ' 個欄位，尚未儲存；原圖與核對結果保留在上方。';

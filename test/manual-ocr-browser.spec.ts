@@ -106,6 +106,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('97.02');
       expect(await page.locator('#manual-countries').inputValue()).toContain('TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3');
       expect(await page.locator('#manual-desktop_Direct').inputValue()).toBe('60.69');
+      await page.locator('.ocr-section-nav').getByRole('button', { name: '前往表單儲存 ↓', exact: true }).click();
+      expect(await page.evaluate('document.activeElement?.id')).toBe('manual-visits');
       expect(await page.locator('#manual-Direct').inputValue()).toBe('');
       expect(await page.locator('#manual-search').inputValue()).toBe('');
       expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
@@ -208,16 +210,19 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         await fresh.getByRole('button', { name: '填入勾選欄位' }).click();
         expect(await fresh.locator('#manual-taiwan').inputValue()).toBe('93.23');
         expect(await fresh.locator('.ocr-workspace').isVisible()).toBe(true);
-        expect(await fresh.getByRole('button', { name: '前往表單儲存 ↓' }).isVisible()).toBe(true);
+        expect(await fresh.locator('.ocr-review-actions').getByRole('button', { name: '前往表單儲存 ↓' }).isVisible()).toBe(true);
         await fresh.setViewportSize({ width: 390, height: 844 });
         expect(await fresh.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
         expect(await fresh.locator('#manual-countries').inputValue()).toContain('TW 93.23');
         if (names.length === 2) {
           expect(await fresh.locator('#manual-visits').inputValue()).toBe('482.4K');
           expect(await fresh.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+          await fresh.getByLabel('跳到核對分類').selectOption({ label: '概況與互動（4欄）' });
+          const visitsCrop = await fresh.locator('[data-field=visits] canvas').boundingBox();
+          expect(visitsCrop && visitsCrop.height >= 30).toBe(true);
           await fresh.getByLabel('跳到核對分類').selectOption({ label: '國家分布（2欄）' });
           if ((await fresh.locator('.ocr-field-row.is-active').getAttribute('data-field')) !== 'countries')
-            await fresh.getByRole('button', { name: '下一欄', exact: true }).click();
+            await fresh.getByRole('button', { name: '核對下一欄 →', exact: true }).click();
           await fresh.setViewportSize({ width: 390, height: 420 });
           await fresh.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
           const countryCrop = await fresh.locator('.ocr-field-row.is-active canvas').boundingBox();
@@ -304,7 +309,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-file').count()).toBe(1);
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor();
-      expect(await page.locator('.ocr-notices').innerText()).toContain('台灣占比未讀到');
+      expect(await page.locator('.ocr-notices').innerText()).toContain('台灣未讀到');
       const taiwan = page.getByRole('textbox', { name: '核對台灣占比', exact: true });
       expect(await taiwan.inputValue()).toBe('');
       expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(false);
@@ -326,7 +331,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       })()`);
       expect(blocked).toEqual({ blocked: true, reached: false });
       expect(await page.locator('#manual-draft-status').innerText()).toContain('截圖核對尚未填入');
-      expect(await page.locator('.ocr-save-warning').innerText()).toContain('尚未儲存');
+      expect(await page.locator('.ocr-save-warning').innerText()).toContain('尚未填入核對結果');
       await page.getByRole('button', { name: '返回核對並填入' }).click();
       // A normal selection checkbox cannot dismiss a known incomplete-country warning.
       await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).check();
@@ -439,6 +444,13 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await overlap.getByRole('button', { name: '採用截圖 1 的 482.4K', exact: true }).click();
       expect(await overlap.locator('#ocr-edit-visits').inputValue()).toBe('482.4K');
       expect(await overlap.getByRole('checkbox', { name: '填入月造訪量', exact: true }).isChecked()).toBe(true);
+      expect(await overlap.locator('#ocr-status-visits').innerText()).toBe('已採用截圖 1 的 482.4K');
+      expect(await overlap.getByRole('button', { name: '已採用截圖 1', exact: true }).getAttribute('aria-pressed')).toBe('true');
+      expect(await overlap.locator('[data-field=visits] .ocr-crop-head').first().innerText()).toContain('已採用此來源');
+      await overlap.locator('#ocr-edit-visits').fill('482.6K');
+      await overlap.locator('#ocr-edit-visits').blur();
+      await overlap.locator('#ocr-edit-visits').focus();
+      expect(await overlap.getByRole('button', { name: '已採用截圖 1', exact: true }).count()).toBe(0);
       await conflictContext.close();
     } finally {
       await browser.close();
