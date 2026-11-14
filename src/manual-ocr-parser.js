@@ -82,9 +82,18 @@ function rowsOf(tsv) {
   const words = tsv
     .split('\n')
     .slice(1)
-    .map((line) => {
+    .map((line, index) => {
       const c = line.split('\t');
-      return { level: c[0], x: +c[6], y: +c[7], w: +c[8], h: +c[9], confidence: +c[10], text: c.slice(11).join('\t').trim() };
+      return {
+        line: index + 1,
+        level: c[0],
+        x: +c[6],
+        y: +c[7],
+        w: +c[8],
+        h: +c[9],
+        confidence: +c[10],
+        text: c.slice(11).join('\t').trim(),
+      };
     })
     .filter((w) => w.level === '5' && w.text && [w.x, w.y, w.w, w.h, w.confidence].every(Number.isFinite));
   const rows = [];
@@ -140,6 +149,57 @@ export async function refineScreenshotNumbers(tsv, recognize) {
       c[10] = words[0][10];
       c[11] = candidate;
       lines[i] = c.join('\t');
+    }
+  }
+  return lines.join('\n');
+}
+
+/** Read an unrecognized country name again from its own pixels, without flags or other cards. */
+export async function refineScreenshotCountryLabels(tsv, recognize) {
+  const rows = rowsOf(tsv);
+  const heading = rows.find((row) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b|^Country$/i.test(row.text));
+  if (!heading) return tsv;
+  const end = rows.find((row) => row.center > heading.center && /\bSee\s*more\s*countries\b|\bTraffic\s*Sources\b/i.test(row.text));
+  const lines = tsv.split('\n');
+  let attempts = 0;
+  for (const row of rows) {
+    if (row.center <= heading.center || (end && row.center >= end.center) || attempts >= 10) continue;
+    if (countryPatterns.some(([, , pattern]) => phrase(row, pattern))) continue;
+    const value = row.words.find((word) => percent(word) && word.confidence >= 80 && !bounded(row, word));
+    if (!value) continue;
+    const labels = row.words.filter((word) => word.x + word.w < value.x && /[A-Za-z]{2}/.test(word.text));
+    if (!labels.length) continue;
+    const x = Math.min(...labels.map((word) => word.x));
+    const y = Math.min(...labels.map((word) => word.y));
+    const region = {
+      x,
+      y,
+      w: Math.max(...labels.map((word) => word.x + word.w)) - x,
+      h: Math.max(...labels.map((word) => word.y + word.h)) - y,
+    };
+    attempts++;
+    const retry = rowsOf(await recognize(region)).flatMap((candidate) => candidate.words);
+    if (!retry.length || retry.some((word) => word.confidence < 80)) continue;
+    const name = retry
+      .map((word) => word.text)
+      .join(' ')
+      .trim();
+    const matches = countryPatterns.filter(([, , pattern]) => {
+      const match = pattern.exec(name);
+      return match && match[0].length === name.length;
+    });
+    if (new Set(matches.map(([, code]) => code)).size !== 1) continue;
+    for (const [index, word] of labels.entries()) {
+      const cells = lines[word.line].split('\t');
+      cells[11] = index === 0 ? matches[0][0] : '';
+      if (index === 0) {
+        cells[6] = String(region.x);
+        cells[7] = String(region.y);
+        cells[8] = String(region.w);
+        cells[9] = String(region.h);
+        cells[10] = String(Math.min(...retry.map((word) => word.confidence)));
+      }
+      lines[word.line] = cells.join('\t');
     }
   }
   return lines.join('\n');

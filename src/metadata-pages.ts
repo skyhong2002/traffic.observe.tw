@@ -155,7 +155,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
   const detailValues = manualDetailValues(saved);
   const value = (key: keyof NonNullable<ManualForm['draft']>, fromSaved: string) => html(form.draft ? (d[key] ?? '') : fromSaved);
   const field = (key: string, label: string, where: string, placeholder: string, fromSaved: string, unit = '') =>
-    `<div class="field"><label for="manual-${key}">${label}</label><span class="input-unit"><input id="manual-${key}" name="${key}"${invalid(key)} value="${value(key, fromSaved)}" placeholder="${placeholder ? `例如 ${placeholder}` : ''}" inputmode="${['visits', 'countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
+    `<div class="field"><label for="manual-${key}">${label.replace(/（[^）]+）/g, '')}</label><span class="input-unit"><input id="manual-${key}" name="${key}"${invalid(key)} value="${value(key, fromSaved)}" placeholder="${placeholder ? `例如 ${placeholder}` : ''}" inputmode="${['visits', 'countryCode', 'category', 'duration', ...breakdownTotals.map(([key]) => key)].includes(key) ? 'text' : 'decimal'}" autocomplete="off"${key === 'visits' ? ' required' : ''}>${unit ? `<span>${unit}</span>` : ''}</span><small>${where}</small></div>`;
   const free = form.free.length
     ? form.free.map((f) => `${monthLabel(f.month)} ${f.estimated ? '有估算' : '<b>無估算</b>'}`).join('・')
     : '還沒有向 Similarweb 抓過';
@@ -181,51 +181,59 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
     `人工補登・${site.name}`,
     siteHead(site, 'manual'),
     `${form.error ? `<p class="flash" id="manual-error" role="alert" tabindex="-1"><b>尚未儲存。</b>${html(form.error)} 已填內容仍保留，請修正後再按儲存。${(form.errorFields ?? []).map((key) => `<a href="#manual-${html(key)}">前往欄位</a>`).join('　')}</p>` : flash(undefined, form.message)}
-<p class="callout manual-status${needed ? ' warn' : ''}"><b>Similarweb 免費資料</b>　${free}${needed ? '。沒有估算的月份可以從 Similarweb 平台抄數字補上。' : '。免費資料有估算的月份仍優先使用免費資料。'}</p>
 <link rel="stylesheet" href="${OCR_STYLE}">
-<section class="block manual-workspace"><div class="manual-intro"><div><span class="ocr-eyebrow">SIMILARWEB · 人工補登</span><h2>把截圖變成可核對的資料</h2><p class="note">先對照原圖確認數值，再填入表單儲存。</p></div><a class="ocr-platform-link" href="${html(proUrl(site.domain))}" rel="noopener">開啟 Similarweb ↗</a></div>
-<details class="manual-instructions"><summary>如何取得截圖與補登？</summary><ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol></details>
+<section class="block manual-workspace">
+<div class="manual-intro"><div><h2>上傳截圖，對照填寫</h2><p class="note">選圖後自動填入右側；對照原圖、修改，然後儲存。</p></div><a href="${html(proUrl(site.domain))}" rel="noopener">開啟 Similarweb ↗</a></div>
+<div class="manual-columns">
 <section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
-<ol class="ocr-steps" aria-label="截圖匯入步驟"><li data-step="select" aria-current="step"><span>1</span> 選擇截圖</li><li data-step="review"><span>2</span> 對照與核對</li><li data-step="save"><span>3</span> 填入後儲存</li></ol>
-<div class="ocr-upload-head"><div><h3 id="manual-import-heading">從截圖填入</h3><p class="note">同一網站、同一月份的英文版截圖；網站或外掛皆可。</p></div><span class="ocr-local-badge">本機辨識・圖片不上傳</span></div>
-<div class="ocr-upload" data-dropzone><div><p class="ocr-upload-label">加入截圖，也可以拖曳到這裡</p><p class="note">概況、國家、流量來源 · 最多 4 張 · PNG / JPG / WebP · 每張 10 MB</p><label class="ocr-choose" for="manual-screenshots">選擇／加入截圖</label><input class="ocr-file-input" type="file" aria-label="選擇／加入截圖" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple></div><button type="button" class="primary" data-recognize>辨識截圖</button></div>
-<div class="ocr-files" data-files></div>
-<p class="ocr-progress" role="status" aria-live="polite" data-progress></p><div data-review></div>
-<details class="ocr-help"><summary>辨識範圍與資料處理</summary><p class="note">辨識在瀏覽器內完成，沒有 AI token 費用。Desktop Only 渠道填入獨立的桌面限定欄位，Mobile Only 目前不支援。已有內容預設保留；辨識結果需核對並按「儲存」才會生效。</p></details>
-<noscript><p>截圖辨識需要啟用 JavaScript，仍可使用下方表單手動補登。</p></noscript>
+<div class="ocr-upload" data-dropzone><div><h3 id="manual-import-heading">原始截圖</h3><p class="note">同一網站、同一月份 · 可一次多選，最多 4 張</p></div><label class="ocr-choose" for="manual-screenshots">＋ 加入截圖（可多選）</label><input type="file" id="manual-screenshots" aria-label="加入截圖" accept="image/png,image/jpeg,image/webp" multiple></div>
+<div class="ocr-source-toolbar"><div data-files class="ocr-files" aria-label="已加入的截圖"></div><div class="ocr-zoom" hidden data-zoom><button type="button" data-zoom-out aria-label="縮小截圖">−</button><button type="button" data-zoom-reset>完整圖片</button><button type="button" data-zoom-in aria-label="放大截圖">＋</button></div></div>
+<div class="ocr-source-view" tabindex="0" role="region" aria-label="原始截圖，可捲動查看" data-source-view><p class="ocr-empty">在這裡放入截圖<br><small>辨識在瀏覽器內完成，圖片不上傳<br>PNG / JPG / WebP · 最多 4 張 · 每張 10 MB</small></p><div class="ocr-source-sheet" hidden><img alt="" data-source-image><span class="ocr-source-marker" hidden aria-hidden="true"></span></div></div>
+<div class="ocr-source-status"><p role="status" aria-live="polite" data-progress>加入截圖後會自動辨識。</p><button type="button" data-recognize hidden>重新辨識</button></div>
+<details class="ocr-help"><summary>使用說明</summary><p>可加入概況、國家或流量來源截圖。點右側欄位會在左側顯示對應位置。Desktop Only 只填入桌面限定欄位；已有內容與手動修改會保留。</p><p>${free}。${needed ? '沒有估算的月份可在這裡補登。' : '免費資料有估算的月份仍優先使用免費資料。'}</p></details>
+<noscript><p>截圖辨識需要 JavaScript，也可以直接在表單手動補登。</p></noscript>
 </section>
 <form class="form manual-form" method="post" action="/site/${html(site.domain)}/manual/" data-has-error="${Boolean(form.error)}" data-completed-month="${html(form.completedMonth ?? '')}">
-<div class="manual-form-title"><span class="ocr-eyebrow">最後一步</span><h3>補登表單</h3><p class="note">核對區填入的數值會出現在這裡，也可以直接手動輸入。</p></div>
-<p id="manual-draft-status" role="status" aria-live="polite" class="note"></p>
-<div class="manual-save-bar"><span>核對月份與月造訪量後即可儲存；其他欄位可留空。</span><button type="submit" class="primary">儲存此月份</button></div>
-<div class="field-grid manual-basics">
-<div class="field"><label for="manual-month">月份</label><select id="manual-month" name="month"${invalid('month')}>${form.choices
+<div class="manual-form-title"><h3>補登資料</h3><div class="manual-header-actions"><div class="field manual-month-field"><label for="manual-month">月份</label><select id="manual-month" name="month"${invalid('month')}>${form.choices
       .map(
         (m) =>
           `<option value="${m}"${m === month ? ' selected' : ''}${savedData(m)}>${monthLabel(m)}${byMonth.has(m) ? '（已補登）' : ''}</option>`,
       )
-      .join('')}</select><small>平台上方日期選單顯示的月份</small></div>
+      .join(
+        '',
+      )}</select><small>平台上方日期選單顯示的月份</small></div><button type="submit" class="primary">儲存此月份</button></div></div>
+<p id="manual-draft-status" role="status" aria-live="polite" class="note"></p>
+<div class="manual-save-bar"><span></span></div>
+<section class="manual-form-section" aria-labelledby="manual-overview-heading"><div class="manual-section-heading"><h3 id="manual-overview-heading">概況與互動</h3></div><div class="field-grid manual-basics">
 ${field('visits', '月造訪量', 'Traffic &amp; engagement → Total visits', '60.10M', saved ? millions(saved.visits) : '')}
-${field('taiwan', '台灣', 'Geography → Taiwan', '61.57', saved ? percentInput(saved.taiwanShare) : '', '%')}
-</div>
-<details class="manual-breakdowns" data-all-channels${form.error ? ' open' : ''}><summary>全裝置流量來源占比（選填）</summary><div class="field-grid">
+${manualDetailFields
+  .filter(([key]) => ['bounce', 'pages', 'duration'].includes(key))
+  .map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit))
+  .join('')}
+</div></section>
+<section class="manual-form-section" aria-labelledby="manual-geography-heading"><div class="manual-section-heading"><h3 id="manual-geography-heading">國家分布</h3><div class="manual-section-actions"><button type="button" data-country-add hidden>＋ 新增</button><button type="button" data-country-code hidden>代碼</button></div></div><div class="field manual-country-field"><label class="sr-only" for="manual-countries">各國占比</label><div class="manual-country-values">${field('taiwan', '台灣占比', 'Geography → Taiwan', '61.57', saved ? percentInput(saved.taiwanShare) : '', '%')}<textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="例如：&#10;TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與台灣占比一致。</small></div></div></section>
+<details class="manual-breakdowns manual-form-section" data-desktop-channels${form.error || Object.entries({ ...detailValues, ...d }).some(([key, v]) => key.startsWith('desktop_') && v) ? ' open' : ''}><summary><span>流量來源</span><span class="manual-scope-label">Desktop Only・桌面限定</span></summary>
+<p class="note manual-scope-note">占桌面造訪的比例；與全裝置資料分開保存。</p>
+<div class="field-grid">${manualDesktopChannels.map(([key, label]) => field(`desktop_${key}`, label, 'Traffic Sources → Worldwide／Desktop Only', '0.00', detailValues[`desktop_${key}`] ?? '', '%')).join('')}</div>
+</details>
+<details class="manual-breakdowns manual-form-section" data-all-channels${form.error ? ' open' : ''}><summary><span>流量來源</span><span class="manual-scope-label">全裝置</span></summary><div class="field-grid">
 ${field('search', '自然搜尋', 'Marketing channels → Org. Search', '36.45', saved ? percentInput(saved.searchShare) : '', '%')}
 ${field('ai', 'Gen AI', 'Marketing channels → Gen AI', '0.37', saved ? percentInput(saved.aiShare) : '', '%')}
 ${manualChannels.map(([key, label]) => field(key, label, 'Marketing channels → ' + label, '0.00', percentInput(saved?.channels[key] ?? null), '%')).join('')}
 </div></details>
-<details class="manual-breakdowns" data-desktop-channels${form.error || Object.entries({ ...detailValues, ...d }).some(([key, v]) => key.startsWith('desktop_') && v) ? ' open' : ''}><summary>桌面限定流量來源（Desktop Only，選填）</summary>
-<p class="note">占桌面造訪的比例，與上方全裝置渠道分開保存。沒有桌面造訪量時，只顯示占比，不以全裝置月造訪量換算次數。</p>
-<div class="field-grid">${manualDesktopChannels.map(([key, label]) => field(`desktop_${key}`, `桌面限定・${label}`, 'Traffic Sources → Worldwide／Desktop Only', '0.00', detailValues[`desktop_${key}`] ?? '', '%')).join('')}</div>
-</details>
-<h3>互動與排名（選填）</h3><div class="field-grid">${manualDetailFields.map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit)).join('')}</div>
-<div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="例如：&#10;TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
+
+<details class="manual-extra-fields"${form.error ? ' open' : ''}><summary>其他補登欄位<span>排名、平台詳細分布</span></summary><details class="manual-breakdowns"><summary>排名（選填）</summary><div class="field-grid">${manualDetailFields
+      .filter(([key]) => !['bounce', 'pages', 'duration'].includes(key))
+      .map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit))
+      .join('')}</div></details>
 <details class="manual-breakdowns"${form.error ? ' open' : ''}><summary>平台詳細分布（選填）</summary>
 <p class="note">請確認各表使用相同月份、Worldwide 與 All traffic 範圍。各表的占比分母不同。每行填「名稱 | 占比 | 變化」，變化可省略；名稱未提供時填 ?。保留平台的 &lt;0.01%、&gt;5000%、New，不自行換算。</p>
 <div class="field-grid manual-basics">${breakdownTotals.map(([key, label]) => field(key, label, key === 'socialTotal' ? '占全站造訪；不等同自然社群' : '占全站造訪', '<0.01%', detailValues[key] ?? '')).join('')}</div>
 <div class="manual-detail-grid">${breakdownFields.map(([key, label, hint]) => `<div class="field"><label for="manual-${key}">${html(label)}</label><textarea id="manual-${key}" name="${key}"${invalid(key)} rows="3" maxlength="20000" placeholder="${html(hint.split('；')[0])}">${value(key, detailValues[key] ?? '')}</textarea><small>${html(hint)}</small></div>`).join('')}</div>
 </details>
-<div class="form-actions"><button type="submit" class="primary">儲存</button><button type="button" id="manual-discard" class="quiet" hidden>放棄此月份草稿</button><span class="note">造訪量可直接貼平台的寫法（60.10M、950K）；占比不知道可以留空。同一月份再存一次會覆蓋。</span></div>
-</form></section>
+</details>
+<div class="form-actions"><button type="button" id="manual-discard" class="quiet" hidden>放棄此月份草稿</button><span class="note">造訪量可直接貼平台的寫法（60.10M、950K）；占比不知道可以留空。同一月份再存一次會覆蓋。</span></div>
+</form></div></section>
 <section class="block"><h2>已補登的月份</h2>${
       rows
         ? `<div class="scroll"><table data-sortable><thead><tr><th class="l" aria-sort="descending">月份</th><th class="num">月造訪量</th><th class="num">自然搜尋</th><th class="num">Gen AI</th><th class="num">台灣</th>${manualChannels.map(([, label]) => `<th class="num">${html(label)}</th>`).join('')}<th class="l">補登者</th><th data-nosort><span class="sr-only">操作</span></th></tr></thead><tbody>${rows}</tbody></table></div>`

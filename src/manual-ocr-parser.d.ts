@@ -26,6 +26,10 @@ export function refineScreenshotNumbers(
   tsv: string,
   recognize: (region: { x: number; y: number; w: number; h: number }) => Promise<string>,
 ): Promise<string>;
+export function refineScreenshotCountryLabels(
+  tsv: string,
+  recognize: (region: { x: number; y: number; w: number; h: number }) => Promise<string>,
+): Promise<string>;
 export function reviewScreenshotCountries(
   tsv: string,
   primary: ScreenshotResult,

@@ -1,7 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseManualChannels, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
-import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, reviewScreenshotCountries } from '../src/manual-ocr-parser.js';
+import {
+  mergeScreenshots,
+  parseScreenshot,
+  refineScreenshotCountryLabels,
+  refineScreenshotNumbers,
+  reviewScreenshotCountries,
+} from '../src/manual-ocr-parser.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/manual-ocr/${name}.tsv`, import.meta.url), 'utf8');
 describe('Similarweb screenshot extraction', () => {
@@ -152,6 +158,18 @@ describe('Similarweb screenshot extraction', () => {
     });
     expect(retries).toBe(0);
   });
+  it('recovers Taiwan from a dedicated label crop, never from its position or the remaining share', async () => {
+    const source = fixture('s3-geography-compressed');
+    const recognizedName = '5\t1\t1\t1\t1\t1\t0\t0\t120\t30\t96\tTaiwan';
+    const recovered = await refineScreenshotCountryLabels(source, async (region) => (region.y < 100 ? 'header\n' + recognizedName : ''));
+    expect(parseScreenshot(recovered).fields.taiwan).toBe('93.23');
+    expect(parseScreenshot(recovered).fields.countries).toContain('TW 93.23');
+    const uncertain = await refineScreenshotCountryLabels(source, async () => 'header\n' + recognizedName.replace('96\t', '30\t'));
+    expect(parseScreenshot(uncertain).fields.taiwan).toBeUndefined();
+    const unknown = await refineScreenshotCountryLabels(source, async () => 'header\n' + recognizedName.replace('Taiwan', 'Unknown'));
+    expect(parseScreenshot(unknown).fields.taiwan).toBeUndefined();
+  });
+
   it('recovers a missing country label from a second reading without replacing recognized rows', async () => {
     const tsv = fixture('s3-geography-compressed');
     const primary = parseScreenshot(tsv);
