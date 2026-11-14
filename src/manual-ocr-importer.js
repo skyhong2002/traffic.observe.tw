@@ -520,6 +520,8 @@ function showReview(result) {
     right.classList.toggle('is-single-field', singleField);
     modeButton.textContent = singleField ? '顯示全部欄位' : '逐欄核對';
     modeButton.setAttribute('aria-pressed', String(singleField));
+    const bulk = right.querySelector('.ocr-bulk-tools');
+    if (bulk && !modeChosen) bulk.open = !singleField;
   };
   modeButton.addEventListener('click', () => {
     modeChosen = true;
@@ -976,7 +978,11 @@ function showReview(result) {
     if (next) revealChoice(next);
   });
   tools.append(jumpMissing);
-  right.querySelector('.ocr-results-hint').after(tools);
+  const bulkTools = document.createElement('details');
+  bulkTools.className = 'ocr-bulk-tools';
+  bulkTools.open = !phoneQuery.matches;
+  bulkTools.append(text('summary', '批次選取欄位'), tools);
+  modeBar.after(bulkTools);
   const footer = text('div', '', 'ocr-review-footer');
   const confirmation = document.createElement('label'),
     confirmed = document.createElement('input');
@@ -1261,6 +1267,7 @@ function showReview(result) {
     updateSaveHandoff(false);
     updateTarget();
     shortcut.hidden = true;
+    bulkTools.hidden = true;
     for (const button of tools.querySelectorAll('button')) button.disabled = true;
     for (const choice of choices) {
       choice.check.disabled = true;

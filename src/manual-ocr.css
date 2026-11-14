@@ -1152,3 +1152,21 @@
     box-shadow: none;
   }
 }
+
+.ocr-confirmation[hidden] {
+  display: none;
+}
+.ocr-bulk-tools {
+  margin-bottom: 10px;
+}
+.ocr-bulk-tools summary {
+  min-height: 36px;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (max-width: 760px) {
+  .ocr-bulk-tools summary {
+    min-height: 44px;
+  }
+}

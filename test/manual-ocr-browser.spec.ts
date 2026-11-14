@@ -360,6 +360,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       expect(await page.locator('.ocr-workspace').isVisible()).toBe(true);
+      expect(await page.locator('.ocr-confirmation').isVisible()).toBe(false);
       expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).getAttribute('readonly')).not.toBeNull();
       expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
       expect(await page.evaluate('document.activeElement?.textContent')).toBe('前往表單儲存 ↓');
