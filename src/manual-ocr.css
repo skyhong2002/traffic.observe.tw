@@ -1027,8 +1027,19 @@
   color: var(--accent);
 }
 
-.ocr-dialog-image img.is-zoomed {
-  width: max(100%, 900px);
+.ocr-dialog-stage {
+  position: relative;
+  width: 100%;
+}
+.ocr-dialog-stage.is-zoomed {
+  width: max(180%, 900px);
+}
+.ocr-dialog-marker {
+  position: absolute;
+  border: 2px solid #c2410c;
+  box-shadow: 0 0 0 2px white;
+  pointer-events: none;
+  background: rgb(251 146 60 / 10%);
 }
 .ocr-dialog-hint {
   font-size: 13px;
@@ -1042,6 +1053,9 @@
 .manual-workspace :is([tabindex="-1"]):focus-visible {
   outline: 2px solid light-dark(#1d4ed8, #93c5fd);
   outline-offset: 3px;
+}
+.ocr-field-row.is-overwrite .ocr-field-status {
+  color: light-dark(#92400e, #fde68a);
 }
 .ocr-field-row.has-error .ocr-field-status,
 .ocr-field-row.has-error:not(.is-selected) .ocr-field-status,
@@ -1094,4 +1108,47 @@
 .ocr-partial-confirmation[hidden],
 .ocr-save-warning[hidden] {
   display: none;
+}
+
+.ocr-mode-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 0;
+}
+.ocr-mode-bar button {
+  min-height: 36px;
+  font-size: 13px;
+  background: transparent;
+}
+.ocr-field-position {
+  color: var(--muted);
+  font-size: 13px;
+}
+.ocr-results.is-single-field .ocr-field-row:not(.is-active),
+.ocr-results.is-single-field .ocr-field-group:not(:has(.is-active)) {
+  display: none;
+}
+.ocr-field-row.is-identical:not(.is-active) {
+  border-color: var(--grid);
+}
+@media (max-width: 760px) {
+  .ocr-mode-bar button,
+  .ocr-form-source,
+  .ocr-dialog-toolbar button,
+  .ocr-review-actions button,
+  .ocr-notices summary,
+  .ocr-edit-value input {
+    min-height: 44px;
+  }
+  .ocr-results.is-single-field .ocr-field-row {
+    scroll-margin-bottom: 16px;
+  }
+  .ocr-review-shortcut {
+    position: static;
+    margin: 12px;
+    box-shadow: none;
+  }
 }

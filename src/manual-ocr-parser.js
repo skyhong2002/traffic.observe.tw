@@ -242,7 +242,15 @@ export function parseScreenshot(tsv, includeSources = false) {
   if (sources) rows = rows.filter((r) => r.center < sources.center);
   const usableText = rows.map((r) => r.text).join('\n');
   if (!/\bWorldwide\b/i.test(usableText) || !/\bAll\s*traffic\b/i.test(usableText))
-    warnings.push('截圖未完整辨識出 Worldwide／All traffic，請核對範圍。');
+    warnings.push(
+      '截圖未完整辨識出 Worldwide／All traffic，' +
+        (/\bWorldwide\b/i.test(usableText)
+          ? '已讀到 Worldwide（全球）；請確認全裝置 All traffic。'
+          : /\bAll\s*traffic\b/i.test(usableText)
+            ? '已讀到 All traffic（全裝置）；請確認地區為 Worldwide。'
+            : '全裝置區未顯示完整篩選，請確認地區為全球、裝置為全部。') +
+        (desktopSources ? ' 桌面渠道已確認 Worldwide・Desktop Only，會獨立儲存。' : ''),
+    );
   const put = (key, word, row, regionWords) => {
     if (conflicts.has(key)) return;
     if (word.confidence < 80 || bounded(row, word)) {

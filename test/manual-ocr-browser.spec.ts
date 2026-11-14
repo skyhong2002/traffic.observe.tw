@@ -81,6 +81,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         );
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      expect(await page.getByRole('button', { name: '顯示全部欄位' }).isVisible()).toBe(true);
+      await page.getByRole('button', { name: '下一欄', exact: true }).click();
+      expect(await page.locator('.ocr-field-position').innerText()).toContain('第 2');
+      await page.getByRole('button', { name: '顯示全部欄位' }).click();
       const extensionReview = await page.locator('[data-review]').innerText();
       expect(await page.getByRole('textbox', { name: '核對月造訪量', exact: true }).inputValue()).toBe('416.5K');
       expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).inputValue()).toBe('97.02');
@@ -122,8 +126,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByRole('textbox', { name: '核對桌面限定・聯盟行銷', exact: true }).inputValue()).toBe('4.67');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
-      expect(await page.locator('.ocr-apply-error').innerText()).toContain('101.28%');
-      expect(await page.locator('.ocr-apply-error').innerText()).toContain('40%');
+      expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('101.28%');
+      expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('40%');
       expect(await page.getByRole('textbox', { name: '核對桌面限定・社群廣告', exact: true }).getAttribute('aria-invalid')).toBeNull();
       expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('填入桌面限定・自然搜尋');
       await page.getByRole('checkbox', { name: '填入桌面限定・自然搜尋', exact: true }).check();
@@ -141,6 +145,14 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('button', { name: '更改截圖並重新核對' }).click();
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      expect(await page.locator('.ocr-field-row.is-identical').count()).toBe(12);
+      await page.locator('#ocr-edit-taiwan').fill('93.22');
+      await page.getByRole('button', { name: '勾選與目前不同的欄位', exact: true }).click();
+      expect(await page.locator('.ocr-selection-count').innerText()).toBe('已選 1 / 16');
+      expect(await page.locator('[data-field=taiwan]').getAttribute('class')).toContain('is-overwrite');
+      await page.locator('#ocr-edit-taiwan').fill('93.23');
+      await page.getByRole('button', { name: '勾選空白欄位', exact: true }).click();
+
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
@@ -319,7 +331,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await taiwan.inputValue()).toBe('101');
       await taiwan.fill('93.23');
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
-      expect(await page.locator('.ocr-apply-error').innerText()).toContain('漏辨識');
+      expect(await page.locator('#ocr-status-countries').innerText()).toContain('漏辨識');
       expect(await page.locator('#manual-countries').inputValue()).toBe('');
 
       await page.getByRole('button', { name: /移除截圖 1/ }).click();

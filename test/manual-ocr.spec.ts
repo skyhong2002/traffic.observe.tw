@@ -80,7 +80,7 @@ describe('Similarweb screenshot extraction', () => {
     expect(parseVisits(result.fields.visits)).toBe(416_500);
     expect(result.warnings.join(' ')).toContain('獨立的「桌面限定」欄位');
     expect(result.warnings.join(' ')).toContain('Germany');
-    expect(result.warnings.join(' ')).toContain('請核對範圍');
+    expect(result.warnings.join(' ')).toContain('請確認');
   });
   it('keeps device restrictions on the country card and on a cropped source card', () => {
     const input = fixture('extension-geography');
