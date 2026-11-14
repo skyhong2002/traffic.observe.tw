@@ -185,6 +185,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         if (!(await countryCheck.isChecked())) {
           expect(await fresh.locator('#ocr-status-countries').innerText()).toContain('不完整');
           await countryCheck.check();
+          const partial = fresh.locator('.ocr-partial-confirmation:visible input');
+          if (await partial.count()) await partial.check();
         }
         await fresh.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
         await fresh.getByRole('button', { name: '填入勾選欄位' }).click();
@@ -288,6 +290,22 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-original-dialog').isVisible()).toBe(true);
       await page.getByRole('button', { name: '返回台灣占比補正' }).click();
       await page.waitForFunction('document.activeElement.id === "ocr-edit-taiwan"');
+      // A submit attempt is intercepted before the form's submitting flag changes.
+      const blocked = await page.evaluate(`(() => {
+        const form = document.querySelector('.manual-form');
+        const attempt = new Event('submit', { bubbles: true, cancelable: true });
+        let reached = false;
+        form.addEventListener('submit', () => { reached = true; }, { once: true });
+        form.dispatchEvent(attempt);
+        return { blocked: attempt.defaultPrevented, reached };
+      })()`);
+      expect(blocked).toEqual({ blocked: true, reached: false });
+      expect(await page.locator('.ocr-save-warning').innerText()).toContain('尚未儲存');
+      await page.getByRole('button', { name: '返回核對並填入' }).click();
+      // A normal selection checkbox cannot dismiss a known incomplete-country warning.
+      await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).check();
+      expect(await page.locator('.ocr-partial-confirmation').innerText()).toContain('TW、US');
+      expect(await page.locator('.ocr-count').innerText()).toContain('辨識疑點');
       await taiwan.fill('101');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
@@ -300,9 +318,13 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await leavePrompt.dismiss();
       expect(await taiwan.inputValue()).toBe('101');
       await taiwan.fill('93.23');
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('.ocr-apply-error').innerText()).toContain('漏辨識');
+      expect(await page.locator('#manual-countries').inputValue()).toBe('');
+
       await page.getByRole('button', { name: /移除截圖 1/ }).click();
-      expect(await page.getByRole('button', { name: '保留目前核對' }).isVisible()).toBe(true);
-      await page.getByRole('button', { name: '保留目前核對' }).click();
+      expect(await page.getByRole('button', { name: '保留截圖與核對' }).isVisible()).toBe(true);
+      await page.getByRole('button', { name: '保留截圖與核對' }).click();
       expect(await taiwan.inputValue()).toBe('93.23');
       expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toContain('移除截圖');
       expect(await page.getByRole('checkbox', { name: '填入聯盟行銷', exact: true }).count()).toBe(0);
@@ -350,6 +372,43 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       page.on('dialog', (dialog) => dialog.accept());
       await page.reload();
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
+      const conflictContext = await browser.newContext();
+      const engagementTsv = readFileSync(new URL('./fixtures/manual-ocr/s3-engagement.tsv', import.meta.url), 'utf8');
+      await conflictContext.addInitScript((tsv) => {
+        let mode = '11',
+          pass = 0;
+        Object.assign(globalThis, {
+          Tesseract: {
+            createWorker: async () => ({
+              setParameters: async (params: { tessedit_pageseg_mode?: string }) => {
+                mode = params.tessedit_pageseg_mode || mode;
+              },
+              recognize: async () => {
+                if (mode === '11') pass++;
+                return { data: { tsv: pass > 1 ? tsv.replace('482.4K', '482.5K') : tsv } };
+              },
+              terminate: async () => {},
+            }),
+          },
+        });
+      }, engagementTsv);
+      const overlap = await conflictContext.newPage();
+      await overlap.goto(origin + '/site/s3.com.tw/manual/');
+      const engagementImage = readFileSync(new URL('./fixtures/manual-ocr/s3-engagement.png', import.meta.url));
+      await overlap.locator('#manual-screenshots').setInputFiles([
+        { name: 'first.png', mimeType: 'image/png', buffer: engagementImage },
+        { name: 'second.png', mimeType: 'image/png', buffer: engagementImage },
+      ]);
+      await overlap.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await overlap.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      expect(await overlap.locator('#ocr-edit-visits').inputValue()).toBe('');
+      expect(await overlap.getByRole('checkbox', { name: '填入月造訪量', exact: true }).isChecked()).toBe(false);
+      await overlap.locator('#ocr-edit-visits').focus();
+      expect(await overlap.locator('[data-field=visits] canvas').count()).toBe(2);
+      expect((await overlap.locator('[data-field=visits] .ocr-crop-head').allTextContents()).join(' ')).toContain('482.4K');
+      expect(await overlap.locator('[data-field=visits] .ocr-crop-head').allTextContents()).toHaveLength(2);
+      expect(await overlap.locator('[data-field=visits]').innerText()).toContain('482.5K');
+      await conflictContext.close();
     } finally {
       await browser.close();
       await server.close();

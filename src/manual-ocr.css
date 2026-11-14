@@ -21,7 +21,7 @@
   margin: 4px 0 8px;
 }
 .ocr-eyebrow {
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.12em;
   color: var(--muted);
   font-weight: 650;
@@ -70,7 +70,7 @@
   height: 22px;
   border: 1px solid var(--axis);
   border-radius: 50%;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-steps [aria-current] {
   color: var(--ink);
@@ -91,7 +91,7 @@
   margin: 0;
 }
 .ocr-local-badge {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--up);
   white-space: nowrap;
 }
@@ -117,7 +117,7 @@
 }
 .ocr-upload .note {
   margin: 4px 0 12px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .manual-import .ocr-upload input[type="file"] {
   max-width: 100%;
@@ -127,7 +127,7 @@
   padding: 0;
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-upload input::file-selector-button {
   border: 1px solid var(--axis);
@@ -175,14 +175,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-file span {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-progress {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   margin: 12px 24px;
 }
@@ -206,7 +206,7 @@
   border: 1px solid var(--grid);
   border-radius: 6px;
   padding: 4px 9px;
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
   color: var(--ink-2);
 }
@@ -215,7 +215,7 @@
   border-left: 2px solid var(--accent);
   padding: 9px 14px;
   background: var(--ocr-accent-wash);
-  font-size: 12px;
+  font-size: 13px;
   border-radius: 0 6px 6px 0;
 }
 .ocr-notices summary {
@@ -257,7 +257,7 @@
 .ocr-panel-head .note,
 .ocr-selection-count {
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
 }
 .ocr-image-tabs {
@@ -268,7 +268,7 @@
 .ocr-image-tabs button {
   min-height: 32px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: 13px;
   background: transparent;
 }
 .ocr-image-tabs button[aria-pressed="true"] {
@@ -278,7 +278,7 @@
 }
 .ocr-image-caption {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   margin: 6px 0 10px;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -288,7 +288,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: 13px;
   margin: 0 0 10px;
   color: var(--muted);
 }
@@ -301,7 +301,7 @@
 .ocr-view-controls button {
   min-height: 30px;
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: 13px;
   background: transparent;
 }
 .ocr-image-viewport {
@@ -312,7 +312,6 @@
   border-radius: 8px;
   background: #e8edf1;
   scrollbar-gutter: stable;
-  overscroll-behavior: contain;
 }
 .ocr-image-stage {
   position: relative;
@@ -353,27 +352,26 @@
 }
 .ocr-focus-label {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   margin: 10px 0 0;
   min-height: 18px;
 }
 .ocr-results {
   overflow: auto;
-  overscroll-behavior: contain;
   scrollbar-gutter: stable;
   border-left: 1px solid var(--axis);
   padding: 16px;
 }
 .ocr-results-hint {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   margin: 0 0 12px;
 }
 .ocr-field-group + .ocr-field-group {
   margin-top: 22px;
 }
 .ocr-field-group > h4 {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -432,11 +430,11 @@
   border: 0;
   min-height: 28px;
   padding: 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-missing {
   color: var(--accent);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-field-values {
   display: flex;
@@ -470,7 +468,7 @@
   white-space: pre;
 }
 .ocr-edit-value input::placeholder {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
 }
 .ocr-unit {
@@ -482,17 +480,17 @@
 }
 .ocr-previous {
   flex: 0 1 40%;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   white-space: pre-line;
   overflow-wrap: anywhere;
 }
 .ocr-field-status {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .ocr-field-row:not(.is-selected) .ocr-field-status {
-  color: var(--accent);
+  color: var(--muted);
 }
 .manual-import [data-review] > .ocr-review-footer {
   margin: 0;
@@ -503,7 +501,7 @@
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.7;
   cursor: pointer;
 }
@@ -517,16 +515,16 @@
 }
 .ocr-review-actions .note {
   margin: 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .ocr-help {
   padding: 14px 24px;
   border-top: 1px solid var(--grid);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-help p {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .manual-form-title {
   margin: 24px 0 18px;
@@ -597,7 +595,7 @@
   .ocr-steps {
     gap: 12px;
     padding: 12px 16px;
-    font-size: 12px;
+    font-size: 13px;
   }
   .ocr-steps li {
     gap: 5px;
@@ -625,7 +623,7 @@
 .ocr-section-nav button {
   min-height: 32px;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: 13px;
   background: transparent;
   border-color: var(--grid);
 }
@@ -648,7 +646,7 @@
   background: transparent;
   border: 0;
   color: var(--accent);
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
 }
 @media (max-width: 760px) {
@@ -670,7 +668,7 @@
   flex: none;
   padding: 6px 10px;
   min-height: 44px;
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-file-decision {
   margin: 16px 24px;
@@ -696,7 +694,7 @@
 .ocr-inline-evidence > span {
   display: block;
   padding: 4px 8px;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   background: var(--surface);
 }
@@ -767,9 +765,7 @@
   .ocr-file-decision {
     margin-inline: 16px;
   }
-  .ocr-field-status,
-  .ocr-previous,
-  .ocr-confirmation {
+  .ocr-previous {
     font-size: 13px;
   }
 }
@@ -787,7 +783,7 @@
 .ocr-selection-tools button {
   min-height: 36px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: 13px;
   background: transparent;
 }
 @media (max-width: 760px) {
@@ -822,7 +818,7 @@
 .ocr-group-note,
 .ocr-country-hint {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted);
   margin: 4px 0 8px;
 }
@@ -853,7 +849,7 @@
 .ocr-full-image {
   display: block;
   margin: 4px 8px;
-  font-size: 12px;
+  font-size: 13px;
   min-height: 36px;
   padding: 4px 8px;
 }
@@ -983,7 +979,7 @@
     border-radius: 8px;
     background: var(--surface);
     box-shadow: 0 3px 12px rgb(0 0 0 / 18%);
-    font-size: 12px;
+    font-size: 13px;
   }
   .ocr-review-shortcut button {
     min-height: 44px;
@@ -1021,7 +1017,7 @@
   padding: 2px 6px;
   background: var(--surface);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
 }
 .ocr-crop-head .ocr-full-image {
   flex: none;
@@ -1035,8 +1031,67 @@
   width: max(100%, 900px);
 }
 .ocr-dialog-hint {
-  font-size: 12px;
+  font-size: 13px;
   margin: 0;
   padding: 6px 12px;
   color: var(--muted);
+}
+
+/* Action, source location, and blocking errors use distinct cues. */
+.manual-workspace :is(button, input, textarea, select):focus-visible,
+.manual-workspace :is([tabindex="-1"]):focus-visible {
+  outline: 2px solid light-dark(#1d4ed8, #93c5fd);
+  outline-offset: 3px;
+}
+.ocr-field-row.has-error .ocr-field-status,
+.ocr-field-row.has-error:not(.is-selected) .ocr-field-status,
+.ocr-field-row.has-error.is-missing .ocr-field-status {
+  color: light-dark(#b91c1c, #fca5a5);
+}
+.ocr-field-row.has-error {
+  border-color: light-dark(#b91c1c, #fca5a5);
+}
+.ocr-source-caption {
+  color: var(--muted);
+  font-size: 13px;
+}
+.ocr-view-controls {
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ocr-view-controls button {
+  min-height: 36px;
+}
+.ocr-partial-confirmation {
+  font-size: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid light-dark(#a16207, #eab308);
+  border-radius: 6px;
+  color: var(--ink);
+}
+.ocr-partial-confirmation input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 3px;
+}
+.ocr-save-warning {
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid light-dark(#b91c1c, #fca5a5);
+  border-radius: 8px;
+}
+.ocr-save-warning p {
+  margin-top: 0;
+}
+.ocr-save-warning button {
+  margin: 4px 8px 4px 0;
+}
+.ocr-partial-confirmation[hidden],
+.ocr-save-warning[hidden] {
+  display: none;
 }

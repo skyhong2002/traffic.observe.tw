@@ -206,7 +206,7 @@ describe('Similarweb screenshot extraction', () => {
     expect(merged.countryContexts).toHaveLength(1);
     expect(merged.fields.taiwan).toBeUndefined();
   });
-  it('retains original image coordinates for values and drops sources for conflicting fields', () => {
+  it('keeps conflicting image regions as uncertain evidence without selecting a value', () => {
     const first = parseScreenshot(fixture('s3-geography-telegram'), true);
     const region = first.sources?.taiwan[0];
     expect(region).toMatchObject({ value: '93.23', x: 70, y: 98 });
@@ -217,6 +217,7 @@ describe('Similarweb screenshot extraction', () => {
     const result = mergeScreenshots([first, conflicting]);
     expect(result.fields.taiwan).toBeUndefined();
     expect(result.sources?.taiwan).toBeUndefined();
+    expect(result.uncertainSources?.taiwan.map((region) => region.value)).toEqual(['93.23', '92.23']);
     expect(result.sources?.desktop_Direct).toHaveLength(2);
   });
   it('skips country retries for complete tables, absent tables and restricted device scopes', async () => {

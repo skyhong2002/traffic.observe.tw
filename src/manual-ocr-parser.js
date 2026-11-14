@@ -22,6 +22,7 @@ const countries = {
   Netherlands: 'NL',
   'New Zealand': 'NZ',
 };
+export const screenshotCountryCodes = { ...countries, 台灣: 'TW' };
 export const screenshotFields = {
   visits: '月造訪量',
   taiwan: '台灣占比',
@@ -403,6 +404,8 @@ export function mergeScreenshots(results) {
     const contexts = results.flatMap((r) => r.countryContexts || []);
     if (contexts.length) result.countryContexts = contexts;
     const uncertain = {};
+    for (const source of results)
+      for (const [key, regions] of Object.entries(source.sources || {})) if (conflicts.has(key)) (uncertain[key] ||= []).push(...regions);
     for (const source of results)
       for (const [key, regions] of Object.entries(source.uncertainSources || {})) {
         if (fields[key] === undefined) (uncertain[key] ||= []).push(...regions);
