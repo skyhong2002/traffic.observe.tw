@@ -890,7 +890,7 @@
 }
 .ocr-dialog-image img {
   display: block;
-  width: max(100%, 650px);
+  width: 100%;
   max-width: none;
   height: auto;
   margin-inline: auto;
@@ -1029,4 +1029,14 @@
   background: transparent;
   border: 0;
   color: var(--accent);
+}
+
+.ocr-dialog-image img.is-zoomed {
+  width: max(100%, 900px);
+}
+.ocr-dialog-hint {
+  font-size: 12px;
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--muted);
 }

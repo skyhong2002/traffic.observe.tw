@@ -582,13 +582,29 @@ function showReview(result) {
       const toolbar = text('div', '', 'ocr-dialog-toolbar');
       const close = text('button', '返回' + screenshotFields[choice.key] + '補正');
       close.type = 'button';
-      toolbar.append(text('strong', '截圖 ' + (index + 1) + ' · ' + images[index].file.name), close);
+      const enlarge = text('button', '放大原圖');
+      enlarge.type = 'button';
+      enlarge.setAttribute('aria-pressed', 'false');
+      toolbar.append(text('strong', '截圖 ' + (index + 1) + ' · ' + images[index].file.name), enlarge, close);
       const img = new Image();
       img.src = images[index].url;
       img.alt = '完整來源截圖 ' + (index + 1);
       const body = text('div', '', 'ocr-dialog-image');
       body.append(img);
-      dialog.append(toolbar, body);
+      const panHint = text('p', '放大後可左右捲動，查看原圖文字與數值。', 'ocr-dialog-hint');
+      enlarge.addEventListener('click', () => {
+        const expanded = img.classList.toggle('is-zoomed');
+        enlarge.setAttribute('aria-pressed', String(expanded));
+        enlarge.textContent = expanded ? '符合寬度' : '放大原圖';
+        const region = regionsFor(choice.key).find((r) => r.image === index);
+        requestAnimationFrame(() => {
+          body.scrollLeft =
+            expanded && region ? Math.max(0, ((region.x + region.w) / images[index].width) * img.clientWidth - body.clientWidth + 16) : 0;
+          body.scrollTop =
+            expanded && region ? Math.max(0, (region.y / images[index].height) * img.clientHeight - body.clientHeight * 0.2) : 0;
+        });
+      });
+      dialog.append(toolbar, panHint, body);
       review.append(dialog);
       close.addEventListener('click', () => dialog.close());
       dialog.addEventListener('close', () => {
