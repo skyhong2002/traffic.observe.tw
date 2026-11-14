@@ -22,3 +22,13 @@ United States 2.13% and Affiliate 4.67%, yielding 213% and 467%. The browser
 test re-reads actual enlarged numeric crops, recovering all five countries and
 ten desktop channels; it also imports this second image by itself, preserves
 drafts, then fills engagement from the first image. No cloud OCR is used.
+
+`s3-geography-compressed.jpg` derives from the same supplied geography PNG,
+resized to 65% (428×832) with browser canvas and encoded as JPEG quality 0.8.
+Its TSV uses the importer's 2x enlargement and sparse-text mode (PSM 11).
+This transformation reproduces the reported omission: 93.23% remains visible
+but the Taiwan label disappears from the first OCR pass. A second full-image
+reading with PSM 6 recovers Taiwan. The browser regression verifies the actual
+JPEG, on a fresh tab without a draft, as well as both original screenshots in
+engagement-first order. Only country shares merge across segmentation modes;
+conflicting values are omitted and no remainder calculation supplies Taiwan.

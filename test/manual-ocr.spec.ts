@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseManualChannels, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
-import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers } from '../src/manual-ocr-parser.js';
+import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, reviewScreenshotCountries } from '../src/manual-ocr-parser.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/manual-ocr/${name}.tsv`, import.meta.url), 'utf8');
 describe('Similarweb screenshot extraction', () => {
@@ -133,6 +133,54 @@ describe('Similarweb screenshot extraction', () => {
       return '';
     });
     expect(retries).toBe(0);
+  });
+  it('recovers a missing country label from a second reading without replacing recognized rows', async () => {
+    const tsv = fixture('s3-geography-compressed');
+    const primary = parseScreenshot(tsv);
+    expect(primary.fields.taiwan).toBeUndefined();
+    const secondary = parseScreenshot(fixture('s3-geography'));
+    const result = await reviewScreenshotCountries(tsv, primary, async () => secondary);
+    expect(result.fields.taiwan).toBe('93.23');
+    expect(result.fields.countries).toContain('TW 93.23');
+    expect(result.fields.countries).toContain('HK 1.59');
+    expect(result.fields.desktop_SearchOrganic).toBe(primary.fields.desktop_SearchOrganic);
+    expect(result.months).toEqual(primary.months);
+  });
+  it('does not invent missing countries and drops conflicting or impossible supplementary shares', async () => {
+    const tsv = fixture('s3-geography-compressed');
+    const primary = { fields: { countries: 'US 2.13\nHK 1.59', desktop_Direct: '13.09' }, months: [], warnings: [] };
+    const empty = { fields: {}, months: [], warnings: [] };
+    const missing = await reviewScreenshotCountries(tsv, primary, async () => empty);
+    expect(missing.fields.taiwan).toBeUndefined();
+    expect(missing.fields.countries).toBe(primary.fields.countries);
+    expect(missing.warnings.join(' ')).toContain('漏辨識');
+    const conflict = await reviewScreenshotCountries(tsv, primary, async () => ({
+      ...empty,
+      fields: { countries: 'TW 93.23\nUS 2.18\nHK 1.590' },
+    }));
+    expect(conflict.fields.countries).toBe('TW 93.23\nHK 1.590');
+    expect(conflict.fields.desktop_Direct).toBe('13.09');
+    expect(conflict.warnings.join(' ')).toContain('不一致');
+    const impossible = await reviewScreenshotCountries(tsv, primary, async () => ({
+      ...empty,
+      fields: { countries: 'TW 99.23' },
+    }));
+    expect(impossible.fields.countries).toBeUndefined();
+    expect(impossible.fields.taiwan).toBeUndefined();
+    expect(impossible.warnings.join(' ')).toContain('超過 100%');
+  });
+  it('skips country retries for complete tables, absent tables and restricted device scopes', async () => {
+    let attempts = 0;
+    for (const tsv of [fixture('engagement'), fixture('channels'), fixture('extension-geography').replace(/\t1143\t/g, '\t10\t')]) {
+      const primary = parseScreenshot(tsv);
+      expect(
+        await reviewScreenshotCountries(tsv, primary, async () => {
+          attempts++;
+          return primary;
+        }),
+      ).toBe(primary);
+    }
+    expect(attempts).toBe(0);
   });
   it('requires an explicit all-traffic scope for extension source lists and preserves explicit zeroes', () => {
     const input = fixture('extension-geography');

@@ -1,4 +1,4 @@
-import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, screenshotFields } from './parser.js';
+import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, reviewScreenshotCountries, screenshotFields } from './parser.js';
 
 const host = document.getElementById('manual-import');
 const fileInput = host.querySelector('input[type=file]');
@@ -81,6 +81,38 @@ async function imageCanvas(file) {
     return canvas;
   } finally {
     URL.revokeObjectURL(url);
+  }
+}
+
+async function recognizeCanvas(canvas, worker, mode) {
+  await worker.setParameters({ tessedit_pageseg_mode: mode, tessedit_char_whitelist: '' });
+  try {
+    const { data } = await worker.recognize(canvas, {}, { text: true, tsv: true });
+    await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.%<>≤≥' });
+    const refined = await refineScreenshotNumbers(data.tsv || '', async ({ x, y, w, h }) => {
+      const padding = h * 0.4;
+      const left = Math.max(0, x - padding),
+        top = Math.max(0, y - padding);
+      const width = Math.min(canvas.width - left, w + padding * 2),
+        height = Math.min(canvas.height - top, h + padding * 2);
+      const crop = document.createElement('canvas');
+      crop.width = Math.round(width * 2);
+      crop.height = Math.round(height * 2);
+      try {
+        const context = crop.getContext('2d');
+        context.fillStyle = '#fff';
+        context.fillRect(0, 0, crop.width, crop.height);
+        context.drawImage(canvas, left, top, width, height, 0, 0, crop.width, crop.height);
+        const { data } = await worker.recognize(crop, {}, { tsv: true });
+        return data.tsv || '';
+      } finally {
+        crop.width = 0;
+        crop.height = 0;
+      }
+    });
+    return refined;
+  } finally {
+    await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: '' });
   }
 }
 function showReview(result) {
@@ -189,32 +221,12 @@ recognize.addEventListener('click', async () => {
       progress.textContent = '正在辨識第 ' + (i + 1) + '／' + files.length + ' 張截圖…';
       const canvas = await imageCanvas(files[i]);
       try {
-        const { data } = await worker.recognize(canvas, {}, { text: true, tsv: true });
-        progress.textContent = '正在複核第 ' + (i + 1) + '／' + files.length + ' 張截圖的百分比…';
-        await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.%<>≤≥' });
-        const refined = await refineScreenshotNumbers(data.tsv || '', async ({ x, y, w, h }) => {
-          const padding = h * 0.4;
-          const left = Math.max(0, x - padding),
-            top = Math.max(0, y - padding);
-          const width = Math.min(canvas.width - left, w + padding * 2),
-            height = Math.min(canvas.height - top, h + padding * 2);
-          const crop = document.createElement('canvas');
-          crop.width = Math.round(width * 2);
-          crop.height = Math.round(height * 2);
-          try {
-            const context = crop.getContext('2d');
-            context.fillStyle = '#fff';
-            context.fillRect(0, 0, crop.width, crop.height);
-            context.drawImage(canvas, left, top, width, height, 0, 0, crop.width, crop.height);
-            const { data } = await worker.recognize(crop, {}, { tsv: true });
-            return data.tsv || '';
-          } finally {
-            crop.width = 0;
-            crop.height = 0;
-          }
+        const tsv = await recognizeCanvas(canvas, worker, '11');
+        const result = await reviewScreenshotCountries(tsv, parseScreenshot(tsv), async () => {
+          progress.textContent = '正在複核第 ' + (i + 1) + '／' + files.length + ' 張截圖的國家表…';
+          return parseScreenshot(await recognizeCanvas(canvas, worker, '6'));
         });
-        await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: '' });
-        results.push(parseScreenshot(refined));
+        results.push(result);
       } finally {
         canvas.width = 0;
         canvas.height = 0;

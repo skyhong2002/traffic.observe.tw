@@ -8,5 +8,10 @@ export function refineScreenshotNumbers(
   tsv: string,
   recognize: (region: { x: number; y: number; w: number; h: number }) => Promise<string>,
 ): Promise<string>;
+export function reviewScreenshotCountries(
+  tsv: string,
+  primary: ScreenshotResult,
+  recognize: () => Promise<ScreenshotResult>,
+): Promise<ScreenshotResult>;
 export function parseScreenshot(tsv: string): ScreenshotResult;
 export function mergeScreenshots(results: ScreenshotResult[]): ScreenshotResult;

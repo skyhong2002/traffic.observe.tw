@@ -122,6 +122,54 @@ export async function refineScreenshotNumbers(tsv, recognize) {
   return lines.join('\n');
 }
 
+/** Re-read incomplete country tables with another segmentation mode. Never infer a country from a remainder. */
+export async function reviewScreenshotCountries(tsv, primary, recognize) {
+  const rows = rowsOf(tsv);
+  const heading = rows.find((r) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b|^Country$/i.test(r.text));
+  if (!heading) return primary;
+  const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
+  if (rows.some((r) => /\b(?:Desktop|Mobile)\b/i.test(r.text) && (!sources || r.center <= sources.center))) return primary;
+  const end = rows.find((r) => r.center > heading.center && /\bSee\s*more\s*countries\b|\bTraffic\s*Sources\b/i.test(r.text));
+  const table = rows.filter((r) => r.center > heading.center && (!end || r.center < end.center));
+  const expected = table.filter((r) => r.words.some((w) => /^\d+(?:\.\d+)?%$/.test(w.text))).length;
+  const sharesOf = (result) =>
+    (result.fields.countries || '')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => line.split(' '));
+  const initial = sharesOf(primary);
+  if (initial.length >= 5 && initial.length >= expected) return primary;
+  const secondary = await recognize();
+  const shares = new Map(),
+    conflicts = new Set();
+  for (const [code, value] of [...initial, ...sharesOf(secondary)]) {
+    if (conflicts.has(code)) continue;
+    if (shares.has(code) && Number(shares.get(code)) !== Number(value)) {
+      shares.delete(code);
+      conflicts.add(code);
+    } else shares.set(code, value);
+  }
+  const fields = { ...primary.fields };
+  const warnings = primary.warnings.filter(
+    (warning) => !Object.entries(countries).some(([name, code]) => shares.has(code) && warning.startsWith(`國家占比（${name}）`)),
+  );
+  for (const code of conflicts) warnings.push(`國家占比（${code}）兩次辨識數值不一致，請手動核對。`);
+  if ([...shares.values()].reduce((sum, value) => sum + Number(value), 0) > 100.1) {
+    shares.clear();
+    warnings.push('兩次辨識的國家占比合計超過 100%，請手動核對。');
+  }
+  delete fields.countries;
+  delete fields.taiwan;
+  if (shares.size)
+    fields.countries = [...shares]
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .map(([code, value]) => `${code} ${value}`)
+      .join('\n');
+  if (shares.has('TW')) fields.taiwan = shares.get('TW');
+  if (shares.size < expected) warnings.push('國家表仍有漏辨識，請核對台灣占比與國家列表，缺少的資料可手動補上。');
+  return { ...primary, fields, warnings: [...new Set(warnings)] };
+}
+
 export function parseScreenshot(tsv) {
   let rows = rowsOf(tsv);
   const fields = {},

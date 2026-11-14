@@ -108,6 +108,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography.png', import.meta.url)));
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).count()).toBe(1);
       expect(await page.locator('[data-review]').innerText()).toContain('93.23');
       expect(await page.locator('[data-review]').innerText()).toContain('38.72');
       expect(await page.locator('[data-review]').innerText()).toContain('4.67');
@@ -134,6 +135,29 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.reload();
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
       expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
+      // Fresh tabs avoid drafts masking an omitted country. Test the normal
+      // engagement-first order and the compressed image that loses the Taiwan label.
+      for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg']]) {
+        const fresh = await context.newPage();
+        fresh.on('pageerror', (e) => errors.push(e.message));
+        await fresh.goto(origin + '/site/s3.com.tw/manual/');
+        expect(await fresh.locator('#manual-taiwan').inputValue()).toBe('');
+        await fresh
+          .locator('#manual-screenshots')
+          .setInputFiles(names.map((name) => fileURLToPath(new URL(`./fixtures/manual-ocr/${name}`, import.meta.url))));
+        await fresh.getByRole('button', { name: '辨識截圖', exact: true }).click();
+        await fresh.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+        expect(await fresh.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(true);
+        await fresh.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+        await fresh.getByRole('button', { name: '填入勾選欄位' }).click();
+        expect(await fresh.locator('#manual-taiwan').inputValue()).toBe('93.23');
+        expect(await fresh.locator('#manual-countries').inputValue()).toContain('TW 93.23');
+        if (names.length === 2) {
+          expect(await fresh.locator('#manual-visits').inputValue()).toBe('482.4K');
+          expect(await fresh.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+        }
+        await fresh.close();
+      }
       expect(external).toEqual([]);
       expect(errors).toEqual([]);
       // An interrupted model download must leave the form editable and allow retry.
