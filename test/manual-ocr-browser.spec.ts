@@ -97,14 +97,58 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByRole('checkbox', { name: '填入桌面限定・直接造訪', exact: true }).isChecked()).toBe(true);
       expect(await page.getByRole('checkbox', { name: '填入直接造訪', exact: true }).count()).toBe(0);
       expect(await page.locator('#manual-visits').inputValue()).toBe('');
+      // Readiness must reflect edited values before the user attempts Fill.
+      for (const [key, invalid, valid] of [
+        ['taiwan', '101', '97.02'],
+        ['taiwan', 'abc', '97.02'],
+        ['visits', 'abc', '416.5K'],
+        ['pages', '0', '3.34'],
+        ['duration', '00:99:00', '00:05:40'],
+      ]) {
+        await page.locator('#ocr-edit-' + key).fill(invalid);
+        expect(await page.locator('#ocr-edit-' + key).getAttribute('aria-invalid')).toBe('true');
+        expect(await page.locator('.ocr-count').innerText()).not.toContain('數值疑點 0');
+        expect(await page.locator('.ocr-preflight').innerText()).not.toContain('處理此欄的提示');
+        expect(await page.locator('#ocr-apply-status').innerText()).not.toContain('個欄位將填入');
+        await page.locator('#ocr-edit-' + key).fill(valid);
+        expect(await page.locator('#ocr-edit-' + key).getAttribute('aria-invalid')).toBeNull();
+      }
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#manual-visits').inputValue()).toBe('416.5K');
+      const visitsSource = page.locator('.field:has(#manual-visits) .ocr-form-source');
+      await page.locator('#manual-visits').fill('500K');
+      expect(await page.locator('#manual-visits').getAttribute('data-ocr-filled')).toBeNull();
+      expect(await visitsSource.innerText()).toContain('已手動修改');
+      await visitsSource.click();
+      expect(await page.locator('#ocr-status-visits').innerText()).toContain('表單目前：500K');
+      await page.locator('#manual-visits').fill('416.5K');
+      expect(await page.locator('#manual-visits').getAttribute('data-ocr-filled')).toBe('true');
+      expect(await visitsSource.innerText()).not.toContain('已手動修改');
       expect(await page.locator('#manual-pages').inputValue()).toBe('3.34');
+      await page.evaluate(`window.unexpectedSubmits = 0;
+        document.querySelector('.manual-form').addEventListener('submit', event => {
+          event.preventDefault(); window.unexpectedSubmits++;
+        }, true);`);
+      expect(await page.evaluate("document.querySelector('.manual-form').checkValidity()")).toBe(true);
+      await page.locator('.manual-form .ocr-country-helper summary').click();
+      await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('Japan');
+      await page.keyboard.press('Enter');
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('表單新增國家占比');
+      await page.getByLabel('表單新增國家占比', { exact: true }).fill('0.01');
+      await page.keyboard.press('Enter');
+      expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.01');
+      await page.getByLabel('表單國家列表・台灣占比', { exact: true }).focus();
+      await page.keyboard.press('Enter');
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('表單國家列表・美國占比');
+      expect(await page.evaluate('window.unexpectedSubmits')).toBe(0);
+      await page.getByLabel('表單國家列表・日本占比', { exact: true }).fill('0.3');
       expect(await page.locator('#manual-duration').inputValue()).toBe('00:05:40');
       expect(await page.locator('#manual-bounce').inputValue()).toBe('44.43');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('97.02');
-      expect(await page.locator('#manual-countries').inputValue()).toContain('TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3');
+      expect((await page.locator('#manual-countries').inputValue()).split('\n')).toEqual(
+        expect.arrayContaining(['TW 97.02', 'US 1.76', 'HK 0.73', 'JP 0.3']),
+      );
       expect(await page.locator('#manual-desktop_Direct').inputValue()).toBe('60.69');
       await page.locator('.ocr-review-actions').getByRole('button', { name: '前往表單儲存 ↓', exact: true }).click();
       expect(await page.evaluate('document.activeElement?.id')).toBe('manual-visits');
@@ -208,7 +252,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-countries').inputValue()).not.toContain('JP');
       await page.getByRole('button', { name: '復原移除日本', exact: true }).click();
       expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.1');
-      await page.getByRole('button', { name: '移除表單國家列表中的日本', exact: true }).click();
+      await page.getByLabel('表單國家列表・日本占比', { exact: true }).fill('0.3');
       // Fresh tabs avoid drafts masking an omitted country. Test the normal
       // engagement-first order and the compressed image that loses the Taiwan label.
       for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg'], ['s3-geography-telegram.jpg']]) {
@@ -671,14 +715,14 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         el.value = 'HK 1.6\nJP 0.1';
         el.dispatchEvent(new Event('input', { bubbles: true }));
       });
-      await page.getByRole('button', { name: '帶入已讀到的 4 個國家，繼續補正', exact: true }).click();
+      await page.getByRole('button', { name: '補入 3 個已讀國家，保留現有值', exact: true }).click();
       expect(await page.locator('#manual-countries').inputValue()).toContain('HK 1.6');
       expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.1');
       expect(await page.locator('.ocr-partial-repair').innerText()).toContain('已有國家的草稿值已保留');
       await page.getByLabel('表單國家列表・馬來西亞占比', { exact: true }).fill('0.6');
       await page.getByRole('button', { name: '復原這次帶入的國家', exact: true }).click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('HK 1.6\nJP 0.1\nMY 0.6');
-      await page.getByRole('button', { name: '帶入已讀到的 4 個國家，繼續補正', exact: true }).click();
+      await page.getByRole('button', { name: '補入 2 個已讀國家，保留現有值', exact: true }).click();
       expect(await page.locator('.ocr-partial-repair canvas').count()).toBeGreaterThan(0);
       await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('United States');
       await page.getByLabel('表單新增國家占比', { exact: true }).fill('2.13');
@@ -737,3 +781,38 @@ it.skipIf(!existsSync(chromium.executablePath()))(
   },
   30000,
 );
+
+it.skipIf(!existsSync(chromium.executablePath()))('retains server Taiwan error semantics until correction', async () => {
+  const server = Fastify();
+  registerManualOcr(server);
+  server.get('/style.css', async (_, reply) => reply.type('text/css').send(STYLE));
+  server.get('/', async (_, reply) =>
+    reply
+      .type('text/html')
+      .send(
+        manualPage(
+          { domain: 's3.com.tw', name: '小三美日' },
+          { months: [], choices: ['202610'], free: [], draft: { taiwan: '93.23' }, error: '請重新確認台灣占比', errorFields: ['taiwan'] },
+        ),
+      ),
+  );
+  const origin = await server.listen({ host: '127.0.0.1', port: 0 });
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.goto(origin);
+    const taiwan = page.locator('#manual-taiwan');
+    expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+    expect((await taiwan.getAttribute('aria-describedby'))?.split(' ')).toContain('manual-error');
+    await page.locator('#manual-visits').fill('500K');
+    expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+    await taiwan.fill('101');
+    expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+    expect(await page.locator('#manual-taiwan-consistency').innerText()).toContain('0–100');
+    await taiwan.fill('93.22');
+    expect(await taiwan.getAttribute('aria-invalid')).toBe('false');
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
