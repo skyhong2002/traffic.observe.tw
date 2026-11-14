@@ -15,7 +15,7 @@ export interface ScreenshotResult {
   sources?: Record<string, ScreenshotSource[]>;
   countryTable?: boolean;
   countryExpectedCount?: number;
-  unmatchedCountries?: { row: number; share: string }[];
+  unmatchedCountries?: { row: number; share: string; image?: number }[];
   uncertainSources?: Record<string, ScreenshotSource[]>;
   countryContexts?: ScreenshotSource[];
 }

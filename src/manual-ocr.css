@@ -950,8 +950,16 @@
   flex: none;
 }
 .manual-import button:disabled {
-  opacity: 0.45;
+  opacity: 1;
+  color: var(--muted);
+  background: var(--surface);
+  border-color: var(--axis);
   cursor: default;
+}
+.manual-form:has(#manual-visits:placeholder-shown) .manual-save-bar button.primary {
+  color: var(--ink);
+  background: var(--surface);
+  border-color: var(--axis);
 }
 @media (max-width: 760px) {
   .ocr-upload-target {
@@ -1513,9 +1521,23 @@
 }
 
 .ocr-cross-warning {
-  color: #ffd08a;
+  color: #ff8d9b;
   margin: 8px 0 0;
   font-size: 14px;
+}
+.ocr-cross-warning p {
+  margin: 0 0 8px;
+}
+.ocr-cross-warning button {
+  margin: 4px 8px 0 0;
+  min-height: 44px;
+}
+.ocr-start-review[hidden] {
+  display: none;
+}
+.ocr-country-rows:has(~ .ocr-country-raw [data-ocr-filled]) input {
+  border-color: #ad672e;
+  background: #2d241e;
 }
 .ocr-cross-warning[hidden] {
   display: none;

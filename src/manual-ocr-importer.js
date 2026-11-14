@@ -21,6 +21,11 @@ const text = (tag, value, className = '') => {
   node.className = className;
   return node;
 };
+const describe = (control, ...ids) =>
+  control.setAttribute(
+    'aria-describedby',
+    [...new Set([control.getAttribute('aria-describedby'), ...ids].filter(Boolean).join(' ').split(/\s+/))].join(' '),
+  );
 function createCountryHelper(getTarget, onSelect = () => {}, prefix = '') {
   const countryHelper = document.createElement('details');
   countryHelper.className = 'ocr-country-helper';
@@ -157,12 +162,11 @@ const formTaiwan = form.elements.namedItem('taiwan');
 const formCountryWarning = text('p', '', 'ocr-cross-warning');
 formCountryWarning.setAttribute('role', 'status');
 formCountryWarning.id = 'manual-country-consistency';
-formTaiwan.setAttribute('aria-describedby', 'manual-country-consistency');
 formCountryRaw.after(formCountryWarning);
 const formTaiwanWarning = text('p', '', 'ocr-cross-warning');
 formTaiwanWarning.id = 'manual-taiwan-consistency';
-formTaiwan.after(formTaiwanWarning);
-formTaiwan.setAttribute('aria-describedby', formTaiwanWarning.id);
+formTaiwan.closest('.input-unit').after(formTaiwanWarning);
+describe(formTaiwan, formTaiwanWarning.id);
 function renderFormCountries() {
   const names = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
   const listedTw = /^TW\s+(\d+(?:\.\d+)?)$/m.exec(formCountries.value);
@@ -1358,7 +1362,7 @@ function showReview(result) {
               const error = text('small', '', 'ocr-country-entry-error');
               error.id = 'review-country-error-' + code;
               error.setAttribute('role', 'status');
-              percentInput.setAttribute('aria-describedby', error.id);
+              describe(percentInput, error.id);
               label.append(error);
               entry = { label, input: percentInput, remove, error, oldValue };
               countryInputs.set(code, entry);
@@ -1425,7 +1429,7 @@ function showReview(result) {
           const unmatched = text('div', '', 'ocr-unmatched-countries');
           unmatched.append(text('p', '以下原圖列的國家名稱未能對應，請選擇國家；占比已保留。'));
           for (const item of result.unmatchedCountries) {
-            const repair = text('button', '補上原圖第 ' + item.row + ' 列・' + item.share + '% 的國家');
+            const repair = text('button', '補上截圖 ' + ((item.image || 0) + 1) + '・第 ' + item.row + ' 列・' + item.share + '% 的國家');
             repair.type = 'button';
             repair.addEventListener('click', () => {
               if (applied) {
@@ -1479,7 +1483,7 @@ function showReview(result) {
             if (choice.unmatched) choice.unmatched.hidden = !partial;
             choice.coverage = coverage;
             status.textContent = partial
-              ? '列表不完整：' + omissions + '，目前合計 ' + coverage.toFixed(2) + '%。請補齊，或明確確認只填入部分國家。'
+              ? '列表不完整，請補齊漏辨識的國家，或確認僅填入下列部分列表。'
               : '已補齊已知漏辨識的國家，請核對占比。';
           };
           acceptPartial.addEventListener('change', () => {
@@ -1802,8 +1806,16 @@ function showReview(result) {
     }
     const tw = choices.find((choice) => choice.key === 'taiwan');
     const countryList = choices.find((choice) => choice.key === 'countries');
-    const listedTw = /^TW\s+(\d+(?:\.\d+)?)$/m.exec(countryList?.value || '');
-    const mismatch = !applied && tw?.value && listedTw && Number.isFinite(Number(tw.value)) && Number(tw.value) !== Number(listedTw[1]);
+    const nextTaiwan = tw ? (tw.check.checked ? tw.value : tw.before) : before.taiwan;
+    const nextCountries = countryList ? (countryList.check.checked ? countryList.value : countryList.before) : before.countries;
+    const listedTw = /^TW\s+(\d+(?:\.\d+)?)$/m.exec(nextCountries || '');
+    const mismatch =
+      !applied &&
+      /^\d+(?:\.\d+)?$/.test(nextTaiwan || '') &&
+      Number(nextTaiwan) <= 100 &&
+      listedTw &&
+      Number(listedTw[1]) <= 100 &&
+      Number(nextTaiwan) !== Number(listedTw[1]);
     if (tw) {
       tw.crossInvalid = Boolean(mismatch);
       if (mismatch) {
@@ -1813,16 +1825,51 @@ function showReview(result) {
     }
     for (const choice of [tw, countryList].filter(Boolean)) {
       if (!choice.crossWarning) {
-        choice.crossWarning = text('p', '', 'ocr-cross-warning');
-        choice.crossWarning.setAttribute('role', 'status');
-        choice.input.setAttribute('aria-describedby', choice.input.getAttribute('aria-describedby') + ' ocr-cross-' + choice.key);
+        choice.crossWarning = text('div', '', 'ocr-cross-warning');
+        choice.crossText = text('p');
+        choice.crossWarning.append(choice.crossText);
+        if (choice === tw) choice.crossText.setAttribute('role', 'status');
+        describe(choice.input, 'ocr-cross-' + choice.key);
         choice.crossWarning.id = 'ocr-cross-' + choice.key;
         choice.status.after(choice.crossWarning);
+        if (choice === tw) {
+          const useList = text('button', '一併改用截圖國家列表');
+          useList.type = 'button';
+          useList.addEventListener('click', () => {
+            countryList.check.checked = true;
+            countryList.check.dispatchEvent(new Event('change', { bubbles: true }));
+            revealChoice(countryList, false);
+          });
+          const keepTw = text('button', '保留表單台灣占比');
+          keepTw.type = 'button';
+          keepTw.addEventListener('click', () => {
+            tw.check.checked = false;
+            tw.check.dispatchEvent(new Event('change', { bubbles: true }));
+          });
+          choice.crossWarning.append(useList, keepTw);
+          choice.crossActions = { useList, keepTw };
+        } else {
+          const back = text('button', '回到台灣占比修正 ↑');
+          back.type = 'button';
+          back.addEventListener('click', () => revealChoice(tw));
+          choice.crossWarning.append(back);
+        }
       }
       choice.crossWarning.hidden = !mismatch;
-      choice.crossWarning.textContent = mismatch
-        ? '台灣占比 ' + tw.value + '% 與國家列表的台灣 ' + listedTw[1] + '% 不一致，請修正其中一處。'
-        : '';
+      choice.crossText.textContent =
+        mismatch && choice === tw
+          ? (tw.check.checked ? '勾選的台灣占比 ' : '表單保留的台灣占比 ') +
+            nextTaiwan +
+            '% 與' +
+            (countryList?.check.checked ? '勾選的國家列表・台灣 ' : '表單保留的國家列表・台灣 ') +
+            listedTw[1] +
+            '% 不一致。請選擇要採用的資料。'
+          : '';
+      if (choice.crossActions) {
+        choice.crossActions.useList.hidden = !countryList?.value || countryList.check.checked || countryList.needsReview;
+        choice.crossActions.keepTw.textContent = tw.before ? '保留表單台灣占比' : '略過台灣占比';
+        choice.crossActions.keepTw.hidden = !tw.check.checked;
+      }
     }
     const selected = choices.filter((c) => c.check.checked);
     const unresolved = choices.filter((choice) => choice.needsReview || choice.error || choice.crossInvalid);
@@ -1877,7 +1924,7 @@ function showReview(result) {
     preflight.replaceChildren();
     const pending = [];
     for (const choice of choices.filter((entry) => entry.error || entry.crossInvalid || (entry.check.checked && entry.needsReview))) {
-      const message = choice.crossInvalid ? '與國家列表不一致，請修正' : choice.error?.message || '補齊或確認只填部分國家';
+      const message = choice.crossInvalid ? '與國家列表不一致，請選擇採用值' : choice.error ? '處理此欄的提示' : '補齊或確認只填部分國家';
       pending.push([
         message.startsWith(screenshotFields[choice.key]) ? message : screenshotFields[choice.key] + '：' + message,
         () => revealChoice(choice),
@@ -2100,7 +2147,7 @@ function showReview(result) {
       if (choice.countryHelper) choice.countryHelper.hidden = true;
       if (choice.unmatched)
         for (const button of choice.unmatched.querySelectorAll('button'))
-          button.textContent = button.textContent.replace('補上原圖', '到表單補上原圖');
+          button.textContent = button.textContent.replace('補上截圖', '到表單補上截圖');
       if (choice.key === 'countries' && !choice.check.checked && choice.value && choice.needsReview) {
         const repair = text('div', '', 'ocr-partial-repair');
         const retained = choice.value.split('\n').filter(Boolean).length;
@@ -2110,7 +2157,7 @@ function showReview(result) {
         renderEvidence(choice, evidence);
         const repairStatus = text('p', '國家列表尚未填入；可沿用已辨識的部分，再補上缺少的國家。');
         repairStatus.setAttribute('role', 'status');
-        repair.append(repairStatus, evidence, restore);
+        repair.append(evidence, repairStatus, restore);
         restore.addEventListener('click', () => {
           const currentLines = formCountries.value.split('\n').filter(Boolean);
           const currentCodes = new Set(currentLines.map((line) => line.trim().split(/\s+/)[0].toUpperCase()));
@@ -2141,7 +2188,7 @@ function showReview(result) {
           }
           formCountryHelper.open = true;
           formCountryTools.search.focus();
-          formCountryHelper.scrollIntoView({ block: 'center' });
+          repairStatus.scrollIntoView({ block: 'start' });
         });
         formCountries.closest('.field').insertBefore(repair, formCountryHelper);
       }
@@ -2259,6 +2306,7 @@ recognize.addEventListener('click', async () => {
               result.countryContexts || [],
             ])
               for (const region of regions) region.image = i;
+            for (const country of result.unmatchedCountries || []) country.image = i;
             result.warnings = result.warnings.map((warning) => '截圖 ' + (i + 1) + '：' + warning);
             results.push(result);
           } finally {
