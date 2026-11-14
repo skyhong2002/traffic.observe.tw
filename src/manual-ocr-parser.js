@@ -52,6 +52,8 @@ const channels = [
   ['Mail', /\bEmail\b/i],
   ['Affiliate', /\bAffiliates?\b/i],
 ];
+const desktopKey = (key) => 'desktop_' + ({ search: 'SearchOrganic', ai: 'GenAi' }[key] || key);
+for (const [key] of channels) screenshotFields[desktopKey(key)] = '桌面限定・' + screenshotFields[key];
 
 function rowsOf(tsv) {
   const words = tsv
@@ -93,6 +95,33 @@ function phrase(row, pattern) {
 const percent = (word) => /^\d+(?:\.\d+)?%$/.test(word.text) && Number(word.text.slice(0, -1)) <= 100;
 const bounded = (row, word) => row.words.some((w) => /^[<>≤≥]$/.test(w.text) && w.x < word.x && word.x - w.x - w.w < word.h);
 
+/** Re-read uncertain percentages from enlarged image crops, never infer a missing decimal. */
+export async function refineScreenshotNumbers(tsv, recognize) {
+  const lines = tsv.split('\n');
+  let attempts = 0;
+  for (let i = 1; i < lines.length && attempts < 20; i++) {
+    const c = lines[i].split('\t');
+    const value = c.slice(11).join('\t').trim();
+    if (c[0] !== '5' || !/^\d+(?:\.\d+)?%$/.test(value) || (+c[10] >= 80 && Number(value.slice(0, -1)) <= 100)) continue;
+    const region = { x: +c[6], y: +c[7], w: +c[8], h: +c[9] };
+    if (!Object.values(region).every(Number.isFinite) || region.w <= 0 || region.h <= 0) continue;
+    attempts++;
+    const retry = await recognize(region);
+    const words = retry
+      .split('\n')
+      .map((line) => line.split('\t'))
+      .filter((word) => word[0] === '5' && word[11]?.trim());
+    if (words.length !== 1) continue;
+    const candidate = words[0][11].trim();
+    if (+words[0][10] >= 80 && percent({ text: candidate }) && candidate.replace('.', '') === value.replace('.', '')) {
+      c[10] = words[0][10];
+      c[11] = candidate;
+      lines[i] = c.join('\t');
+    }
+  }
+  return lines.join('\n');
+}
+
 export function parseScreenshot(tsv) {
   let rows = rowsOf(tsv);
   const fields = {},
@@ -108,18 +137,23 @@ export function parseScreenshot(tsv) {
     ))
     months.add(match[2] + String(monthNames.indexOf(match[1].slice(0, 3).toLowerCase()) + 1).padStart(2, '0'));
   const deviceRows = rows.filter((r) => /\b(?:Desktop|Mobile)\s*(?:Web|traffic|only)?\b/i.test(r.text));
+  const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
+  const sourceRows = sources ? rows.filter((r) => r.center > sources.center) : [];
+  const sourceScope = sourceRows.map((r) => r.text).join('\n');
+  const desktopSources = /\bWorldwide\b/i.test(sourceScope) && /\bDesktop\s*Only\b/i.test(sourceScope) && !/\bMobile\b/i.test(sourceScope);
   if (deviceRows.length) {
-    const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
-    const geography = rows.find((r) => /\bTop\s*5\s*Countries\b/i.test(r.text));
-    // The extension's country card is separate from its Desktop Only source
-    // card. Keep the former only when the device filter is clearly below it.
-    if (sources && geography && geography.center < sources.center && deviceRows.every((r) => r.center > sources.center)) {
-      rows = rows.filter((r) => r.center < sources.center);
-      warnings.push('流量來源為 Desktop Only／Mobile Only，已略過該區塊；上方國家資料仍可核對填入。');
-    } else {
+    if (!sources || deviceRows.some((r) => r.center <= sources.center)) {
       return { fields, months: [...months], warnings: ['這張截圖顯示 Desktop 或 Mobile 範圍，請改用 Worldwide／All traffic 截圖。'] };
     }
+    warnings.push(
+      desktopSources
+        ? 'Desktop Only 流量來源將填入獨立的「桌面限定」欄位，不會覆寫全裝置渠道或換算全裝置造訪次數。'
+        : '流量來源未能確認為 Worldwide／Desktop Only 或 All traffic，已略過該區塊；上方國家資料仍可核對填入。',
+    );
   }
+  // A source card has its own device filter; it must never set the scope of
+  // engagement metrics or the independent (possibly title-cropped) country card.
+  if (sources) rows = rows.filter((r) => r.center < sources.center);
   const usableText = rows.map((r) => r.text).join('\n');
   if (!/\bWorldwide\b/i.test(usableText) || !/\bAll\s*traffic\b/i.test(usableText))
     warnings.push('截圖未完整辨識出 Worldwide／All traffic，請核對範圍。');
@@ -150,14 +184,17 @@ export function parseScreenshot(tsv) {
     }
   }
   const countryShares = [];
-  const geography = rows.find((r) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b/i.test(r.text));
+  const geography = rows.find((r) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b|^Country$/i.test(r.text));
   const geographyEnd = rows.find((r) => geography && r.center > geography.center && /\bSee\s*more\s*countries\b/i.test(r.text));
   for (const row of geography ? rows.filter((r) => r.center > geography.center && (!geographyEnd || r.center < geographyEnd.center)) : []) {
     for (const [name, code] of Object.entries(countries)) {
       const label = phrase(row, new RegExp(`\\b${name}\\b`, 'i'));
       if (!label) continue;
       const value = row.words.find((w) => w.x > label.right && percent(w));
-      if (!value) continue;
+      if (!value) {
+        warnings.push(`國家占比（${name}）未能確定數值，請手動核對。`);
+        continue;
+      }
       if (value.confidence < 80 || bounded(row, value)) {
         warnings.push(`國家占比（${name}）不夠清楚或含有界限，請手動核對。`);
         continue;
@@ -193,17 +230,16 @@ export function parseScreenshot(tsv) {
       });
       break;
     }
-  const sources = rows.find((r) => /\bTraffic\s*Sources\b/i.test(r.text));
   if (sources) {
-    const sourceRows = rows.filter((r) => r.center > sources.center);
-    const scope = sourceRows.map((r) => r.text).join('\n');
-    if (/\bWorldwide\b/i.test(scope) && /\bAll\s*traffic\b/i.test(scope))
+    if (desktopSources || (/\bWorldwide\b/i.test(sourceScope) && /\bAll\s*traffic\b/i.test(sourceScope) && !deviceRows.length))
       for (const row of sourceRows)
         for (const [key, pattern, extensionPattern = pattern] of channels) {
           const label = phrase(row, extensionPattern);
           if (!label) continue;
           const value = row.words.find((w) => w.x > label.right && percent(w));
-          if (value) put(key, value, row);
+          const targetKey = desktopSources ? desktopKey(key) : key;
+          if (value) put(targetKey, value, row);
+          else warnings.push(`${screenshotFields[targetKey]}未能確定數值，請手動核對。`);
         }
     else warnings.push('流量來源未辨識出 Worldwide／All traffic，已略過該區塊。');
   }

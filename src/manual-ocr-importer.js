@@ -1,4 +1,4 @@
-import { mergeScreenshots, parseScreenshot, screenshotFields } from './parser.js';
+import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, screenshotFields } from './parser.js';
 
 const host = document.getElementById('manual-import');
 const fileInput = host.querySelector('input[type=file]');
@@ -134,7 +134,7 @@ function showReview(result) {
   confirmed.type = 'checkbox';
   confirmation.append(
     confirmed,
-    document.createTextNode(' 我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，勾選資料為全球／全裝置範圍。'),
+    document.createTextNode(' 我已確認截圖屬於 ' + host.dataset.domain + '、' + targetLabel + '，以及各欄標示的全裝置／桌面限定範圍。'),
   );
   review.append(confirmation);
   const apply = text('button', '填入勾選欄位');
@@ -159,6 +159,7 @@ function showReview(result) {
       month.dispatchEvent(new Event('change', { bubbles: true }));
     }
     for (const { key, value } of selected) form.elements.namedItem(key).value = value;
+    if (selected.some(({ key }) => key.startsWith('desktop_'))) form.querySelector('[data-desktop-channels]').open = true;
     form.dispatchEvent(new Event('input', { bubbles: true }));
     progress.textContent = '已填入 ' + selected.length + ' 個欄位，尚未儲存。請核對表單後按「儲存」。';
     review.replaceChildren();
@@ -189,7 +190,31 @@ recognize.addEventListener('click', async () => {
       const canvas = await imageCanvas(files[i]);
       try {
         const { data } = await worker.recognize(canvas, {}, { text: true, tsv: true });
-        results.push(parseScreenshot(data.tsv || ''));
+        progress.textContent = '正在複核第 ' + (i + 1) + '／' + files.length + ' 張截圖的百分比…';
+        await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.%<>≤≥' });
+        const refined = await refineScreenshotNumbers(data.tsv || '', async ({ x, y, w, h }) => {
+          const padding = h * 0.4;
+          const left = Math.max(0, x - padding),
+            top = Math.max(0, y - padding);
+          const width = Math.min(canvas.width - left, w + padding * 2),
+            height = Math.min(canvas.height - top, h + padding * 2);
+          const crop = document.createElement('canvas');
+          crop.width = Math.round(width * 2);
+          crop.height = Math.round(height * 2);
+          try {
+            const context = crop.getContext('2d');
+            context.fillStyle = '#fff';
+            context.fillRect(0, 0, crop.width, crop.height);
+            context.drawImage(canvas, left, top, width, height, 0, 0, crop.width, crop.height);
+            const { data } = await worker.recognize(crop, {}, { tsv: true });
+            return data.tsv || '';
+          } finally {
+            crop.width = 0;
+            crop.height = 0;
+          }
+        });
+        await worker.setParameters({ tessedit_pageseg_mode: '11', tessedit_char_whitelist: '' });
+        results.push(parseScreenshot(refined));
       } finally {
         canvas.width = 0;
         canvas.height = 0;

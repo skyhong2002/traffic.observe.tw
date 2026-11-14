@@ -19,6 +19,7 @@ export const manualChannels = [
   ['DisplayAds', '展示廣告（Display Ads）'],
   ['Affiliate', '聯盟行銷（Affiliate）'],
 ] as const;
+export const manualDesktopChannels = [['SearchOrganic', '自然搜尋'], ['GenAi', 'Gen AI'], ...manualChannels] as const;
 export function parseManualChannels(body: Record<string, unknown>) {
   const channels: Partial<Record<TrafficChannel, number>> = {};
   for (const [key, label] of manualChannels) {
@@ -100,7 +101,15 @@ export function parseManualDetails(body: Record<string, unknown>): ManualDetails
     throw new ManualInputError('台灣占比與國家列表的 TW 不一致。', 'taiwan', 'countries');
   if (!listedTw && tw !== null) countries.push({ code: 'TW', share: tw });
   if (countries.reduce((sum, c) => sum + c.share, 0) > 1.001) throw new ManualInputError('國家占比合計不能超過 100%。', 'countries');
+  const desktopChannels: Partial<Record<TrafficChannel, number>> = {};
+  for (const [key, label] of manualDesktopChannels) {
+    const value = parseShare(body[`desktop_${key}`], `桌面限定・${label}`, `desktop_${key}`);
+    if (value !== null) desktopChannels[key] = value;
+  }
+  if (Object.values(desktopChannels).reduce((sum, value) => sum + value, 0) > 1.001)
+    throw new ManualInputError('桌面限定渠道占比合計不能超過 100%。', ...manualDesktopChannels.map(([key]) => `desktop_${key}`));
   return {
+    ...(Object.keys(desktopChannels).length ? { desktopChannels } : {}),
     breakdowns: parseBreakdowns(body),
     countries: countries.sort((a, b) => b.share - a.share),
     bounceRate: parseShare(body.bounce, '跳出率', 'bounce'),
@@ -132,6 +141,12 @@ export function manualDetailValues(entry?: ManualMonth): Record<string, string> 
   const p = entry?.details;
   return {
     ...breakdownValues(p?.breakdowns),
+    ...Object.fromEntries(
+      manualDesktopChannels.map(([key]) => [
+        `desktop_${key}`,
+        p?.desktopChannels?.[key] == null ? '' : String(Number((p.desktopChannels[key] * 100).toFixed(6))),
+      ]),
+    ),
     bounce: p?.bounceRate == null ? '' : String(p.bounceRate * 100),
     pages: String(p?.pagesPerVisit ?? ''),
     duration: String(p?.timeOnSite ?? ''),

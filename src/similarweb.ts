@@ -35,6 +35,8 @@ export interface TrafficProfile {
   /** Top five countries (ISO 3166 alpha-2) and their share of visits, largest first. */
   countries: Array<{ code: string; share: number }>;
   channels: Partial<Record<TrafficChannel, number>>;
+  /** Desktop-only manual channel shares. Never combine with all-device visits or channels. */
+  desktopChannels?: Partial<Record<TrafficChannel, number>>;
   bounceRate: number | null;
   pagesPerVisit: number | null;
   /** Average visit duration in seconds. */

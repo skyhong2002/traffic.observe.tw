@@ -22,7 +22,7 @@ export function publicTraffic<T>(data: T): T {
     if (!value || typeof value !== 'object') return value;
     const out: Record<string, unknown> = {};
     for (const [name, item] of Object.entries(value)) {
-      if (name === 'breakdowns' || name === 'manualProfiles') continue;
+      if (name === 'breakdowns' || name === 'manualProfiles' || name === 'desktopChannels') continue;
       if (name === 'channels' || name === 'prevChannels' || name === 'shares') {
         out[name] =
           item == null

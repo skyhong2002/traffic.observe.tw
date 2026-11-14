@@ -83,8 +83,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(extensionReview).toContain('416.5K');
       expect(extensionReview).toContain('97.02');
       expect(extensionReview).toContain('Desktop Only');
-      expect(extensionReview).toContain('Germany');
-      expect(extensionReview).not.toContain('60.69');
+      expect(extensionReview).toContain('60.69');
+      expect(await page.getByRole('checkbox', { name: '填入桌面限定・直接造訪', exact: true }).isChecked()).toBe(true);
       expect(await page.getByRole('checkbox', { name: '填入直接造訪', exact: true }).count()).toBe(0);
       expect(await page.locator('#manual-visits').inputValue()).toBe('');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
@@ -94,10 +94,46 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-duration').inputValue()).toBe('00:05:40');
       expect(await page.locator('#manual-bounce').inputValue()).toBe('44.43');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('97.02');
-      expect(await page.locator('#manual-countries').inputValue()).toBe('TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3');
+      expect(await page.locator('#manual-countries').inputValue()).toContain('TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3');
+      expect(await page.locator('#manual-desktop_Direct').inputValue()).toBe('60.69');
       expect(await page.locator('#manual-Direct').inputValue()).toBe('');
       expect(await page.locator('#manual-search').inputValue()).toBe('');
       expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
+
+      // The reported failure: a Country card without its Top 5 title, followed
+      // by Desktop Only sources. It must also work when selected by itself.
+      await page.goto(origin + '/site/s3.com.tw/manual/');
+      await page
+        .locator('#manual-screenshots')
+        .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography.png', import.meta.url)));
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      expect(await page.locator('[data-review]').innerText()).toContain('93.23');
+      expect(await page.locator('[data-review]').innerText()).toContain('38.72');
+      expect(await page.locator('[data-review]').innerText()).toContain('4.67');
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+      expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
+      expect(await page.locator('#manual-desktop_Affiliate').inputValue()).toBe('4.67');
+      expect(await page.locator('#manual-search').inputValue()).toBe('');
+      expect(await page.locator('#manual-ai').inputValue()).toBe('');
+      expect(await page.locator('#manual-visits').inputValue()).toBe('');
+      expect(await page.locator('[data-desktop-channels]').getAttribute('open')).toBe('');
+      await page
+        .locator('#manual-screenshots')
+        .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-engagement.png', import.meta.url)));
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
+      expect(await page.locator('#manual-pages').inputValue()).toBe('5.66');
+      expect(await page.locator('#manual-duration').inputValue()).toBe('00:00:57');
+      expect(await page.locator('#manual-bounce').inputValue()).toBe('71.01');
+      await page.reload();
+      expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
+      expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
       expect(external).toEqual([]);
       expect(errors).toEqual([]);
       // An interrupted model download must leave the form editable and allow retry.

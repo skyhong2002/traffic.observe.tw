@@ -1246,6 +1246,27 @@ export function platformBreakdownsSection(profiles: TrafficProfile[]) {
   );
 }
 
+/** Desktop shares keep their own denominator; there is no all-device count conversion. */
+export function desktopChannelsSection(profiles: TrafficProfile[]) {
+  if (limitedTraffic()) return '';
+  const available = profiles.filter((p) => Object.keys(p.desktopChannels ?? {}).length).sort((a, b) => b.month.localeCompare(a.month));
+  if (!available.length) return '';
+  return section(
+    '桌面限定流量來源',
+    `<p class="note">Worldwide／Desktop Only，占桌面造訪的比例。與全裝置渠道分開顯示；未提供桌面造訪量，不換算造訪次數，未填欄位保持未知。</p>${available
+      .map((profile) => {
+        const rows = CHANNELS.filter(([key]) => profile.desktopChannels?.[key] !== undefined)
+          .map(
+            ([key, label]) =>
+              `<tr><td class="l">${html(label)}</td><td class="num">${pct(profile.desktopChannels?.[key] ?? null, 2)}</td></tr>`,
+          )
+          .join('');
+        return `<details class="platform-month" open><summary>${monthLong(profile.month)}・Desktop Only・人工補登</summary><div class="scroll"><table><thead><tr><th class="l">流量來源</th><th class="num">桌面占比</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+      })
+      .join('')}`,
+  );
+}
+
 /** `tech` is the 網站技術 block (tech-pages.ts techSection). */
 export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, tech = '') {
   const ordered = [...site.months].sort((a, b) => a.month.localeCompare(b.month));
@@ -1310,6 +1331,7 @@ ${viewer ? tagPanel(site.domain, site.tags, viewer) : ''}
 ${section('每月造訪', `<div class="chart-box">${visitsChart}</div>`)}
 ${similarwebSection(site)}
 ${breakdowns}
+${desktopChannelsSection(site.manualProfiles ?? site.profiles)}
 ${site.profiles.length ? section('導流來源走勢', channelTiles(site.profiles.map((p) => ({ month: p.month, shares: p.channels, source: p.source })))) : ''}
 ${section(
   '導流占比',

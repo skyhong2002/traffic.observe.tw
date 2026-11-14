@@ -1,4 +1,4 @@
-import { type ManualMonth, manualChannels, manualDetailFields, manualDetailValues, proUrl } from './manual.ts';
+import { type ManualMonth, manualChannels, manualDesktopChannels, manualDetailFields, manualDetailValues, proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals } from './manual-breakdowns.ts';
 import { MANUAL_FORM_SCRIPT } from './manual-form-script.ts';
 import { OCR_IMPORTER } from './manual-ocr.ts';
@@ -186,7 +186,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 <ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol>
 <section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
 <h3 id="manual-import-heading">從截圖填入</h3>
-<p class="note">選擇同一網站、同一月份的 Similarweb 英文版網站或瀏覽器外掛截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器，也沒有 AI token 費用。Desktop Only／Mobile Only 的流量來源會略過，國家資料可另外核對填入。先核對結果，再選擇要填入的欄位。</p>
+<p class="note">選擇同一網站、同一月份的 Similarweb 英文版網站或瀏覽器外掛截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器，也沒有 AI token 費用。Desktop Only 渠道會填入獨立的桌面限定欄位；Mobile Only 目前不支援。先核對結果，再選擇要填入的欄位。</p>
 <label for="manual-screenshots">選擇截圖</label><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple>
 <button type="button" data-recognize>辨識截圖</button>
 <p role="status" aria-live="polite" data-progress></p><div data-review></div>
@@ -205,11 +205,15 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 ${field('visits', '月造訪量', 'Traffic &amp; engagement → Total visits', '60.10M', saved ? millions(saved.visits) : '')}
 ${field('taiwan', '台灣', 'Geography → Taiwan', '61.57', saved ? percentInput(saved.taiwanShare) : '', '%')}
 </div>
-<h3>流量來源占比（選填）</h3><div class="field-grid">
+<h3>全裝置流量來源占比（選填）</h3><div class="field-grid">
 ${field('search', '自然搜尋', 'Marketing channels → Org. Search', '36.45', saved ? percentInput(saved.searchShare) : '', '%')}
 ${field('ai', 'Gen AI', 'Marketing channels → Gen AI', '0.37', saved ? percentInput(saved.aiShare) : '', '%')}
 ${manualChannels.map(([key, label]) => field(key, label, 'Marketing channels → ' + label, '0.00', percentInput(saved?.channels[key] ?? null), '%')).join('')}
 </div>
+<details class="manual-breakdowns" data-desktop-channels${form.error || Object.entries({ ...detailValues, ...d }).some(([key, v]) => key.startsWith('desktop_') && v) ? ' open' : ''}><summary>桌面限定流量來源（Desktop Only，選填）</summary>
+<p class="note">占桌面造訪的比例，與上方全裝置渠道分開保存。沒有桌面造訪量時，只顯示占比，不以全裝置月造訪量換算次數。</p>
+<div class="field-grid">${manualDesktopChannels.map(([key, label]) => field(`desktop_${key}`, `桌面限定・${label}`, 'Traffic Sources → Worldwide／Desktop Only', '0.00', detailValues[`desktop_${key}`] ?? '', '%')).join('')}</div>
+</details>
 <h3>互動與排名（選填）</h3><div class="field-grid">${manualDetailFields.map(([key, label, hint, unit]) => field(key, label, hint, '', detailValues[key], unit)).join('')}</div>
 <div class="field"><label for="manual-countries">國家占比</label><textarea id="manual-countries" name="countries"${invalid('countries')} rows="5" placeholder="TW 61.57&#10;US 12.34">${value('countries', detailValues.countries)}</textarea><small>每行一個兩碼國家代碼與百分比。可填平台列出的所有國家，未列出的國家不推定為 0%。TW 如有填寫須與上方台灣占比一致。</small></div>
 <details class="manual-breakdowns"${form.error ? ' open' : ''}><summary>平台詳細分布（選填）</summary>

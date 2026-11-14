@@ -229,6 +229,11 @@ export const ENDPOINTS: Endpoint[] = [
         type: 'object[]',
         desc: '僅管理員：所有手動補登月份的完整 profile，免費估算存在時仍保留。breakdowns 含 Social、Referral 來源網站/產業、連出目的地/廣告主、Display 刊登網站及各渠道總占比。明細 share 為 {value: 0–1, bound: lt | gt | null}，name=null 表示未公開名稱，change 保留平台字串（如 >5000%、New）；各表分母不同。',
       },
+      {
+        name: 'manualProfiles[].desktopChannels',
+        type: 'object | undefined',
+        desc: '僅管理員：Worldwide／Desktop Only 渠道占比（0–1），鍵名同 channels；獨立於全裝置 channels，不能乘以全裝置月造訪量換算次數。未補登的渠道保持未知。',
+      },
       { name: 'category', type: 'string | null', desc: 'Similarweb 的網站類別，例如 Finance/Investing' },
       { name: 'similarSites', type: 'string[]', desc: 'Similarweb 列出的相似網站' },
       { name: 'tags', type: 'object[]', desc: '每個標籤的來源與票數，同 /api/v1/tags/{domain}' },

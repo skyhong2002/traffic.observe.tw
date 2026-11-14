@@ -8,7 +8,17 @@ recognize the original PNGs, rather than relying only on cached OCR output.
 The `extension-*` screenshots were supplied on 2026-11-12. The engagement
 card identifies **matsu.idv.tw**, October 2026. Its accompanying country card
 is above a separate **Worldwide / Desktop Only** Traffic Sources card.
-Only the country card may be imported from that second image; desktop-only
-channels must stay empty. The 0.12% Germany share has OCR confidence below
-80 and is omitted with a warning. These TSVs use the same 2x browser-canvas
-enlargement and sparse-text Tesseract mode as the importer.
+The country and source cards have independent scopes. Since 2026-11-14,
+desktop-only channels import into separate `desktop_*` fields, while all-device
+channels stay empty. In the raw TSV the 0.12% Germany share has OCR confidence
+below 80; the browser may recover it by re-reading a larger numeric crop.
+These TSVs use the same 2x browser-canvas enlargement and sparse-text Tesseract
+mode as the importer.
+
+The `s3-*` screenshots were supplied on 2026-11-14 for **s3.com.tw**, October
+2026. The second image starts at `Country`, with `Top 5 Countries` cropped out,
+and includes Worldwide / Desktop Only sources. Raw OCR loses the decimal in
+United States 2.13% and Affiliate 4.67%, yielding 213% and 467%. The browser
+test re-reads actual enlarged numeric crops, recovering all five countries and
+ten desktop channels; it also imports this second image by itself, preserves
+drafts, then fills engagement from the first image. No cloud OCR is used.

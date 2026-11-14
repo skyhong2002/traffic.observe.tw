@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { manualProfile, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
+import { coverageFields } from '../src/collection.ts';
+import { manualDetailValues, manualProfile, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
 import { ManualInputError } from '../src/manual-input.ts';
+import { desktopChannelsSection } from '../src/pages.ts';
+import { publicTraffic, trafficAccess } from '../src/traffic-access.ts';
 
 describe('manual Similarweb details', () => {
   it('accepts copied full-width numbers, rank prefixes and both platform time formats', () => {
@@ -66,5 +69,26 @@ describe('manual Similarweb details', () => {
       bounceRate: null,
       countries: [{ code: 'TW', share: 0.6 }],
     });
+  });
+  it('keeps desktop shares independent of all-device metrics, coverage and guest data', () => {
+    const details = parseManualDetails({ desktop_SearchOrganic: '38.72', desktop_GenAi: '0.27', desktop_Direct: '0' });
+    const entry = { month: '202610', channels: {}, details, searchShare: null, aiShare: null, taiwanShare: null };
+    const profile = manualProfile(entry);
+    expect(profile.desktopChannels).toEqual({ SearchOrganic: 0.3872, GenAi: 0.0027, Direct: 0 });
+    expect(profile.channels).toEqual({});
+    expect(coverageFields(482400, [profile]).missing).toContain('channels.SearchOrganic');
+    expect(manualDetailValues(entry as Parameters<typeof manualDetailValues>[0])).toMatchObject({
+      desktop_SearchOrganic: '38.72',
+      desktop_GenAi: '0.27',
+      desktop_Direct: '0',
+      desktop_Referrals: '',
+    });
+    expect(desktopChannelsSection([profile])).toContain('Desktop Only');
+    expect(desktopChannelsSection([profile])).toContain('38.72%');
+    expect(trafficAccess.run(false, () => desktopChannelsSection([profile]))).toBe('');
+    expect(trafficAccess.run(false, () => publicTraffic({ profile }))).not.toHaveProperty('profile.desktopChannels');
+    expect(profile.desktopChannels?.Direct).toBe(0);
+    expect(() => parseManualDetails({ desktop_Direct: '101' })).toThrow(ManualInputError);
+    expect(() => parseManualDetails({ desktop_Direct: '60', desktop_SearchOrganic: '50' })).toThrow('合計');
   });
 });

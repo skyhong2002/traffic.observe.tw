@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parseManualChannels, parseManualDetails, parseShare, parseVisits } from '../src/manual.ts';
-import { mergeScreenshots, parseScreenshot } from '../src/manual-ocr-parser.js';
+import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers } from '../src/manual-ocr-parser.js';
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/manual-ocr/${name}.tsv`, import.meta.url), 'utf8');
 describe('Similarweb screenshot extraction', () => {
@@ -57,7 +57,7 @@ describe('Similarweb screenshot extraction', () => {
     expect(result.fields.visits).toBeUndefined();
     expect(result.warnings.join(' ')).toContain('月造訪量');
   });
-  it('reads extension engagement and countries without importing desktop-only sources', () => {
+  it('reads extension engagement, countries and independent desktop-only sources', () => {
     const result = mergeScreenshots(['extension-engagement', 'extension-geography'].map((name) => parseScreenshot(fixture(name))));
     expect(result.months).toEqual(['202610']);
     expect(result.fields).toEqual({
@@ -67,9 +67,18 @@ describe('Similarweb screenshot extraction', () => {
       bounce: '44.43',
       taiwan: '97.02',
       countries: 'TW 97.02\nUS 1.76\nHK 0.73\nJP 0.3',
+      desktop_Direct: '60.69',
+      desktop_SearchOrganic: '32.53',
+      desktop_SocialOrganic: '3.63',
+      desktop_GenAi: '0.69',
+      desktop_Mail: '0.32',
+      desktop_SocialPaid: '0',
+      desktop_SearchPaid: '0',
+      desktop_Affiliate: '0',
+      desktop_DisplayAds: '0',
     });
     expect(parseVisits(result.fields.visits)).toBe(416_500);
-    expect(result.warnings.join(' ')).toContain('已略過該區塊');
+    expect(result.warnings.join(' ')).toContain('獨立的「桌面限定」欄位');
     expect(result.warnings.join(' ')).toContain('Germany');
     expect(result.warnings.join(' ')).toContain('請核對範圍');
   });
@@ -78,8 +87,52 @@ describe('Similarweb screenshot extraction', () => {
     // Put the device filter above the country card instead of the source card.
     const restrictedCountry = input.replace(/\t1143\t/g, '\t10\t');
     expect(parseScreenshot(restrictedCountry).fields).toEqual({});
-    expect(parseScreenshot(input.replace('Countries', 'Sources')).fields).toEqual({});
-    expect(parseScreenshot(input.replace('Desktop', 'Mobile')).fields).toEqual(parseScreenshot(input).fields);
+    const cropped = input
+      .split('\n')
+      .filter((line) => +line.split('\t')[7] >= 1000 || line.startsWith('1\t'))
+      .join('\n');
+    expect(parseScreenshot(cropped).fields).toMatchObject({ desktop_Direct: '60.69' });
+    expect(parseScreenshot(cropped).fields.taiwan).toBeUndefined();
+    const mobile = parseScreenshot(input.replace('Desktop', 'Mobile'));
+    expect(mobile.fields.taiwan).toBe('97.02');
+    expect(mobile.fields.desktop_Direct).toBeUndefined();
+    expect(mobile.warnings.join(' ')).toContain('已略過該區塊');
+  });
+  it('reads a title-cropped Country table above desktop sources in the actual s3 screenshot', () => {
+    const result = parseScreenshot(fixture('s3-geography'));
+    expect(result.fields).toMatchObject({
+      taiwan: '93.23',
+      countries: 'TW 93.23\nHK 1.59\nID 0.58\nMY 0.57',
+      desktop_SearchOrganic: '38.72',
+      desktop_SocialPaid: '20.48',
+      desktop_Direct: '13.09',
+      desktop_SearchPaid: '8.79',
+      desktop_SocialOrganic: '6.08',
+      desktop_Referrals: '3.47',
+      desktop_DisplayAds: '2.36',
+      desktop_Mail: '2.07',
+      desktop_GenAi: '0.27',
+    });
+    expect(result.fields.search).toBeUndefined();
+    expect(result.fields.Direct).toBeUndefined();
+    // Raw OCR lost these decimal points. They stay empty without a successful crop re-read.
+    expect(result.fields.desktop_Affiliate).toBeUndefined();
+  });
+  it('only accepts a missing decimal after an independent high-confidence crop recognition', async () => {
+    const word = (value: string, confidence: number) =>
+      `1\t1\t0\t0\t0\t0\t0\t0\t100\t100\t-1\n5\t1\t1\t1\t1\t1\t10\t10\t50\t20\t${confidence}\t${value}`;
+    const original = word('213%', 90);
+    const repaired = await refineScreenshotNumbers(original, async () => word('2.13%', 90));
+    expect(repaired).toContain('\t2.13%');
+    expect(await refineScreenshotNumbers(original, async () => word('2.13%', 50))).toBe(original);
+    expect(await refineScreenshotNumbers(original, async () => word('2.18%', 99))).toBe(original);
+    expect(await refineScreenshotNumbers(original, async () => word('<2.13%', 99))).toBe(original);
+    let retries = 0;
+    await refineScreenshotNumbers(word('2.13%', 90), async () => {
+      retries++;
+      return '';
+    });
+    expect(retries).toBe(0);
   });
   it('requires an explicit all-traffic scope for extension source lists and preserves explicit zeroes', () => {
     const input = fixture('extension-geography');
