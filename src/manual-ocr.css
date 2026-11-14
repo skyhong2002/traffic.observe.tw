@@ -1496,3 +1496,58 @@
     padding-bottom: 8px;
   }
 }
+
+.ocr-cross-warning {
+  color: #ffd08a;
+  margin: 8px 0 0;
+  font-size: 14px;
+}
+.ocr-cross-warning[hidden] {
+  display: none;
+}
+.ocr-preflight ul {
+  list-style: none;
+  padding-left: 0;
+}
+.ocr-preflight button {
+  display: block;
+}
+.ocr-unmatched-countries button {
+  margin: 4px 0;
+}
+@media (max-width: 760px) {
+  .ocr-bulk-tools:not([open]) {
+    margin-bottom: 0;
+  }
+  .ocr-results-mode {
+    flex-wrap: wrap;
+  }
+  .ocr-field-row .ocr-cross-warning {
+    font-size: 14px;
+  }
+}
+.ocr-country-row:has(.ocr-remove-country:not([hidden])) {
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 120px) 44px;
+}
+.ocr-remove-country {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px;
+}
+.ocr-remove-country[hidden] {
+  display: none;
+}
+.ocr-field-row input::placeholder {
+  color: #aaa;
+}
+@media (max-width: 760px) {
+  .ocr-help summary {
+    min-height: 44px;
+  }
+  .ocr-mode-bar {
+    flex-wrap: wrap;
+  }
+}
+.ocr-country-row:has(.ocr-remove-country:not([hidden])) {
+  display: grid;
+}

@@ -27,6 +27,12 @@ export const screenshotSelectableCountryCodes =
   'AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW'.split(
     ' ',
   );
+const englishCountryNames = new Intl.DisplayNames(['en'], { type: 'region' });
+for (const code of screenshotSelectableCountryCodes) countries[englishCountryNames.of(code)] = code;
+Object.assign(countries, { Macau: 'MO', Macao: 'MO', 'South Korea': 'KR', 'North Korea': 'KP', 'Czech Republic': 'CZ', Turkey: 'TR' });
+const countryPatterns = Object.entries(countries)
+  .sort(([a], [b]) => b.length - a.length)
+  .map(([name, code]) => [name, code, new RegExp('\\b' + name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i')]);
 export const screenshotCountryCodes = { ...countries, 台灣: 'TW' };
 export const screenshotFields = {
   visits: '月造訪量',
@@ -313,8 +319,8 @@ export function parseScreenshot(tsv, includeSources = false) {
   const geography = rows.find((r) => /\bCountry\b.*Traffic\s*share|\bTop\s*5\s*Countries\b|^Country$/i.test(r.text));
   const geographyEnd = rows.find((r) => geography && r.center > geography.center && /\bSee\s*more\s*countries\b/i.test(r.text));
   for (const row of geography ? rows.filter((r) => r.center > geography.center && (!geographyEnd || r.center < geographyEnd.center)) : []) {
-    for (const [name, code] of Object.entries(countries)) {
-      const label = phrase(row, new RegExp(`\\b${name}\\b`, 'i'));
+    for (const [name, code, pattern] of countryPatterns) {
+      const label = phrase(row, pattern);
       if (!label) continue;
       const value = row.words.find((w) => w.x > label.right && percent(w));
       if (!value) {
@@ -345,6 +351,7 @@ export function parseScreenshot(tsv, includeSources = false) {
         row.words.filter((w) => w.x <= value.x + value.w),
       );
       if (code === 'TW') put('taiwan', value, row);
+      break;
     }
   }
   if (
@@ -396,6 +403,11 @@ export function parseScreenshot(tsv, includeSources = false) {
       const contextRows = rows.filter((r) => r.center > geography.center && (!geographyEnd || r.center < geographyEnd.center));
       const countryRows = contextRows.filter((r) => r.words.some((word) => /^\d+(?:\.\d+)?%$/.test(word.text)));
       result.countryExpectedCount = countryRows.length;
+      result.unmatchedCountries = countryRows.flatMap((row, index) => {
+        if (countryPatterns.some(([, , pattern]) => phrase(row, pattern))) return [];
+        const value = row.words.find(percent);
+        return value ? [{ row: index + 1, share: value.text.slice(0, -1) }] : [];
+      });
       result.countryContexts = countryRows.length
         ? countryRows.map((row) => regionOf('國家表逐列上下文，非此欄精確位置', row.words))
         : [regionOf('國家表範圍，非精確辨識位置', contextRows.length ? contextRows.flatMap((row) => row.words) : geography.words)];
@@ -430,6 +442,7 @@ export function mergeScreenshots(results) {
       }
     result.countryTable = results.some((r) => r.countryTable);
     result.countryExpectedCount = Math.max(0, ...results.map((r) => r.countryExpectedCount || 0));
+    result.unmatchedCountries = results.flatMap((r) => r.unmatchedCountries || []);
     const contexts = results.flatMap((r) => r.countryContexts || []);
     if (contexts.length) result.countryContexts = contexts;
     const uncertain = {};

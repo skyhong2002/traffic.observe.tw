@@ -131,9 +131,9 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).inputValue()).toBe('38.72');
       expect(await page.getByRole('textbox', { name: '核對桌面限定・聯盟行銷', exact: true }).inputValue()).toBe('4.67');
       await page.getByRole('button', { name: '定位國家占比', exact: true }).click();
-      await page.getByRole('textbox', { name: '美國占比', exact: true }).fill('2.14');
+      await page.getByRole('textbox', { name: '國家列表・美國占比', exact: true }).fill('2.14');
       expect(await page.locator('#ocr-edit-countries').inputValue()).toContain('US 2.14');
-      await page.getByRole('textbox', { name: '美國占比', exact: true }).fill('2.13');
+      await page.getByRole('textbox', { name: '國家列表・美國占比', exact: true }).fill('2.13');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#ocr-status-desktop_SearchOrganic').innerText()).toContain('101.28%');
@@ -144,6 +144,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
+      expect(await page.getByLabel('表單國家列表・美國占比', { exact: true }).inputValue()).toBe('2.13');
+      await page.getByLabel('表單國家列表・美國占比', { exact: true }).fill('2.14');
+      expect(await page.locator('#manual-countries').inputValue()).toContain('US 2.14');
+      await page.getByLabel('表單國家列表・美國占比', { exact: true }).fill('2.13');
       expect(await page.locator('#manual-desktop_Affiliate').inputValue()).toBe('4.67');
       expect(await page.locator('#manual-search').inputValue()).toBe('');
       expect(await page.locator('#manual-ai').inputValue()).toBe('');
@@ -157,6 +161,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       expect(await page.locator('.ocr-field-row.is-identical').count()).toBe(12);
       await page.locator('#ocr-edit-taiwan').fill('93.22');
+      expect(await page.locator('[data-field=taiwan] .ocr-cross-warning').innerText()).toContain('不一致');
+      expect(await page.locator('[data-field=countries] .ocr-cross-warning').innerText()).toContain('93.22%');
       await page.getByRole('button', { name: '勾選與目前不同的欄位', exact: true }).click();
       expect(await page.locator('.ocr-selection-count').innerText()).toBe('已選 1 / 16');
       expect(await page.locator('[data-field=taiwan]').getAttribute('class')).toContain('is-overwrite');
@@ -348,7 +354,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-save-warning').isVisible()).toBe(false);
       // A normal selection checkbox cannot dismiss a known incomplete-country warning.
       await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).check();
-      expect(await page.locator('[data-field=countries] .ocr-partial-confirmation').innerText()).toContain('TW、US');
+      expect(await page.locator('[data-field=countries] .ocr-partial-confirmation').innerText()).toContain('台灣、美國');
       expect(await page.locator('.ocr-count').innerText()).toContain('數值疑點');
       await taiwan.fill('101');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
@@ -382,7 +388,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('TW 92.23\nUS 2.13');
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#ocr-status-taiwan').innerText()).toContain('不一致');
-      expect(await taiwan.getAttribute('aria-describedby')).toBe('ocr-status-taiwan');
+      expect((await taiwan.getAttribute('aria-describedby'))?.split(' ')).toContain('ocr-status-taiwan');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('US 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       await page.locator('[data-desktop-channels] > summary').click();
@@ -502,7 +508,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
     const browser = await chromium.launch({ headless: true });
     try {
       const missing = readFileSync(new URL('./fixtures/manual-ocr/s3-geography-telegram.tsv', import.meta.url), 'utf8')
-        .replace(/\tUnited\n/g, '\tMexico\n')
+        .replace(/\tUnited\n/g, '\tUnmapped\n')
         .replace(/\tStates\n/g, '\tUnknown\n')
         .replace(/\t213%/g, '\t2.13%');
       const context = await browser.newContext();
@@ -543,6 +549,26 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-notices').innerText()).toContain('只填部分國家');
       await page.locator('#ocr-edit-desktop_SearchOrganic').fill('38.71');
       expect(await partial.isChecked()).toBe(true);
+      await page.setViewportSize({ width: 390, height: 420 });
+      await page.getByLabel('跳到核對分類').selectOption({ label: '國家分布（2欄）' });
+      await page.getByRole('button', { name: '核對下一欄 →', exact: true }).click();
+      const countryEditors = page.locator('[data-field=countries] .ocr-country-rows input');
+      await countryEditors.first().focus();
+      for (let i = 0; i < 20; i++) {
+        if (
+          (await page.evaluate('document.activeElement?.getAttribute("aria-label")')) ===
+          (await countryEditors.last().getAttribute('aria-label'))
+        )
+          break;
+        await page.keyboard.press('Tab');
+      }
+      await expect
+        .poll(async () => {
+          const box = await countryEditors.last().boundingBox();
+          return box && box.y >= -1 && box.y + box.height <= 421;
+        })
+        .toBe(true);
+      await page.setViewportSize({ width: 1440, height: 1000 });
       await page.locator('[data-field=countries] .ocr-country-helper summary').click();
       expect(await page.locator('.ocr-country-helper option[value=ZZ]').count()).toBe(0);
       expect(await page.locator('.ocr-country-helper option[value=EU]').count()).toBe(0);

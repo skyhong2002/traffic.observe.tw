@@ -5,6 +5,22 @@ import { mergeScreenshots, parseScreenshot, refineScreenshotNumbers, reviewScree
 
 const fixture = (name: string) => readFileSync(new URL(`./fixtures/manual-ocr/${name}.tsv`, import.meta.url), 'utf8');
 describe('Similarweb screenshot extraction', () => {
+  it('recognizes ISO English country names and aliases while retaining unidentified row numbers', () => {
+    const source = fixture('s3-geography-telegram');
+    for (const [name, code] of [
+      ['Brazil', 'BR'],
+      ['Mexico', 'MX'],
+      ['Macao', 'MO'],
+      ['Macau', 'MO'],
+      ['Congo - Kinshasa', 'CD'],
+    ]) {
+      expect(parseScreenshot(source.replace(/\tTaiwan/g, '\t' + name), true).fields.countries).toContain(code + ' 93.23');
+    }
+    const unknown = parseScreenshot(source.replace(/\tTaiwan/g, '\tUnmapped'), true);
+    expect(unknown.unmatchedCountries).toContainEqual({ row: 1, share: '93.23' });
+    expect(unknown.fields.countries).not.toContain('TW');
+  });
+
   it('reads stock screenshots without mixing country changes or chart axes into shares', () => {
     const result = mergeScreenshots(['channels', 'engagement'].map((name) => parseScreenshot(fixture(name))));
     expect(result).toEqual({

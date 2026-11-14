@@ -39,6 +39,7 @@ export const MANUAL_FORM_SCRIPT = `<script>
     for (const field of fields) field.value = draft && typeof draft[field.name] === 'string'
       ? draft[field.name] : (option()?.dataset[field.name.toLowerCase()] ?? '');
     notify(Boolean(draft));
+    form.dispatchEvent(new Event('manual:values-changed'));
   };
   form.addEventListener('manual:read-month', (event) => {
     const selected = event.detail.month;
