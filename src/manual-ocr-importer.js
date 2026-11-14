@@ -46,7 +46,10 @@ form.addEventListener(
     message.setAttribute('role', 'alert');
     const back = text('button', '返回核對並填入', 'primary');
     back.type = 'button';
-    back.addEventListener('click', () => host.querySelector('.ocr-review-shortcut button').click());
+    back.addEventListener('click', () => {
+      saveWarning.hidden = true;
+      host.querySelector('.ocr-review-shortcut button').click();
+    });
     const discard = text('button', '放棄這次核對，儲存表單目前內容');
     discard.type = 'button';
     discard.addEventListener('click', () => {
@@ -60,6 +63,14 @@ form.addEventListener(
   },
   true,
 );
+// Native validation precedes submit. Pending screenshot review needs its
+// own choice before validating the still-empty draft form.
+for (const submit of form.querySelectorAll('[type=submit]'))
+  submit.addEventListener('click', (event) => {
+    if (!pendingReview) return;
+    event.preventDefault();
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  });
 window.addEventListener('beforeunload', (event) => {
   if (reviewDirty) {
     event.preventDefault();
@@ -402,6 +413,10 @@ function showReview(result) {
     for (const key of ['visits', 'pages', 'duration', 'bounce']) if (!entries.some(([entry]) => entry === key)) entries.push([key, '']);
   }
   if (!entries.length) throw Error('沒有辨識到可補登的數值，請改用清楚的英文版概況、國家或流量來源截圖，也可直接手填。');
+  const primaryOrder = ['visits', 'pages', 'duration', 'bounce', 'taiwan', 'countries'];
+  entries.sort(
+    ([a], [b]) => (primaryOrder.includes(a) ? primaryOrder.indexOf(a) : 99) - (primaryOrder.includes(b) ? primaryOrder.indexOf(b) : 99),
+  );
   const targetLabel = targetMonth.slice(0, 4) + '/' + targetMonth.slice(4);
   uploadTarget.textContent = '核對對象：' + host.dataset.domain + ' · ' + targetLabel + '（截圖月份優先）';
   const omittedCountries = [
@@ -616,7 +631,8 @@ function showReview(result) {
     }
     renderEvidence();
     const active = choices.find((choice) => choice.key === key);
-    if (active?.row.contains(document.activeElement)) requestAnimationFrame(() => scrollChoice(active));
+    if (active?.row.contains(document.activeElement) && document.activeElement !== active.check)
+      requestAnimationFrame(() => scrollChoice(active));
     renderImage();
     if (move)
       requestAnimationFrame(() => {
@@ -676,6 +692,9 @@ function showReview(result) {
   function renderEvidence() {
     const choice = choices.find((entry) => entry.key === activeKey);
     if (!choice) return;
+    const signature = activeKey + ':' + applied + ':' + choice.adoptedImage;
+    if (choice.evidence.dataset.signature === signature) return;
+    choice.evidence.dataset.signature = signature;
     choice.evidence.replaceChildren();
     const regions = regionsFor(activeKey);
     if (!regions.length) {
@@ -725,8 +744,24 @@ function showReview(result) {
               box.h * scale,
             );
           };
+          const labelScale = Math.min(
+            ...list.filter((region) => region.labelBox).map((region) => Math.min(40 / region.labelBox.h, 310 / region.labelBox.w)),
+          );
           list.forEach((region, row) => {
-            if (region.labelBox) drawBox(region.labelBox, 12, row * 64 + 12, 310);
+            if (region.labelBox) {
+              const box = region.labelBox;
+              context.drawImage(
+                sourceImage,
+                (box.x / source.width) * sourceImage.naturalWidth,
+                (box.y / source.height) * sourceImage.naturalHeight,
+                (box.w / source.width) * sourceImage.naturalWidth,
+                (box.h / source.height) * sourceImage.naturalHeight,
+                12,
+                row * 64 + 12 + (40 - box.h * labelScale) / 2,
+                box.w * labelScale,
+                box.h * labelScale,
+              );
+            }
             drawBox(region.valueBox, region.labelBox ? 350 : 12, row * 64 + 12, region.labelBox ? 178 : 516);
           });
           return;
@@ -768,7 +803,7 @@ function showReview(result) {
         cropHead.append(adopt);
       }
       appendFullImageAction(cropHead, choice, index);
-      if (compact) cropHead.append(text('span', '欄間空白已省略', 'ocr-crop-note'));
+      if (compact) cropHead.append(text('span', '分段放大：欄名與數字分別縮放，省略中間空白', 'ocr-crop-note'));
       choice.evidence.append(cropHead, canvas);
     }
   }
@@ -820,7 +855,7 @@ function showReview(result) {
       close.addEventListener('click', () => dialog.close());
       dialog.addEventListener('close', () => {
         dialog.remove();
-        revealChoice(choice);
+        revealChoice(choice, false);
       });
       dialog.showModal();
       close.focus();
@@ -987,6 +1022,54 @@ function showReview(result) {
         hint.id = 'ocr-country-format';
         content.append(hint);
         input.setAttribute('aria-describedby', status.id + ' ' + hint.id);
+        const countryHelper = document.createElement('details');
+        countryHelper.className = 'ocr-country-helper';
+        countryHelper.addEventListener('focusin', () => selectField(key));
+        countryHelper.append(text('summary', '用國家名稱新增或更新占比'));
+        const picker = document.createElement('select');
+        picker.setAttribute('aria-label', '選擇國家名稱');
+        const localNames = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
+        const englishNames = new Intl.DisplayNames(['en'], { type: 'region' });
+        const countryOptions = [];
+        for (let a = 65; a <= 90; a++)
+          for (let b = 65; b <= 90; b++) {
+            const code = String.fromCharCode(a, b),
+              name = localNames.of(code);
+            if (name !== code) countryOptions.push({ code, name });
+          }
+        for (const { code, name } of countryOptions.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))) {
+          const option = text('option', name + ' · ' + englishNames.of(code) + ' (' + code + ')');
+          option.value = code;
+          picker.append(option);
+        }
+        picker.value = 'TW';
+        const share = document.createElement('input');
+        share.setAttribute('aria-label', '新增國家占比');
+        share.inputMode = 'decimal';
+        share.placeholder = '占比 %';
+        const insert = text('button', '加入或更新國家');
+        insert.type = 'button';
+        const helperStatus = text('p', '選擇國家名稱即可，不必記國家代碼。');
+        helperStatus.setAttribute('role', 'status');
+        insert.addEventListener('click', () => {
+          const value = share.value.trim().replace(/%$/, '');
+          if (!/^\d+(?:\.\d+)?$/.test(value) || Number(value) > 100) {
+            helperStatus.textContent = '請填 0–100 的占比。';
+            share.focus();
+            return;
+          }
+          const code = picker.value;
+          const lines = input.value.split('\n').filter(Boolean);
+          const index = lines.findIndex((line) => line.trim().split(/\s+/)[0].toUpperCase() === code);
+          if (index >= 0) lines[index] = code + ' ' + value;
+          else lines.push(code + ' ' + value);
+          input.value = lines.join('\n');
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          helperStatus.textContent = '已更新 ' + localNames.of(code) + ' ' + value + '%，請核對列表；尚未填入表單。';
+        });
+        countryHelper.append(picker, share, insert, helperStatus);
+        content.append(countryHelper);
+        choice.countryHelper = countryHelper;
         if (countryIncomplete) {
           const acceptPartial = document.createElement('input');
           acceptPartial.type = 'checkbox';
@@ -999,6 +1082,8 @@ function showReview(result) {
             .map((name) => screenshotCountryCodes[name] || (/^[A-Z]{2}$/.test(name) ? name : ''))
             .filter(Boolean);
           const originalCount = value.split('\n').filter(Boolean).length;
+          const expectedCount = Math.max(originalCount + omittedCountries.length, result.countryExpectedCount || 0);
+          const unlocatedGap = result.warnings.some((warning) => /國家表.*漏辨識/.test(warning)) && !result.countryExpectedCount;
           choice.updateCountry = () => {
             if (applied) return;
             const lines = choice.value.split('\n').filter(Boolean);
@@ -1006,7 +1091,7 @@ function showReview(result) {
             const taiwan = choices.find((entry) => entry.key === 'taiwan');
             const addedTaiwan = taiwan?.check.checked && taiwan.value && !codes.includes('TW');
             const missing = expectedCodes.filter((code) => !codes.includes(code) && !(code === 'TW' && addedTaiwan));
-            const partial = missing.length || lines.length + (addedTaiwan ? 1 : 0) < originalCount + omittedCountries.length;
+            const partial = unlocatedGap || missing.length || lines.length + (addedTaiwan ? 1 : 0) < expectedCount;
             const coverage =
               lines.reduce((sum, line) => sum + (Number(line.trim().split(/\s+/)[1]?.replace(/%$/, '')) || 0), 0) +
               (addedTaiwan ? Number(taiwan.value) || 0 : 0);
@@ -1026,7 +1111,19 @@ function showReview(result) {
         }
       }
       input.addEventListener('focus', () => selectField(key));
-      check.addEventListener('focus', () => selectField(key));
+      // Keep the mouse target still until the native click has toggled it.
+      // Keyboard focus can update evidence immediately.
+      let pointerSelecting = false;
+      check.addEventListener('pointerdown', () => {
+        pointerSelecting = true;
+      });
+      check.addEventListener('focus', () => {
+        if (!pointerSelecting) selectField(key);
+      });
+      check.addEventListener('click', () => {
+        pointerSelecting = false;
+        selectField(key);
+      });
       input.addEventListener('input', () => {
         input.removeAttribute('aria-invalid');
         choice.value = input.value.trim();
@@ -1037,7 +1134,7 @@ function showReview(result) {
         reviewDirty = true;
         choice.adoptedImage = undefined;
         if (choice.conflict) renderEvidence();
-        if (countryAcknowledgement) countryAcknowledgement.checked = false;
+        if (countryAcknowledgement && ['countries', 'taiwan'].includes(key)) countryAcknowledgement.checked = false;
         choice.needsReview = !choice.value;
         if (!choice.before && !choice.selectionTouched) check.checked = Boolean(choice.value);
         status.textContent =
@@ -1052,7 +1149,7 @@ function showReview(result) {
       });
       check.addEventListener('change', () => {
         choice.selectionTouched = true;
-        if (countryAcknowledgement) countryAcknowledgement.checked = false;
+        if (countryAcknowledgement && ['countries', 'taiwan'].includes(key)) countryAcknowledgement.checked = false;
         status.textContent =
           check.checked && choice.before
             ? '將覆寫目前內容：' + choice.before
@@ -1120,6 +1217,13 @@ function showReview(result) {
   positionBulk();
   phoneQuery.addEventListener('change', positionBulk);
   const footer = text('div', '', 'ocr-review-footer');
+  const skipLabel = text('label', '', 'ocr-partial-confirmation');
+  const skipAck = document.createElement('input');
+  skipAck.type = 'checkbox';
+  const skipText = text('span');
+  skipLabel.append(skipAck, skipText);
+  skipLabel.hidden = true;
+  let skipSignature = '';
   const confirmation = document.createElement('label'),
     confirmed = document.createElement('input');
   confirmed.type = 'checkbox';
@@ -1196,8 +1300,9 @@ function showReview(result) {
   }
   shortcut.append(shortcutCount, shortcutButton);
   review.append(shortcut);
-  footer.append(confirmation, localError, refresh, actionLine);
+  footer.append(skipLabel, confirmation, localError, refresh, actionLine);
   function fail(message, choice, invalid = true) {
+    applyStatus.textContent = '尚未填入；請先處理待完成事項。';
     localError.textContent =
       choice && !invalid
         ? '尚未填入。請查看「' + screenshotFields[choice.key] + '」旁的待完成說明。'
@@ -1223,6 +1328,14 @@ function showReview(result) {
     for (const choice of choices) choice.updateCountry?.();
     const selected = choices.filter((c) => c.check.checked);
     const unresolved = choices.filter((choice) => choice.needsReview);
+    const skipped = unresolved.filter((choice) => !choice.check.checked);
+    const nextSignature = skipped.map((choice) => choice.key).join('|');
+    if (nextSignature !== skipSignature) skipAck.checked = false;
+    skipSignature = nextSignature;
+    skipLabel.hidden = applied || !skipped.length;
+    skipText.textContent =
+      '我選擇略過未完成欄位：' + skipped.map((choice) => screenshotFields[choice.key]).join('、') + '。這些值不會填入，之後可在表單補登。';
+    const allIdentical = choices.every((choice) => choice.before && sameValue(choice.key, choice.value, choice.before));
     if (countryNotice)
       countryNotice.textContent = unresolved.some((c) => c.key === 'taiwan')
         ? '台灣未讀到；請到「國家分布」補正。'
@@ -1248,21 +1361,25 @@ function showReview(result) {
       choice.row.classList.toggle('is-selected', choice.check.checked);
       choice.row.classList.toggle('is-missing', choice.needsReview);
     }
-    apply.disabled = applied || stale || !confirmed.checked || !selected.length;
+    apply.disabled = applied || stale || !confirmed.checked || (!selected.length && !allIdentical);
+    apply.textContent = !selected.length && allIdentical ? '完成核對，保留表單' : '填入勾選欄位';
     if (!applied)
       applyStatus.textContent = stale
         ? '請先更新目前內容，再確認要覆寫的欄位。'
-        : !selected.length
-          ? '請先勾選至少一個要填入的欄位。'
-          : !confirmed.checked
-            ? '請勾選上方確認：網站、月份與裝置範圍。'
-            : selected.length +
-              ' 個欄位將填入 ' +
-              targetLabel +
-              (selected.some((c) => c.before) ? '，覆寫 ' + selected.filter((c) => c.before).length + ' 欄' : '') +
-              ' · 尚未儲存';
+        : !selected.length && allIdentical
+          ? '數值皆與表單相同；確認網站、月份與範圍後可完成核對。'
+          : !selected.length
+            ? '請先勾選至少一個要填入的欄位。'
+            : !confirmed.checked
+              ? '請勾選上方確認：網站、月份與裝置範圍。'
+              : selected.length +
+                ' 個欄位將填入 ' +
+                targetLabel +
+                (selected.some((c) => c.before) ? '，覆寫 ' + selected.filter((c) => c.before).length + ' 欄' : '') +
+                ' · 尚未儲存';
   }
   confirmed.addEventListener('change', updateSelection);
+  skipAck.addEventListener('change', updateSelection);
   apply.addEventListener('click', () => {
     const selected = choices.filter((c) => c.check.checked);
     localError.hidden = true;
@@ -1291,7 +1408,7 @@ function showReview(result) {
       }
     }
     const latest = current();
-    if (selected.some((c) => latest[c.key] !== c.before)) {
+    if ((selected.length ? selected : choices).some((c) => latest[c.key] !== c.before)) {
       fail('核對期間表單內容已變更。請更新目前內容；核對修正會保留，變更的欄位將取消勾選。');
       stale = true;
       refresh.hidden = false;
@@ -1371,6 +1488,12 @@ function showReview(result) {
       countryAcknowledgement?.focus();
       return;
     }
+    if (choices.some((choice) => choice.needsReview && !choice.check.checked) && !skipAck.checked) {
+      fail('有未完成欄位尚未填入：請補正，或勾選上方「略過」確認。');
+      skipAck.focus();
+      skipLabel.scrollIntoView({ block: 'center' });
+      return;
+    }
     if (taiwanChoice && countryChoice && !listedTw) {
       countryChoice.value = 'TW ' + taiwanChoice.value + (lines.length ? '\n' + lines.join('\n') : '');
       countryChoice.input.value = countryChoice.value;
@@ -1409,6 +1532,8 @@ function showReview(result) {
       choice.check.disabled = true;
       choice.input.readOnly = true;
       choice.status.textContent = choice.check.checked ? '已填入表單 · 尚未儲存' : '未填入';
+      if (!selected.length) choice.status.textContent = '與表單相同，已完成核對';
+      if (choice.countryHelper) choice.countryHelper.hidden = true;
       choice.previous.textContent = choice.before ? '填入前：' + choice.before + choice.unit : '';
       if (choice.key === 'countries' && countryAcknowledgement) countryAcknowledgement.closest('label').hidden = true;
     }
@@ -1421,7 +1546,13 @@ function showReview(result) {
     next.addEventListener('click', goToHandoff);
     actionLine.prepend(next);
     next.focus({ preventScroll: true });
-    applyStatus.textContent = '已填入 ' + selected.length + ' 個欄位，尚未儲存；原圖與核對結果保留在上方。';
+    const omitted = choices.filter((choice) => choice.needsReview && !choice.check.checked).map((choice) => screenshotFields[choice.key]);
+    applyStatus.textContent = selected.length
+      ? '已填入 ' +
+        selected.length +
+        ' 個欄位，尚未儲存。' +
+        (omitted.length ? '未填入：' + omitted.join('、') + '；請在表單補登。' : '原圖與核對結果保留在上方。')
+      : '數值皆與表單相同，核對完成；表單內容未更動。';
     progress.textContent = applyStatus.textContent;
     setStep('save');
     updateSelection();

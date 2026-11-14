@@ -203,7 +203,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         if (!(await countryCheck.isChecked())) {
           expect(await fresh.locator('#ocr-status-countries').innerText()).toContain('不完整');
           await countryCheck.check();
-          const partial = fresh.locator('.ocr-partial-confirmation:visible input');
+          const partial = fresh.locator('[data-field=countries] .ocr-partial-confirmation:visible input');
           if (await partial.count()) await partial.check();
         }
         await fresh.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
@@ -319,7 +319,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('[data-field=taiwan] .ocr-full-image').click();
       expect(await page.locator('.ocr-original-dialog').isVisible()).toBe(true);
       await page.getByRole('button', { name: '返回台灣占比補正' }).click();
-      await page.waitForFunction('document.activeElement.id === "ocr-edit-taiwan"');
+      await page.waitForFunction('document.activeElement.dataset.field === "taiwan"');
       // A submit attempt is intercepted before the form's submitting flag changes.
       const blocked = await page.evaluate(`(() => {
         const form = document.querySelector('.manual-form');
@@ -330,12 +330,15 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         return { blocked: attempt.defaultPrevented, reached };
       })()`);
       expect(blocked).toEqual({ blocked: true, reached: false });
+      await page.locator('.manual-save-bar [type=submit]').click();
+      expect(await page.locator('.ocr-save-warning').isVisible()).toBe(true);
       expect(await page.locator('#manual-draft-status').innerText()).toContain('截圖核對尚未填入');
       expect(await page.locator('.ocr-save-warning').innerText()).toContain('尚未填入核對結果');
       await page.getByRole('button', { name: '返回核對並填入' }).click();
+      expect(await page.locator('.ocr-save-warning').isVisible()).toBe(false);
       // A normal selection checkbox cannot dismiss a known incomplete-country warning.
       await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).check();
-      expect(await page.locator('.ocr-partial-confirmation').innerText()).toContain('TW、US');
+      expect(await page.locator('[data-field=countries] .ocr-partial-confirmation').innerText()).toContain('TW、US');
       expect(await page.locator('.ocr-count').innerText()).toContain('數值疑點');
       await taiwan.fill('101');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
@@ -374,6 +377,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('button', { name: '更新目前內容，保留核對修正' }).click();
       expect(await taiwan.inputValue()).toBe('93.23');
       expect(await page.getByRole('checkbox', { name: '填入桌面限定・直接造訪', exact: true }).isChecked()).toBe(false);
+      const skip = page.getByRole('checkbox', { name: /我選擇略過未完成欄位/ });
+      if (await skip.isVisible()) await skip.check();
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
@@ -458,4 +463,115 @@ it.skipIf(!existsSync(chromium.executablePath()))(
     }
   },
   30_000,
+);
+
+it.skipIf(!existsSync(chromium.executablePath()))(
+  'requires an explicit generic-country decision and completes identical reviews',
+  async () => {
+    const { readFileSync } = await import('node:fs');
+    const server = Fastify();
+    registerManualOcr(server);
+    server.get('/style.css', async (_, reply) => reply.type('text/css').send(STYLE));
+    server.get('/site/s3.com.tw/manual/', async (_, reply) =>
+      reply.type('text/html').send(manualPage({ domain: 's3.com.tw', name: '小三美日' }, { months: [], choices: ['202610'], free: [] })),
+    );
+    const origin = await server.listen({ host: '127.0.0.1', port: 0 });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const missing = readFileSync(new URL('./fixtures/manual-ocr/s3-geography-telegram.tsv', import.meta.url), 'utf8')
+        .replace(/\tUnited\n/g, '\tMexico\n')
+        .replace(/\tStates\n/g, '\tUnknown\n')
+        .replace(/\t213%/g, '\t2.13%');
+      const context = await browser.newContext();
+      await context.addInitScript((tsv) => {
+        Object.assign(globalThis, {
+          Tesseract: {
+            createWorker: async () => ({
+              setParameters: async () => {},
+              recognize: async () => ({ data: { tsv } }),
+              terminate: async () => {},
+            }),
+          },
+        });
+      }, missing);
+      const page = await context.newPage();
+      const posts: string[] = [];
+      page.on('request', (request) => {
+        if (request.method() === 'POST') posts.push(request.url());
+      });
+      await page.goto(origin + '/site/s3.com.tw/manual/');
+      await page
+        .locator('#manual-screenshots')
+        .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography-telegram.jpg', import.meta.url)));
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      expect(await page.locator('#ocr-edit-taiwan').inputValue()).toBe('93.23');
+      expect(await page.locator('#ocr-edit-countries').inputValue()).not.toContain('US');
+      const countryCheck = page.getByRole('checkbox', { name: '填入國家占比', exact: true });
+      await countryCheck.check();
+      const partial = page.locator('[data-field=countries] .ocr-partial-confirmation input');
+      expect(await partial.isVisible()).toBe(true);
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toBe('');
+      expect(await page.locator('#ocr-status-countries').innerText()).toContain('漏辨識');
+      await partial.check();
+      await page.locator('#ocr-edit-desktop_SearchOrganic').fill('38.71');
+      expect(await partial.isChecked()).toBe(true);
+      await page.locator('[data-field=countries] .ocr-country-helper summary').click();
+      await page.getByLabel('選擇國家名稱', { exact: true }).selectOption('MX');
+      await page.getByLabel('新增國家占比', { exact: true }).fill('2.13');
+      await page.getByRole('button', { name: '加入或更新國家', exact: true }).click();
+      expect(await page.locator('#ocr-edit-countries').inputValue()).toContain('MX 2.13');
+      expect(await partial.isVisible()).toBe(false);
+      // Rebuilding evidence on resize must preserve a focused source action.
+      await page.locator('[data-field=countries] .ocr-full-image').focus();
+      await page.setViewportSize({ width: 1024, height: 700 });
+      expect(await page.evaluate('document.activeElement?.classList.contains("ocr-full-image")')).toBe(true);
+      await context.close();
+
+      const identical = await browser.newContext();
+      const engagement = readFileSync(new URL('./fixtures/manual-ocr/s3-engagement.tsv', import.meta.url), 'utf8');
+      await identical.addInitScript((tsv) => {
+        Object.assign(globalThis, {
+          Tesseract: {
+            createWorker: async () => ({
+              setParameters: async () => {},
+              recognize: async () => ({ data: { tsv } }),
+              terminate: async () => {},
+            }),
+          },
+        });
+      }, engagement);
+      const same = await identical.newPage();
+      same.on('request', (request) => {
+        if (request.method() === 'POST') posts.push(request.url());
+      });
+      await same.goto(origin + '/site/s3.com.tw/manual/');
+      await same
+        .locator('#manual-screenshots')
+        .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-engagement.png', import.meta.url)));
+      await same.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await same.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      await same.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await same.getByRole('button', { name: '填入勾選欄位' }).click();
+      const before = await same.locator('#manual-visits').inputValue();
+      await same.getByRole('button', { name: '重新辨識', exact: true }).click();
+      await same.getByRole('button', { name: '更改截圖並重新核對', exact: true }).click();
+      await same.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await same.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      expect(await same.locator('.ocr-selection-count').innerText()).toBe('已選 0 / 4');
+      await same.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await same.getByRole('button', { name: '完成核對，保留表單', exact: true }).click();
+      expect(await same.locator('#manual-visits').inputValue()).toBe(before);
+      expect(await same.locator('#manual-draft-status').innerText()).not.toContain('截圖核對尚未填入');
+      expect(await same.locator('#ocr-apply-status').innerText()).toContain('表單內容未更動');
+      expect(posts).toEqual([]);
+      await identical.close();
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  },
+  30000,
 );

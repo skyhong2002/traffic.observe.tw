@@ -173,7 +173,7 @@ export async function reviewScreenshotCountries(tsv, primary, recognize) {
       .join('\n');
   if (shares.has('TW')) fields.taiwan = shares.get('TW');
   if (shares.size < expected) warnings.push('國家表仍有漏辨識，請核對台灣占比與國家列表，缺少的資料可手動補上。');
-  const result = { ...primary, fields, warnings: [...new Set(warnings)] };
+  const result = { ...primary, fields, warnings: [...new Set(warnings)], countryExpectedCount: expected };
   if (primary.sources) {
     result.sources = { ...primary.sources };
     const uncertain = {};
@@ -201,13 +201,11 @@ export function parseScreenshot(tsv, includeSources = false) {
   let rows = rowsOf(tsv);
   const sourceRegions = {},
     uncertainRegions = {};
-  const record = (key, value, words, uncertain = false) => {
-    if (!includeSources) return;
+  const regionOf = (value, words) => {
     const x = Math.min(...words.map((w) => w.x)),
       y = Math.min(...words.map((w) => w.y));
     const right = Math.max(...words.map((w) => w.x + w.w)),
       bottom = Math.max(...words.map((w) => w.y + w.h));
-    const target = uncertain ? uncertainRegions : sourceRegions;
     const numeric = [...words].reverse().find((word) => /\d/.test(word.text));
     const labels = numeric ? words.filter((word) => word.x + word.w <= numeric.x && /[A-Za-z]/.test(word.text)) : [];
     const bounds = (items) => {
@@ -220,7 +218,7 @@ export function parseScreenshot(tsv, includeSources = false) {
         h: Math.max(...items.map((word) => word.y + word.h)) - top,
       };
     };
-    (target[key] ||= []).push({
+    return {
       value,
       x,
       y,
@@ -228,7 +226,12 @@ export function parseScreenshot(tsv, includeSources = false) {
       h: bottom - y,
       ...(numeric ? { valueBox: bounds([numeric, ...words.filter((word) => /^[<>≤≥~≈±]$/.test(word.text))]) } : {}),
       ...(labels.length ? { labelBox: bounds(labels) } : {}),
-    });
+    };
+  };
+  const record = (key, value, words, uncertain = false) => {
+    if (!includeSources) return;
+    const target = uncertain ? uncertainRegions : sourceRegions;
+    (target[key] ||= []).push(regionOf(value, words));
   };
   const fields = {},
     conflicts = new Set(),
@@ -385,20 +388,12 @@ export function parseScreenshot(tsv, includeSources = false) {
     if (Object.keys(uncertainRegions).length) result.uncertainSources = uncertainRegions;
     if (geography) {
       result.countryTable = true;
-      const words = rows
-        .filter((r) => r.center >= geography.center && (!geographyEnd || r.center < geographyEnd.center))
-        .flatMap((r) => r.words);
-      const x = Math.min(...words.map((w) => w.x)),
-        y = Math.min(...words.map((w) => w.y));
-      result.countryContexts = [
-        {
-          value: '國家表範圍，非精確辨識位置',
-          x,
-          y,
-          w: Math.max(...words.map((w) => w.x + w.w)) - x,
-          h: Math.max(...words.map((w) => w.y + w.h)) - y,
-        },
-      ];
+      const contextRows = rows.filter((r) => r.center > geography.center && (!geographyEnd || r.center < geographyEnd.center));
+      const countryRows = contextRows.filter((r) => r.words.some((word) => /^\d+(?:\.\d+)?%$/.test(word.text)));
+      result.countryExpectedCount = countryRows.length;
+      result.countryContexts = countryRows.length
+        ? countryRows.map((row) => regionOf('國家表逐列上下文，非此欄精確位置', row.words))
+        : [regionOf('國家表範圍，非精確辨識位置', contextRows.length ? contextRows.flatMap((row) => row.words) : geography.words)];
     }
   }
   return result;
@@ -429,6 +424,7 @@ export function mergeScreenshots(results) {
         if (fields[key] !== undefined) (result.sources[key] ||= []).push(...regions);
       }
     result.countryTable = results.some((r) => r.countryTable);
+    result.countryExpectedCount = Math.max(0, ...results.map((r) => r.countryExpectedCount || 0));
     const contexts = results.flatMap((r) => r.countryContexts || []);
     if (contexts.length) result.countryContexts = contexts;
     const uncertain = {};

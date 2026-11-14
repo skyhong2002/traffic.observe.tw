@@ -1315,6 +1315,29 @@
   border-left-color: var(--axis);
   padding-block: 8px;
 }
+.ocr-country-helper {
+  margin-block: 8px;
+  font-size: 14px;
+}
+.ocr-country-helper summary {
+  min-height: 44px;
+  padding-block: 10px;
+}
+.ocr-country-helper select,
+.ocr-country-helper input {
+  width: 100%;
+  min-height: 44px;
+  margin-bottom: 8px;
+  font-size: 16px;
+}
+.ocr-country-helper[hidden] {
+  display: none;
+}
+@media (max-width: 760px) {
+  .manual-form :is(input, select, textarea) {
+    font-size: 16px;
+  }
+}
 @media (min-width: 761px) and (max-height: 800px) {
   .ocr-workspace {
     --ocr-workspace-height: clamp(330px, calc(100dvh - 300px), 500px);

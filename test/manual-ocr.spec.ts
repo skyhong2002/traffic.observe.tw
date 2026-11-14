@@ -200,10 +200,12 @@ describe('Similarweb screenshot extraction', () => {
     expect(located.fields.taiwan).toBeUndefined();
     expect(located.sources?.taiwan).toBeUndefined();
     expect(located.uncertainSources?.taiwan[0]).toMatchObject({ value: '93.23%', y: 98 });
-    expect(located.countryContexts?.[0].h).toBeGreaterThan(100);
+    expect(located.countryContexts).toHaveLength(5);
+    expect(located.countryContexts?.every((row) => row.valueBox && row.labelBox)).toBe(true);
+    expect(located.countryExpectedCount).toBe(5);
     const merged = mergeScreenshots([located]);
     expect(merged.uncertainSources?.taiwan).toHaveLength(1);
-    expect(merged.countryContexts).toHaveLength(1);
+    expect(merged.countryContexts).toHaveLength(5);
     expect(merged.fields.taiwan).toBeUndefined();
   });
   it('keeps conflicting image regions as uncertain evidence without selecting a value', () => {

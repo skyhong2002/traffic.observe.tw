@@ -14,6 +14,7 @@ export interface ScreenshotResult {
   warnings: string[];
   sources?: Record<string, ScreenshotSource[]>;
   countryTable?: boolean;
+  countryExpectedCount?: number;
   uncertainSources?: Record<string, ScreenshotSource[]>;
   countryContexts?: ScreenshotSource[];
 }
