@@ -401,7 +401,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('.manual-form .ocr-form-source').filter({ hasText: '台灣占比' }).click();
       expect(await page.locator('.ocr-field-row.is-active').getAttribute('data-field')).toBe('taiwan');
       await page.getByRole('button', { name: '桌面限定流量來源 10', exact: true }).click();
-      expect(await page.locator('.ocr-results').evaluate('(el) => getComputedStyle(el).overflowY')).toBe('visible');
+      expect(await page.evaluate('getComputedStyle(document.querySelector(".ocr-results")).overflowY')).toBe('visible');
       await page.setViewportSize({ width: 390, height: 844 });
       expect(await page.locator('.ocr-workspace').evaluate((el) => el.firstElementChild?.classList.contains('ocr-results'))).toBe(true);
       expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
