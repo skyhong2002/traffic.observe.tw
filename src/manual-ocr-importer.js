@@ -172,6 +172,7 @@ function renderFormCountries() {
     ? '台灣占比 ' + formTaiwan.value + '% 與國家列表的台灣 ' + listedTw[1] + '% 不一致，請先修正再儲存。'
     : '';
   formTaiwan.setCustomValidity(mismatch ? formCountryWarning.textContent : '');
+  formTaiwan.setAttribute('aria-invalid', String(Boolean(mismatch)));
   formTaiwanWarning.hidden = !mismatch;
   formTaiwanWarning.textContent = formCountryWarning.textContent;
   const codes = new Set();
@@ -773,6 +774,8 @@ function showReview(result) {
   const before = current(),
     choices = [];
   let countryAcknowledgement, returnToForm;
+  const appliedSources = [];
+  let appliedFields = [];
   let modeChosen = false;
   const phoneQuery = matchMedia('(max-width: 760px)');
   let singleField = phoneQuery.matches;
@@ -1578,7 +1581,7 @@ function showReview(result) {
   const jumpMissing = text('button', '', 'ocr-jump-missing');
   jumpMissing.type = 'button';
   jumpMissing.addEventListener('click', () => {
-    const unresolved = choices.filter((choice) => choice.needsReview || choice.error);
+    const unresolved = choices.filter((choice) => choice.needsReview || choice.error || choice.crossInvalid);
     const index = unresolved.findIndex((choice) => choice.key === activeKey);
     const next = unresolved[(index + 1) % unresolved.length];
     if (next) {
@@ -1664,8 +1667,13 @@ function showReview(result) {
   const shortcutButton = text('button', '前往填入確認 ↓');
   shortcutButton.type = 'button';
   function goToHandoff() {
-    if (applied) focusFormField(returnToForm?.name || 'visits');
-    else {
+    if (applied) {
+      if (month.value !== targetMonth) {
+        month.value = targetMonth;
+        month.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      focusFormField(returnToForm?.name || 'visits');
+    } else {
       confirmed.focus({ preventScroll: true });
       confirmation.scrollIntoView({ block: 'center' });
     }
@@ -1695,7 +1703,7 @@ function showReview(result) {
   returnButton.type = 'button';
   returnButton.hidden = true;
   returnButton.addEventListener('click', () => {
-    if (returnToForm) focusFormField(returnToForm.name);
+    if (returnToForm) goToHandoff();
   });
   navigation.append(returnButton);
   for (const [label, offset] of [['上一欄', -1]]) {
@@ -1711,15 +1719,25 @@ function showReview(result) {
   review.append(shortcut);
   footer.append(monthNotice, preflight, confirmation, skipLabel, localError, refresh, actionLine);
   const updateMonthNotice = () => {
-    monthNotice.hidden = month.value === targetMonth || applied;
+    monthNotice.hidden = month.value === targetMonth;
     monthNotice.textContent =
-      '將填入 ' +
+      (applied ? '此核對結果已填入 ' : '將填入 ') +
       targetLabel +
       '；表單目前在 ' +
       month.value.slice(0, 4) +
       '/' +
       month.value.slice(4) +
-      '。填入時會切換月份，原月份草稿保留。';
+      (applied ? '。請返回核對月份再檢查或儲存，兩個月份的草稿均保留。' : '。填入時會切換月份，原月份草稿保留。');
+    if (applied) {
+      const label = month.value === targetMonth ? '前往 ' + targetLabel + ' 表單 ↓' : '返回 ' + targetLabel + ' 表單 ↓';
+      jumpConfirm.textContent = label;
+      const next = actionLine.querySelector('.ocr-handoff');
+      if (next) next.textContent = label;
+      if (month.value === targetMonth) {
+        for (const [field, source] of appliedSources) if (!source.isConnected) field.closest('.field').append(source);
+        for (const field of appliedFields) field.dataset.ocrFilled = 'true';
+      }
+    }
   };
   if (reviewMonthChange) month.removeEventListener('change', reviewMonthChange);
   reviewMonthChange = () => {
@@ -1781,6 +1799,13 @@ function showReview(result) {
     const countryList = choices.find((choice) => choice.key === 'countries');
     const listedTw = /^TW\s+(\d+(?:\.\d+)?)$/m.exec(countryList?.value || '');
     const mismatch = !applied && tw?.value && listedTw && Number.isFinite(Number(tw.value)) && Number(tw.value) !== Number(listedTw[1]);
+    if (tw) {
+      tw.crossInvalid = Boolean(mismatch);
+      if (mismatch) {
+        tw.input.setAttribute('aria-invalid', 'true');
+        tw.row.classList.add('has-error');
+      }
+    }
     for (const choice of [tw, countryList].filter(Boolean)) {
       if (!choice.crossWarning) {
         choice.crossWarning = text('p', '', 'ocr-cross-warning');
@@ -1795,7 +1820,7 @@ function showReview(result) {
         : '';
     }
     const selected = choices.filter((c) => c.check.checked);
-    const unresolved = choices.filter((choice) => choice.needsReview || choice.error);
+    const unresolved = choices.filter((choice) => choice.needsReview || choice.error || choice.crossInvalid);
     const skipped = choices.filter((choice) => choice.needsReview && !choice.check.checked);
     const nextSignature = skipped.map((choice) => choice.key).join('|');
     if (nextSignature !== skipSignature) skipAck.checked = false;
@@ -1805,13 +1830,15 @@ function showReview(result) {
       '我選擇略過未完成欄位：' + skipped.map((choice) => screenshotFields[choice.key]).join('、') + '。這些值不會填入，之後可在表單補登。';
     const allIdentical = choices.every((choice) => choice.before && sameValue(choice.key, choice.value, choice.before));
     if (countryNotice)
-      countryNotice.textContent = unresolved.some((c) => c.key === 'taiwan')
-        ? '・台灣未讀到'
-        : unresolved.some((c) => c.key === 'countries')
-          ? '・國家待補正'
-          : choices.find((c) => c.key === 'countries')?.partialAccepted
-            ? '・已確認只填部分國家（' + choices.find((c) => c.key === 'countries').coverage.toFixed(2) + '%，仍不完整）'
-            : '・國家數值已補正';
+      countryNotice.textContent = mismatch
+        ? '・台灣占比不一致'
+        : unresolved.some((c) => c.key === 'taiwan')
+          ? '・台灣未讀到'
+          : unresolved.some((c) => c.key === 'countries')
+            ? '・國家待補正'
+            : choices.find((c) => c.key === 'countries')?.partialAccepted
+              ? '・已確認只填部分國家（' + choices.find((c) => c.key === 'countries').coverage.toFixed(2) + '%，仍不完整）'
+              : '・國家數值已補正';
     count.textContent = choices.length + ' 欄 · 數值疑點 ' + unresolved.length;
     shortcutCount.textContent = '已選 ' + selected.length + ' 欄' + (unresolved.length ? ' · 數值疑點 ' + unresolved.length : '');
     jumpMissing.hidden = !unresolved.length;
@@ -1844,8 +1871,8 @@ function showReview(result) {
     }
     preflight.replaceChildren();
     const pending = [];
-    for (const choice of choices.filter((entry) => entry.error || (entry.check.checked && entry.needsReview))) {
-      const message = choice.error?.message || '補齊或確認只填部分國家';
+    for (const choice of choices.filter((entry) => entry.error || entry.crossInvalid || (entry.check.checked && entry.needsReview))) {
+      const message = choice.crossInvalid ? '與國家列表不一致，請修正' : choice.error?.message || '補齊或確認只填部分國家';
       pending.push([
         message.startsWith(screenshotFields[choice.key]) ? message : screenshotFields[choice.key] + '：' + message,
         () => revealChoice(choice),
@@ -1869,7 +1896,7 @@ function showReview(result) {
       preflight.append(list);
     }
     apply.disabled = applied || stale || !confirmed.checked || (!selected.length && !allIdentical);
-    const blocked = choices.some((choice) => choice.error || (choice.check.checked && choice.needsReview));
+    const blocked = pending.length > 0;
     apply.classList.toggle('primary', !blocked);
     apply.textContent = blocked ? '填入勾選欄位' : !selected.length && allIdentical ? '完成核對，保留表單' : '填入勾選欄位';
     if (!applied)
@@ -1992,11 +2019,11 @@ function showReview(result) {
     const listedTw = shares.find((row) => row[1].toUpperCase() === 'TW');
     if (nextValues.taiwan && listedTw && Math.abs(Number(nextValues.taiwan) - Number(listedTw[2])) > 0.000001) {
       const keptTaiwan = choices.find((choice) => choice.key === 'taiwan' && !choice.check.checked);
-      fail(
-        '台灣占比 ' + nextValues.taiwan + '% 與國家列表 TW ' + listedTw[2] + '% 不一致。請確認要保留或改用的數值。',
-        keptTaiwan || taiwanChoice || countryChoice,
-        false,
-      );
+      const choice = keptTaiwan || taiwanChoice || countryChoice;
+      if (choice?.crossInvalid) {
+        revealChoice(choice);
+        choice.input.focus({ preventScroll: true });
+      } else fail('台灣占比與國家列表不一致。請確認要保留或改用的數值。', choice);
       return;
     }
     const total = shares.reduce((sum, row) => sum + Number(row[2]), 0) + (!listedTw && nextValues.taiwan ? Number(nextValues.taiwan) : 0);
@@ -2041,10 +2068,12 @@ function showReview(result) {
         revealChoice(choices.find((choice) => choice.key === key));
       });
       field.closest('.field').append(back);
+      appliedSources.push([field, back]);
     }
     if (selected.some(({ key }) => key.startsWith('desktop_'))) form.querySelector('[data-desktop-channels]').open = true;
     form.dispatchEvent(new Event('input', { bubbles: true }));
     applied = true;
+    appliedFields = selected.map(({ key }) => form.elements.namedItem(key));
     updateMonthNotice();
     right.classList.add('is-applied');
     startReview.hidden = true;
@@ -2118,7 +2147,7 @@ function showReview(result) {
     jumpConfirm.textContent = selected.length ? '前往表單儲存 ↓' : '回到表單 ↓';
     selectField(activeKey, false);
     apply.hidden = true;
-    const next = text('button', selected.length ? '前往表單儲存 ↓' : '回到表單 ↓', 'primary');
+    const next = text('button', selected.length ? '前往表單儲存 ↓' : '回到表單 ↓', 'primary ocr-handoff');
     next.type = 'button';
     next.addEventListener('click', goToHandoff);
     actionLine.prepend(next);

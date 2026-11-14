@@ -173,6 +173,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#ocr-edit-taiwan').fill('93.22');
       expect(await page.locator('[data-field=taiwan] .ocr-cross-warning').innerText()).toContain('不一致');
       expect(await page.locator('[data-field=countries] .ocr-cross-warning').innerText()).toContain('93.22%');
+      expect(await page.locator('.ocr-count').innerText()).toContain('數值疑點 1');
+      expect(await page.locator('.ocr-preflight').innerText()).toContain('與國家列表不一致');
       await page.getByRole('button', { name: '勾選與目前不同的欄位', exact: true }).click();
       expect(await page.locator('.ocr-selection-count').innerText()).toBe('已選 1 / 16');
       expect(await page.locator('[data-field=taiwan]').getAttribute('class')).toContain('is-overwrite');
@@ -410,7 +412,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('[data-field=countries] .ocr-country-raw > summary').click();
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('TW 92.23\nUS 2.13');
       await page.locator('#ocr-apply').click();
-      expect(await page.locator('#ocr-status-taiwan').innerText()).toContain('不一致');
+      expect(await page.locator('#ocr-cross-taiwan').innerText()).toContain('不一致');
+      expect(await page.evaluate('document.activeElement?.id')).toBe('ocr-edit-taiwan');
       expect((await taiwan.getAttribute('aria-describedby'))?.split(' ')).toContain('ocr-status-taiwan');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('US 2.13\nHK 1.59\nID 0.58\nMY 0.57');
