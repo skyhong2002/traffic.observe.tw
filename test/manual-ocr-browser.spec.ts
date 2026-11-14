@@ -178,6 +178,16 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.reload();
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
       expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
+      await page.locator('#manual-month').selectOption('202609');
+      await page.locator('#manual-month').selectOption('202610');
+      expect(await page.locator('.ocr-form-country-helper').count()).toBe(1);
+      await page.locator('.ocr-form-country-helper summary').click();
+      await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('日本');
+      await page.getByLabel('表單新增國家占比', { exact: true }).fill('0.1');
+      await page.getByRole('button', { name: '加入或更新表單國家', exact: true }).click();
+      expect(await page.getByLabel('表單國家列表・日本占比', { exact: true }).inputValue()).toBe('0.1');
+      await page.getByRole('button', { name: '移除表單國家列表中的日本', exact: true }).click();
+      expect(await page.locator('#manual-countries').inputValue()).not.toContain('JP');
       // Fresh tabs avoid drafts masking an omitted country. Test the normal
       // engagement-first order and the compressed image that loses the Taiwan label.
       for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg'], ['s3-geography-telegram.jpg']]) {
@@ -573,7 +583,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-country-helper option[value=ZZ]').count()).toBe(0);
       expect(await page.locator('.ocr-country-helper option[value=EU]').count()).toBe(0);
       await page.getByLabel('搜尋國家名稱或代碼', { exact: true }).fill('Mexico');
-      expect(await page.locator('.ocr-country-helper option').count()).toBe(2);
+      expect(await page.locator('[data-field=countries] .ocr-country-helper option').count()).toBe(2);
       await page.getByLabel('選擇國家名稱', { exact: true }).selectOption('MX');
       await page.setViewportSize({ width: 390, height: 420 });
       await page.getByLabel('新增國家占比', { exact: true }).fill('2.13');

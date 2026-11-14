@@ -21,6 +21,107 @@ const text = (tag, value, className = '') => {
   node.className = className;
   return node;
 };
+function createCountryHelper(getTarget, onSelect = () => {}, prefix = '') {
+  const countryHelper = document.createElement('details');
+  countryHelper.className = 'ocr-country-helper';
+  countryHelper.addEventListener('focusin', (event) => {
+    if (event.target.tagName !== 'SUMMARY') onSelect();
+  });
+  countryHelper.addEventListener('toggle', () => {
+    if (countryHelper.open) onSelect();
+  });
+  countryHelper.append(text('summary', '用國家名稱新增或更新占比'));
+  const countrySearch = document.createElement('input');
+  countrySearch.type = 'search';
+  countrySearch.setAttribute('aria-label', prefix + '搜尋國家名稱或代碼');
+  countrySearch.placeholder = '搜尋台灣、Taiwan 或 TW';
+  const picker = document.createElement('select');
+  picker.setAttribute('aria-label', prefix + '選擇國家名稱');
+  const localNames = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
+  const englishNames = new Intl.DisplayNames(['en'], { type: 'region' });
+  const countryOptions = [];
+  for (const code of screenshotSelectableCountryCodes) countryOptions.push({ code, name: localNames.of(code) });
+  const chooseCountry = text('option', '選擇國家名稱');
+  chooseCountry.value = '';
+  picker.append(chooseCountry);
+  for (const { code, name } of countryOptions.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))) {
+    const option = text('option', name + ' · ' + englishNames.of(code) + ' (' + code + ')');
+    option.value = code;
+    picker.append(option);
+  }
+  picker.value = '';
+  const share = document.createElement('input');
+  share.setAttribute('aria-label', prefix + '新增國家占比');
+  share.inputMode = 'decimal';
+  share.placeholder = '占比 %';
+  const insert = text('button', prefix ? '加入或更新表單國家' : '加入或更新國家');
+  insert.type = 'button';
+  const helperStatus = text('p', '選擇國家名稱即可，不必記國家代碼。');
+  helperStatus.setAttribute('role', 'status');
+  countrySearch.addEventListener('input', () => {
+    const query = countrySearch.value.trim().toLocaleLowerCase();
+    const matches = countryOptions.filter(({ code, name }) =>
+      (code + ' ' + name + ' ' + englishNames.of(code)).toLocaleLowerCase().includes(query),
+    );
+    picker.replaceChildren(chooseCountry);
+    for (const { code, name } of matches) {
+      const option = text('option', name + ' · ' + englishNames.of(code) + ' (' + code + ')');
+      option.value = code;
+      picker.append(option);
+    }
+    picker.value = matches.length === 1 ? matches[0].code : '';
+    helperStatus.textContent = '找到 ' + matches.length + ' 個國家；請核對名稱再輸入占比。';
+  });
+  insert.addEventListener('click', () => {
+    const target = getTarget();
+    const value = share.value.trim().replace(/%$/, '');
+    if (!picker.value) {
+      helperStatus.textContent = '請先選擇國家名稱。';
+      picker.focus();
+      return;
+    }
+    if (!/^\d+(?:\.\d+)?$/.test(value) || Number(value) > 100) {
+      helperStatus.textContent = '請填 0–100 的占比。';
+      share.focus();
+      return;
+    }
+    const code = picker.value;
+    const lines = target.value.split('\n').filter(Boolean);
+    const index = lines.findIndex((line) => line.trim().split(/\s+/)[0].toUpperCase() === code);
+    if (index >= 0) lines[index] = code + ' ' + value;
+    else lines.push(code + ' ' + value);
+    lines.sort((a, b) => Number(b.trim().split(/\s+/)[1]) - Number(a.trim().split(/\s+/)[1]));
+    target.value = lines.join('\n');
+    target.setSelectionRange(target.value.length, target.value.length);
+    target.scrollTop = target.scrollHeight;
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+    helperStatus.textContent =
+      '已更新 ' + localNames.of(code) + ' ' + value + '%，請核對列表；' + (target === formCountries ? '尚未儲存。' : '尚未填入表單。');
+  });
+  for (const [label, control] of [
+    ['搜尋國家', countrySearch],
+    ['國家名稱', picker],
+    ['占比（%）', share],
+  ]) {
+    const field = text('label', '', 'ocr-helper-field');
+    field.append(text('span', label), control);
+    countryHelper.append(field);
+  }
+  countryHelper.append(insert, helperStatus);
+
+  return {
+    element: countryHelper,
+    search: countrySearch,
+    share,
+    reset: () => {
+      countrySearch.value = '';
+      countrySearch.dispatchEvent(new Event('input'));
+      share.value = '';
+      helperStatus.textContent = '選擇國家名稱即可，不必記國家代碼。';
+      countryHelper.open = false;
+    },
+  };
+}
 const countryDisplayNames = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
 const readableCountries = (value) =>
   value.replace(/\b[A-Z]{2}\b/g, (code) => (screenshotSelectableCountryCodes.includes(code) ? countryDisplayNames.of(code) : code));
@@ -93,6 +194,14 @@ form.addEventListener('input', renderFormCountries);
 form.addEventListener('change', renderFormCountries);
 form.addEventListener('manual:values-changed', renderFormCountries);
 renderFormCountries();
+const formCountryTools = createCountryHelper(
+  () => formCountries,
+  () => {},
+  '表單',
+);
+const formCountryHelper = formCountryTools.element;
+formCountryHelper.classList.add('ocr-form-country-helper');
+formCountryRaw.after(formCountryHelper);
 const base = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
 let busy = false;
 let images = [];
@@ -168,11 +277,11 @@ function setStep(step) {
   }
 }
 function clearFormSources() {
+  formCountryTools.reset();
   for (const field of form.querySelectorAll('[data-ocr-filled]')) {
     delete field.dataset.ocrFilled;
   }
   for (const button of form.querySelectorAll('.ocr-form-source')) button.remove();
-  for (const helper of form.querySelectorAll('.ocr-country-helper')) helper.remove();
 }
 form.addEventListener('change', (event) => {
   if (event.target === month) clearFormSources();
@@ -1142,7 +1251,7 @@ function showReview(result) {
         const raw = document.createElement('details');
         raw.className = 'ocr-country-raw';
         raw.append(text('summary', '進階：編輯國家代碼清單'), editorLine);
-        evidence.after(countryRows, raw);
+        evidence.after(countryRows, previous, raw);
         choice.countryRows = countryRows;
         const countryNames = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
         const countryInputs = new Map();
@@ -1214,92 +1323,16 @@ function showReview(result) {
         hint.id = 'ocr-country-format';
         raw.append(hint);
         input.setAttribute('aria-describedby', status.id + ' ' + hint.id);
-        const countryHelper = document.createElement('details');
-        countryHelper.className = 'ocr-country-helper';
-        countryHelper.addEventListener('focusin', (event) => {
-          if (!applied && event.target.tagName !== 'SUMMARY') selectField(key);
-        });
-        countryHelper.addEventListener('toggle', () => {
-          if (!applied && countryHelper.open) selectField(key);
-        });
-        countryHelper.append(text('summary', '用國家名稱新增或更新占比'));
-        const countrySearch = document.createElement('input');
-        countrySearch.type = 'search';
-        countrySearch.setAttribute('aria-label', '搜尋國家名稱或代碼');
-        countrySearch.placeholder = '搜尋台灣、Taiwan 或 TW';
-        const picker = document.createElement('select');
-        picker.setAttribute('aria-label', '選擇國家名稱');
-        const localNames = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
-        const englishNames = new Intl.DisplayNames(['en'], { type: 'region' });
-        const countryOptions = [];
-        for (const code of screenshotSelectableCountryCodes) countryOptions.push({ code, name: localNames.of(code) });
-        const chooseCountry = text('option', '選擇國家名稱');
-        chooseCountry.value = '';
-        picker.append(chooseCountry);
-        for (const { code, name } of countryOptions.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant'))) {
-          const option = text('option', name + ' · ' + englishNames.of(code) + ' (' + code + ')');
-          option.value = code;
-          picker.append(option);
-        }
-        picker.value = '';
-        const share = document.createElement('input');
-        share.setAttribute('aria-label', '新增國家占比');
-        share.inputMode = 'decimal';
-        share.placeholder = '占比 %';
-        const insert = text('button', '加入或更新國家');
-        insert.type = 'button';
-        const helperStatus = text('p', '選擇國家名稱即可，不必記國家代碼。');
-        helperStatus.setAttribute('role', 'status');
-        countrySearch.addEventListener('input', () => {
-          const query = countrySearch.value.trim().toLocaleLowerCase();
-          const matches = countryOptions.filter(({ code, name }) =>
-            (code + ' ' + name + ' ' + englishNames.of(code)).toLocaleLowerCase().includes(query),
-          );
-          picker.replaceChildren(chooseCountry);
-          for (const { code, name } of matches) {
-            const option = text('option', name + ' · ' + englishNames.of(code) + ' (' + code + ')');
-            option.value = code;
-            picker.append(option);
-          }
-          picker.value = matches.length === 1 ? matches[0].code : '';
-          helperStatus.textContent = '找到 ' + matches.length + ' 個國家；請核對名稱再輸入占比。';
-        });
-        insert.addEventListener('click', () => {
-          const target = applied ? form.elements.namedItem('countries') : input;
-          const value = share.value.trim().replace(/%$/, '');
-          if (!picker.value) {
-            helperStatus.textContent = '請先選擇國家名稱。';
-            picker.focus();
-            return;
-          }
-          if (!/^\d+(?:\.\d+)?$/.test(value) || Number(value) > 100) {
-            helperStatus.textContent = '請填 0–100 的占比。';
-            share.focus();
-            return;
-          }
-          const code = picker.value;
-          const lines = target.value.split('\n').filter(Boolean);
-          const index = lines.findIndex((line) => line.trim().split(/\s+/)[0].toUpperCase() === code);
-          if (index >= 0) lines[index] = code + ' ' + value;
-          else lines.push(code + ' ' + value);
-          lines.sort((a, b) => Number(b.trim().split(/\s+/)[1]) - Number(a.trim().split(/\s+/)[1]));
-          target.value = lines.join('\n');
-          target.setSelectionRange(target.value.length, target.value.length);
-          target.scrollTop = target.scrollHeight;
-          target.dispatchEvent(new Event('input', { bubbles: true }));
-          helperStatus.textContent =
-            '已更新 ' + localNames.of(code) + ' ' + value + '%，請核對列表；' + (applied ? '尚未儲存。' : '尚未填入表單。');
-        });
-        for (const [label, control] of [
-          ['搜尋國家', countrySearch],
-          ['國家名稱', picker],
-          ['占比（%）', share],
-        ]) {
-          const field = text('label', '', 'ocr-helper-field');
-          field.append(text('span', label), control);
-          countryHelper.append(field);
-        }
-        countryHelper.append(insert, helperStatus);
+        const {
+          element: countryHelper,
+          search: countrySearch,
+          share,
+        } = createCountryHelper(
+          () => input,
+          () => {
+            if (!applied) selectField(key);
+          },
+        );
         content.append(countryHelper);
         choice.countryHelper = countryHelper;
         if (countryIncomplete && result.unmatchedCountries?.length) {
@@ -1700,7 +1733,12 @@ function showReview(result) {
         if (same) choice.status.textContent = '與目前相同，無需覆寫';
         else if (choice.before)
           choice.status.textContent = choice.check.checked
-            ? '將覆寫：' + choice.before + choice.unit + ' → ' + choice.value + choice.unit
+            ? '將覆寫：' +
+              comparisonValue(choice.key, choice.before) +
+              choice.unit +
+              ' → ' +
+              comparisonValue(choice.key, choice.value) +
+              choice.unit
             : '與目前不同，保留原值；勾選才覆寫';
         if (choice.refreshed) choice.status.textContent = '表單剛變更；' + choice.status.textContent;
       }
@@ -1933,11 +1971,7 @@ function showReview(result) {
       choice.status.textContent = choice.check.checked ? '' : '未填入';
       choice.renderCountryRows?.();
       if (!selected.length) choice.status.textContent = '與表單相同，已完成核對';
-      if (choice.countryHelper) {
-        const field = form.elements.namedItem('countries');
-        field.closest('.field').append(choice.countryHelper);
-        choice.countryHelper.open = choice.needsReview && !choice.check.checked;
-      }
+      if (choice.countryHelper) choice.countryHelper.hidden = true;
       choice.previous.textContent = choice.before ? '填入前：' + comparisonValue(choice.key, choice.before) + choice.unit : '';
       if (choice.key === 'countries' && countryAcknowledgement) countryAcknowledgement.closest('label').hidden = true;
     }
