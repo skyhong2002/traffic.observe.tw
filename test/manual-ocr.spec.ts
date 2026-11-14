@@ -184,6 +184,28 @@ describe('Similarweb screenshot extraction', () => {
     expect(result.sources?.taiwan[0]).toMatchObject({ value: '93.23', y: 98 });
     expect(result.sources?.countries.some((s) => s.value === 'TW 93.23')).toBe(true);
   });
+  it('retains uncertain regions and country context without treating them as recognized values', () => {
+    const tsv = fixture('s3-geography-telegram')
+      .split('\n')
+      .map((line) => {
+        const cells = line.split('\t');
+        if (cells[11] === '93.23%') cells[10] = '25';
+        return cells.join('\t');
+      })
+      .join('\n');
+    const plain = parseScreenshot(tsv);
+    expect(plain.fields.taiwan).toBeUndefined();
+    expect(plain).not.toHaveProperty('countryContexts');
+    const located = parseScreenshot(tsv, true);
+    expect(located.fields.taiwan).toBeUndefined();
+    expect(located.sources?.taiwan).toBeUndefined();
+    expect(located.uncertainSources?.taiwan[0]).toMatchObject({ value: '93.23%', y: 98 });
+    expect(located.countryContexts?.[0].h).toBeGreaterThan(100);
+    const merged = mergeScreenshots([located]);
+    expect(merged.uncertainSources?.taiwan).toHaveLength(1);
+    expect(merged.countryContexts).toHaveLength(1);
+    expect(merged.fields.taiwan).toBeUndefined();
+  });
   it('retains original image coordinates for values and drops sources for conflicting fields', () => {
     const first = parseScreenshot(fixture('s3-geography-telegram'), true);
     const region = first.sources?.taiwan[0];

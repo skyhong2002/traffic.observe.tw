@@ -175,6 +175,12 @@ export async function reviewScreenshotCountries(tsv, primary, recognize) {
   const result = { ...primary, fields, warnings: [...new Set(warnings)] };
   if (primary.sources) {
     result.sources = { ...primary.sources };
+    const uncertain = {};
+    for (const pass of [primary, secondary])
+      for (const [key, regions] of Object.entries(pass.uncertainSources || {})) {
+        if (fields[key] === undefined) (uncertain[key] ||= []).push(...regions);
+      }
+    if (Object.keys(uncertain).length) result.uncertainSources = uncertain;
     for (const key of ['countries', 'taiwan']) {
       result.sources[key] = [
         ...(primary.sources[key] || []),
@@ -192,14 +198,16 @@ export async function reviewScreenshotCountries(tsv, primary, recognize) {
 
 export function parseScreenshot(tsv, includeSources = false) {
   let rows = rowsOf(tsv);
-  const sourceRegions = {};
-  const record = (key, value, words) => {
+  const sourceRegions = {},
+    uncertainRegions = {};
+  const record = (key, value, words, uncertain = false) => {
     if (!includeSources) return;
     const x = Math.min(...words.map((w) => w.x)),
       y = Math.min(...words.map((w) => w.y));
     const right = Math.max(...words.map((w) => w.x + w.w)),
       bottom = Math.max(...words.map((w) => w.y + w.h));
-    (sourceRegions[key] ||= []).push({ value, x, y, w: right - x, h: bottom - y });
+    const target = uncertain ? uncertainRegions : sourceRegions;
+    (target[key] ||= []).push({ value, x, y, w: right - x, h: bottom - y });
   };
   const fields = {},
     conflicts = new Set(),
@@ -237,6 +245,7 @@ export function parseScreenshot(tsv, includeSources = false) {
   const put = (key, word, row, regionWords) => {
     if (conflicts.has(key)) return;
     if (word.confidence < 80 || bounded(row, word)) {
+      record(key, word.text, regionWords || row.words.filter((w) => w.x <= word.x + word.w), true);
       warnings.push(`${screenshotFields[key]}不夠清楚或含有界限，請手動核對。`);
       return;
     }
@@ -276,6 +285,19 @@ export function parseScreenshot(tsv, includeSources = false) {
         continue;
       }
       if (value.confidence < 80 || bounded(row, value)) {
+        record(
+          'countries',
+          code + ' ' + value.text,
+          row.words.filter((w) => w.x <= value.x + value.w),
+          true,
+        );
+        if (code === 'TW')
+          record(
+            'taiwan',
+            value.text,
+            row.words.filter((w) => w.x <= value.x + value.w),
+            true,
+          );
         warnings.push(`國家占比（${name}）不夠清楚或含有界限，請手動核對。`);
         continue;
       }
@@ -331,7 +353,24 @@ export function parseScreenshot(tsv, includeSources = false) {
   const result = { fields, months: [...months], warnings: [...new Set(warnings)] };
   if (includeSources) {
     result.sources = Object.fromEntries(Object.entries(sourceRegions).filter(([key]) => fields[key] !== undefined));
-    if (geography) result.countryTable = true;
+    if (Object.keys(uncertainRegions).length) result.uncertainSources = uncertainRegions;
+    if (geography) {
+      result.countryTable = true;
+      const words = rows
+        .filter((r) => r.center >= geography.center && (!geographyEnd || r.center < geographyEnd.center))
+        .flatMap((r) => r.words);
+      const x = Math.min(...words.map((w) => w.x)),
+        y = Math.min(...words.map((w) => w.y));
+      result.countryContexts = [
+        {
+          value: '國家表範圍，非精確辨識位置',
+          x,
+          y,
+          w: Math.max(...words.map((w) => w.x + w.w)) - x,
+          h: Math.max(...words.map((w) => w.y + w.h)) - y,
+        },
+      ];
+    }
   }
   return result;
 }
@@ -361,6 +400,14 @@ export function mergeScreenshots(results) {
         if (fields[key] !== undefined) (result.sources[key] ||= []).push(...regions);
       }
     result.countryTable = results.some((r) => r.countryTable);
+    const contexts = results.flatMap((r) => r.countryContexts || []);
+    if (contexts.length) result.countryContexts = contexts;
+    const uncertain = {};
+    for (const source of results)
+      for (const [key, regions] of Object.entries(source.uncertainSources || {})) {
+        if (fields[key] === undefined) (uncertain[key] ||= []).push(...regions);
+      }
+    if (Object.keys(uncertain).length) result.uncertainSources = uncertain;
   }
   return result;
 }

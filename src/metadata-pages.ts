@@ -197,7 +197,7 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
 <form class="form manual-form" method="post" action="/site/${html(site.domain)}/manual/" data-has-error="${Boolean(form.error)}" data-completed-month="${html(form.completedMonth ?? '')}">
 <div class="manual-form-title"><span class="ocr-eyebrow">最後一步</span><h3>補登表單</h3><p class="note">核對區填入的數值會出現在這裡，也可以直接手動輸入。</p></div>
 <p id="manual-draft-status" role="status" aria-live="polite" class="note"></p>
-<p class="note">只需填月份與月造訪量即可儲存；其他欄位可留空，之後再補。</p>
+<div class="manual-save-bar"><span>核對月份與月造訪量後即可儲存；其他欄位可留空。</span><button type="submit" class="primary">儲存此月份</button></div>
 <div class="field-grid manual-basics">
 <div class="field"><label for="manual-month">月份</label><select id="manual-month" name="month"${invalid('month')}>${form.choices
       .map(

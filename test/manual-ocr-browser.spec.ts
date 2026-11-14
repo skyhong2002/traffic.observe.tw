@@ -112,6 +112,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page
         .locator('#manual-screenshots')
         .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography.png', import.meta.url)));
+      await page.locator('[data-desktop-channels] > summary').click();
+      await page.locator('#manual-desktop_SearchOrganic').fill('40');
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).count()).toBe(1);
@@ -119,6 +121,12 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).inputValue()).toBe('38.72');
       expect(await page.getByRole('textbox', { name: '核對桌面限定・聯盟行銷', exact: true }).inputValue()).toBe('4.67');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('.ocr-apply-error').innerText()).toContain('101.28%');
+      expect(await page.locator('.ocr-apply-error').innerText()).toContain('40%');
+      expect(await page.getByRole('textbox', { name: '核對桌面限定・社群廣告', exact: true }).getAttribute('aria-invalid')).toBeNull();
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('填入桌面限定・自然搜尋');
+      await page.getByRole('checkbox', { name: '填入桌面限定・自然搜尋', exact: true }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       expect(await page.locator('#manual-desktop_SearchOrganic').inputValue()).toBe('38.72');
@@ -172,6 +180,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         if (names.length === 2) {
           await fresh.getByRole('button', { name: '定位月造訪量', exact: true }).click();
           expect(await fresh.locator('.ocr-image-stage > img').getAttribute('alt')).toContain('s3-engagement.png');
+        }
+        const countryCheck = fresh.getByRole('checkbox', { name: '填入國家占比', exact: true });
+        if (!(await countryCheck.isChecked())) {
+          expect(await fresh.locator('#ocr-status-countries').innerText()).toContain('不完整');
+          await countryCheck.check();
         }
         await fresh.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
         await fresh.getByRole('button', { name: '填入勾選欄位' }).click();
@@ -268,28 +281,42 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       const taiwan = page.getByRole('textbox', { name: '核對台灣占比', exact: true });
       expect(await taiwan.inputValue()).toBe('');
       expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(false);
+      expect(await page.getByRole('checkbox', { name: '填入國家占比', exact: true }).isChecked()).toBe(false);
+      expect(await page.locator('#ocr-status-countries').innerText()).toContain('不完整');
+      await taiwan.focus();
+      await page.locator('[data-field=taiwan] .ocr-full-image').click();
+      expect(await page.locator('.ocr-original-dialog').isVisible()).toBe(true);
+      await page.getByRole('button', { name: '返回台灣占比補正' }).click();
+      await page.waitForFunction('document.activeElement.id === "ocr-edit-taiwan"');
       await taiwan.fill('101');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
+      const leaving = page.waitForEvent('dialog');
+      await page.evaluate('setTimeout(() => location.reload(), 0)');
+      const leavePrompt = await leaving;
+      expect(leavePrompt.type()).toBe('beforeunload');
+      await leavePrompt.dismiss();
+      expect(await taiwan.inputValue()).toBe('101');
       await taiwan.fill('93.23');
       await page.getByRole('button', { name: /移除截圖 1/ }).click();
       expect(await page.getByRole('button', { name: '保留目前核對' }).isVisible()).toBe(true);
       await page.getByRole('button', { name: '保留目前核對' }).click();
       expect(await taiwan.inputValue()).toBe('93.23');
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toContain('移除截圖');
       expect(await page.getByRole('checkbox', { name: '填入聯盟行銷', exact: true }).count()).toBe(0);
       expect(await page.getByRole('checkbox', { name: '填入桌面限定・聯盟行銷', exact: true }).isChecked()).toBe(false);
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('TW 92.23\nUS 2.13');
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
-      expect(await page.locator('.ocr-apply-error').innerText()).toContain('不一致');
+      expect(await page.locator('#ocr-status-taiwan').innerText()).toContain('不一致');
       expect(await taiwan.getAttribute('aria-describedby')).toBe('ocr-status-taiwan');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('US 2.13\nHK 1.59\nID 0.58\nMY 0.57');
       await page.locator('[data-desktop-channels] > summary').click();
       await page.locator('#manual-desktop_Direct').fill('12.99');
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
-      expect(await page.locator('[data-progress]').innerText()).toContain('已變更');
+      expect(await page.locator('.ocr-apply-error').innerText()).toContain('已變更');
       expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
       await page.getByRole('button', { name: '更新目前內容，保留核對修正' }).click();
       expect(await taiwan.inputValue()).toBe('93.23');
@@ -301,6 +328,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.ocr-workspace').isVisible()).toBe(true);
       expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).getAttribute('readonly')).not.toBeNull();
       expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
+      expect(await page.evaluate('document.activeElement?.textContent')).toBe('前往表單儲存 ↓');
       expect(await page.locator('#manual-taiwan').getAttribute('data-ocr-filled')).toBe('true');
       await page.locator('.manual-form .ocr-form-source').filter({ hasText: '手動補正' }).click();
       expect(await page.locator('.ocr-field-row.is-active').getAttribute('data-field')).toBe('taiwan');
