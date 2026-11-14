@@ -1435,9 +1435,11 @@
 }
 .ocr-crop-note {
   display: block;
-  margin: 4px 0;
+  margin: 0;
+  padding: 4px 8px;
   font-size: 13px;
-  color: var(--muted);
+  color: #475569;
+  background: #fff;
 }
 .manual-form:has(.ocr-save-warning:not([hidden])) #manual-draft-status {
   display: none;
