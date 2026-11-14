@@ -32,3 +32,11 @@ reading with PSM 6 recovers Taiwan. The browser regression verifies the actual
 JPEG, on a fresh tab without a draft, as well as both original screenshots in
 engagement-first order. Only country shares merge across segmentation modes;
 conflicting values are omitted and no remainder calculation supplies Taiwan.
+
+`s3-geography-telegram.jpg` is the exact Telegram-compressed file supplied
+on 2026-11-14 after the user reported that Taiwan was still absent. Its TSV
+was obtained from the browser with the pinned local worker, PSM 11 and 2x
+canvas enlargement. Tests cover this actual JPEG, not just a reconstructed
+compression. Optional parser source metadata preserves the coordinates of
+accepted values; country retries also retain a valid Taiwan scalar when a
+separate misread country invalidates the retry's combined country list.

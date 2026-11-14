@@ -48,8 +48,8 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         );
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
-      expect(await page.locator('[data-review]').innerText()).toContain('29.54M');
-      expect(await page.locator('[data-review]').innerText()).toContain('94.16');
+      expect(await page.getByRole('textbox', { name: '核對月造訪量', exact: true }).inputValue()).toBe('29.54M');
+      expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).inputValue()).toBe('94.16');
       expect(await page.locator('#manual-visits').inputValue()).toBe('30M');
       expect(await page.getByRole('checkbox', { name: '填入月造訪量', exact: true }).isChecked()).toBe(false);
       expect(await page.getByRole('button', { name: '填入勾選欄位' }).isDisabled()).toBe(true);
@@ -80,10 +80,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       const extensionReview = await page.locator('[data-review]').innerText();
-      expect(extensionReview).toContain('416.5K');
-      expect(extensionReview).toContain('97.02');
+      expect(await page.getByRole('textbox', { name: '核對月造訪量', exact: true }).inputValue()).toBe('416.5K');
+      expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).inputValue()).toBe('97.02');
       expect(extensionReview).toContain('Desktop Only');
-      expect(extensionReview).toContain('60.69');
+      expect(await page.getByRole('textbox', { name: '核對桌面限定・直接造訪', exact: true }).inputValue()).toBe('60.69');
       expect(await page.getByRole('checkbox', { name: '填入桌面限定・直接造訪', exact: true }).isChecked()).toBe(true);
       expect(await page.getByRole('checkbox', { name: '填入直接造訪', exact: true }).count()).toBe(0);
       expect(await page.locator('#manual-visits').inputValue()).toBe('');
@@ -102,6 +102,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
 
       // The reported failure: a Country card without its Top 5 title, followed
       // by Desktop Only sources. It must also work when selected by itself.
+      await page.setViewportSize({ width: 1280, height: 900 });
       await page.goto(origin + '/site/s3.com.tw/manual/');
       await page
         .locator('#manual-screenshots')
@@ -109,9 +110,9 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
       await page.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
       expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).count()).toBe(1);
-      expect(await page.locator('[data-review]').innerText()).toContain('93.23');
-      expect(await page.locator('[data-review]').innerText()).toContain('38.72');
-      expect(await page.locator('[data-review]').innerText()).toContain('4.67');
+      expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).inputValue()).toBe('93.23');
+      expect(await page.getByRole('textbox', { name: '核對桌面限定・自然搜尋', exact: true }).inputValue()).toBe('38.72');
+      expect(await page.getByRole('textbox', { name: '核對桌面限定・聯盟行銷', exact: true }).inputValue()).toBe('4.67');
       await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
       await page.getByRole('button', { name: '填入勾選欄位' }).click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
@@ -137,7 +138,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-visits').inputValue()).toBe('482.4K');
       // Fresh tabs avoid drafts masking an omitted country. Test the normal
       // engagement-first order and the compressed image that loses the Taiwan label.
-      for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg']]) {
+      for (const names of [['s3-engagement.png', 's3-geography.png'], ['s3-geography-compressed.jpg'], ['s3-geography-telegram.jpg']]) {
         const fresh = await context.newPage();
         fresh.on('pageerror', (e) => errors.push(e.message));
         await fresh.goto(origin + '/site/s3.com.tw/manual/');
@@ -148,9 +149,30 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         await fresh.getByRole('button', { name: '辨識截圖', exact: true }).click();
         await fresh.getByRole('heading', { name: '核對辨識結果' }).waitFor({ timeout: 30_000 });
         expect(await fresh.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(true);
+        await fresh.getByRole('button', { name: '定位台灣占比', exact: true }).click();
+        expect(await fresh.locator('.ocr-marker.is-active').count()).toBeGreaterThan(0);
+        expect(await fresh.locator('.ocr-image-stage > img').getAttribute('alt')).toContain(names[names.length - 1]);
+        const box = await fresh.locator('.ocr-marker.is-active').first().boundingBox();
+        const imageBox = await fresh.locator('.ocr-image-stage > img').boundingBox();
+        expect(box && imageBox && Math.abs(box.y - imageBox.y) / imageBox.height).toBeLessThan(0.2);
+        expect(await fresh.locator('#manual-taiwan').inputValue()).toBe('');
+        await fresh.getByRole('button', { name: '放大', exact: true }).click();
+        expect(await fresh.getByRole('button', { name: '符合寬度' }).getAttribute('aria-pressed')).toBe('true');
+        await fresh.getByRole('button', { name: '符合寬度' }).click();
+        await fresh.getByRole('checkbox', { name: '顯示標記', exact: true }).uncheck();
+        expect(await fresh.locator('.ocr-overlay').isVisible()).toBe(false);
+        await fresh.getByRole('checkbox', { name: '顯示標記', exact: true }).check();
+        if (names.length === 2) {
+          await fresh.getByRole('button', { name: '定位月造訪量', exact: true }).click();
+          expect(await fresh.locator('.ocr-image-stage > img').getAttribute('alt')).toContain('s3-engagement.png');
+        }
         await fresh.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
         await fresh.getByRole('button', { name: '填入勾選欄位' }).click();
         expect(await fresh.locator('#manual-taiwan').inputValue()).toBe('93.23');
+        expect(await fresh.locator('.ocr-workspace').isVisible()).toBe(true);
+        expect(await fresh.getByRole('button', { name: '前往表單儲存 ↓' }).isVisible()).toBe(true);
+        await fresh.setViewportSize({ width: 390, height: 844 });
+        expect(await fresh.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
         expect(await fresh.locator('#manual-countries').inputValue()).toContain('TW 93.23');
         if (names.length === 2) {
           expect(await fresh.locator('#manual-visits').inputValue()).toBe('482.4K');
@@ -182,4 +204,90 @@ it.skipIf(!existsSync(chromium.executablePath()))(
     }
   },
   60_000,
+);
+
+it.skipIf(!existsSync(chromium.executablePath()))(
+  'exposes a missing Taiwan row, validates corrections, and preserves source review after applying',
+  async () => {
+    const { readFileSync } = await import('node:fs');
+    // Deterministic unreadable-label fixture exercises the correction path;
+    // the real Telegram JPEG is independently recognized in the test above.
+    const missing = readFileSync(new URL('./fixtures/manual-ocr/s3-geography-telegram.tsv', import.meta.url), 'utf8').replace(
+      /\tTaiwan/g,
+      '\tUnreadable',
+    );
+    const server = Fastify();
+    registerManualOcr(server);
+    server.get('/style.css', async (_request, reply) => reply.type('text/css').send(STYLE));
+    server.get('/site/s3.com.tw/manual/', async (_request, reply) =>
+      reply
+        .type('text/html')
+        .send(manualPage({ domain: 's3.com.tw', name: '小三美日' }, { months: [], choices: ['202610', '202609'], free: [] })),
+    );
+    const origin = await server.listen({ host: '127.0.0.1', port: 0 });
+    const browser = await chromium.launch({ headless: true });
+    try {
+      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      await context.addInitScript((tsv) => {
+        Object.assign(globalThis, {
+          Tesseract: {
+            createWorker: async () => ({
+              setParameters: async () => {},
+              recognize: async () => ({ data: { tsv } }),
+              terminate: async () => {},
+            }),
+          },
+        });
+      }, missing);
+      const page = await context.newPage();
+      await page.goto(origin + '/site/s3.com.tw/manual/');
+      await page
+        .locator('#manual-screenshots')
+        .setInputFiles(fileURLToPath(new URL('./fixtures/manual-ocr/s3-geography-telegram.jpg', import.meta.url)));
+      await page.getByRole('button', { name: '辨識截圖', exact: true }).click();
+      await page.getByRole('heading', { name: '核對辨識結果' }).waitFor();
+      expect(await page.locator('.ocr-notices').innerText()).toContain('台灣占比未讀到');
+      const taiwan = page.getByRole('textbox', { name: '核對台灣占比', exact: true });
+      expect(await taiwan.inputValue()).toBe('');
+      expect(await page.getByRole('checkbox', { name: '填入台灣占比', exact: true }).isChecked()).toBe(false);
+      await taiwan.fill('101');
+      await page.getByRole('checkbox', { name: /我已確認截圖屬於/ }).check();
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await taiwan.getAttribute('aria-invalid')).toBe('true');
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
+      await taiwan.fill('93.23');
+      expect(await page.getByRole('checkbox', { name: '填入聯盟行銷', exact: true }).count()).toBe(0);
+      expect(await page.getByRole('checkbox', { name: '填入桌面限定・聯盟行銷', exact: true }).isChecked()).toBe(false);
+      await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('TW 92.23\nUS 2.13');
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('[data-progress]').innerText()).toContain('不一致');
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
+      await page.getByRole('textbox', { name: '核對國家占比', exact: true }).fill('US 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+      await page.locator('#manual-desktop_Direct').fill('13.99');
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('[data-progress]').innerText()).toContain('已變更');
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('');
+      await page.locator('#manual-desktop_Direct').fill('');
+      await page.getByRole('button', { name: '填入勾選欄位' }).click();
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
+      expect(await page.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+      expect(await page.locator('.ocr-workspace').isVisible()).toBe(true);
+      expect(await page.getByRole('textbox', { name: '核對台灣占比', exact: true }).getAttribute('readonly')).not.toBeNull();
+      expect(await page.locator('[data-progress]').innerText()).toContain('尚未儲存');
+      expect(await page.locator('#manual-taiwan').getAttribute('data-ocr-filled')).toBe('true');
+      await page.locator('.manual-form .ocr-form-source').filter({ hasText: '手動補正' }).click();
+      expect(await page.locator('.ocr-field-row.is-active').getAttribute('data-field')).toBe('taiwan');
+      await page.getByRole('button', { name: '桌面限定流量來源 10', exact: true }).click();
+      expect(await page.locator('.ocr-results').evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+      await page.setViewportSize({ width: 390, height: 844 });
+      expect(await page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')).toBe(true);
+      page.on('dialog', (dialog) => dialog.accept());
+      await page.reload();
+      expect(await page.locator('#manual-taiwan').inputValue()).toBe('93.23');
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  },
+  30_000,
 );

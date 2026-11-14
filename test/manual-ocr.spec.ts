@@ -169,6 +169,34 @@ describe('Similarweb screenshot extraction', () => {
     expect(impossible.fields.taiwan).toBeUndefined();
     expect(impossible.warnings.join(' ')).toContain('超過 100%');
   });
+  it('preserves independently read Taiwan when another bad country invalidates the retry list', async () => {
+    const tsv = fixture('s3-geography-telegram');
+    const primary = parseScreenshot(tsv.replace(/\tTaiwan/g, '\tUnreadable'), true);
+    expect(primary.fields.taiwan).toBeUndefined();
+    // PSM 6 can read Malaysia 0.57% as 57%; that rejects its list even though
+    // the same pass has a high-confidence Taiwan scalar and source location.
+    const secondary = parseScreenshot(tsv.replace('0.57%', '57%'), true);
+    expect(secondary.fields.taiwan).toBe('93.23');
+    expect(secondary.fields.countries).toBeUndefined();
+    const result = await reviewScreenshotCountries(tsv, primary, async () => secondary);
+    expect(result.fields.taiwan).toBe('93.23');
+    expect(result.fields.countries).toContain('TW 93.23');
+    expect(result.sources?.taiwan[0]).toMatchObject({ value: '93.23', y: 98 });
+    expect(result.sources?.countries.some((s) => s.value === 'TW 93.23')).toBe(true);
+  });
+  it('retains original image coordinates for values and drops sources for conflicting fields', () => {
+    const first = parseScreenshot(fixture('s3-geography-telegram'), true);
+    const region = first.sources?.taiwan[0];
+    expect(region).toMatchObject({ value: '93.23', x: 70, y: 98 });
+    expect(region?.w).toBeGreaterThan(1100);
+    expect(first.countryTable).toBe(true);
+    expect(first.sources?.countries.map((s) => s.value)).toContain('TW 93.23');
+    const conflicting = parseScreenshot(fixture('s3-geography-telegram').replace('93.23%', '92.23%'), true);
+    const result = mergeScreenshots([first, conflicting]);
+    expect(result.fields.taiwan).toBeUndefined();
+    expect(result.sources?.taiwan).toBeUndefined();
+    expect(result.sources?.desktop_Direct).toHaveLength(2);
+  });
   it('skips country retries for complete tables, absent tables and restricted device scopes', async () => {
     let attempts = 0;
     for (const tsv of [fixture('engagement'), fixture('channels'), fixture('extension-geography').replace(/\t1143\t/g, '\t10\t')]) {

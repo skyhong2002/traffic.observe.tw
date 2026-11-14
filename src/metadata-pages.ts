@@ -1,7 +1,7 @@
 import { type ManualMonth, manualChannels, manualDesktopChannels, manualDetailFields, manualDetailValues, proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals } from './manual-breakdowns.ts';
 import { MANUAL_FORM_SCRIPT } from './manual-form-script.ts';
-import { OCR_IMPORTER } from './manual-ocr.ts';
+import { OCR_IMPORTER, OCR_STYLE } from './manual-ocr.ts';
 import type { ManagedSite } from './metadata.ts';
 import { displayHtml, favicon, html, layout, siteTabs, vol, volText } from './pages.ts';
 
@@ -182,17 +182,20 @@ export function manualPage(site: Pick<ManagedSite, 'domain' | 'name'>, form: Man
     siteHead(site, 'manual'),
     `${form.error ? `<p class="flash" id="manual-error" role="alert" tabindex="-1"><b>尚未儲存。</b>${html(form.error)} 已填內容仍保留，請修正後再按儲存。${(form.errorFields ?? []).map((key) => `<a href="#manual-${html(key)}">前往欄位</a>`).join('　')}</p>` : flash(undefined, form.message)}
 <p class="callout manual-status${needed ? ' warn' : ''}"><b>Similarweb 免費資料</b>　${free}${needed ? '。沒有估算的月份可以從 Similarweb 平台抄數字補上。' : '。免費資料有估算的月份仍優先使用免費資料。'}</p>
-<section class="block"><h2>補登一個月份</h2>
-<ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol>
+<link rel="stylesheet" href="${OCR_STYLE}">
+<section class="block manual-workspace"><div class="manual-intro"><div><span class="ocr-eyebrow">SIMILARWEB · 人工補登</span><h2>把截圖變成可核對的資料</h2><p class="note">先對照原圖確認數值，再填入表單儲存。</p></div><a class="ocr-platform-link" href="${html(proUrl(site.domain))}" rel="noopener">開啟 Similarweb ↗</a></div>
+<details class="manual-instructions"><summary>如何取得截圖與補登？</summary><ol class="steps"><li>用自己的 Similarweb 帳號登入後，打開<a href="${html(proUrl(site.domain))}" rel="noopener">這個網站在平台上的頁面 ↗</a>。</li><li>照下面每個欄位註明的位置抄數字。不需要購買 Pro；依帳號可查看的月份補登，免費帳號通常只看得到最近一個月。</li><li>按「儲存」，排行與網站頁會立刻改用這個數字（Similarweb 免費資料有估算的月份仍以它為準）。</li></ol></details>
 <section id="manual-import" class="manual-import" data-domain="${html(site.domain)}" aria-labelledby="manual-import-heading">
-<h3 id="manual-import-heading">從截圖填入</h3>
-<p class="note">選擇同一網站、同一月份的 Similarweb 英文版網站或瀏覽器外掛截圖，可一次選取概況、國家與流量來源（最多 4 張，每張 10 MB）。辨識在瀏覽器內完成，圖片不會傳到伺服器，也沒有 AI token 費用。Desktop Only 渠道會填入獨立的桌面限定欄位；Mobile Only 目前不支援。先核對結果，再選擇要填入的欄位。</p>
-<label for="manual-screenshots">選擇截圖</label><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple>
-<button type="button" data-recognize>辨識截圖</button>
-<p role="status" aria-live="polite" data-progress></p><div data-review></div>
+<ol class="ocr-steps" aria-label="截圖匯入步驟"><li data-step="select" aria-current="step"><span>1</span> 選擇截圖</li><li data-step="review"><span>2</span> 對照與核對</li><li data-step="save"><span>3</span> 填入後儲存</li></ol>
+<div class="ocr-upload-head"><div><h3 id="manual-import-heading">從截圖填入</h3><p class="note">同一網站、同一月份的英文版截圖；網站或外掛皆可。</p></div><span class="ocr-local-badge">本機辨識・圖片不上傳</span></div>
+<div class="ocr-upload" data-dropzone><div><label for="manual-screenshots">選擇截圖，也可以拖曳到這裡</label><p class="note">概況、國家、流量來源 · 最多 4 張 · PNG / JPG / WebP · 每張 10 MB</p><input type="file" id="manual-screenshots" accept="image/png,image/jpeg,image/webp" multiple></div><button type="button" class="primary" data-recognize>辨識截圖</button></div>
+<div class="ocr-files" data-files></div>
+<p class="ocr-progress" role="status" aria-live="polite" data-progress></p><div data-review></div>
+<details class="ocr-help"><summary>辨識範圍與資料處理</summary><p class="note">辨識在瀏覽器內完成，沒有 AI token 費用。Desktop Only 渠道填入獨立的桌面限定欄位，Mobile Only 目前不支援。已有內容預設保留；辨識結果需核對並按「儲存」才會生效。</p></details>
 <noscript><p>截圖辨識需要啟用 JavaScript，仍可使用下方表單手動補登。</p></noscript>
 </section>
 <form class="form manual-form" method="post" action="/site/${html(site.domain)}/manual/" data-has-error="${Boolean(form.error)}" data-completed-month="${html(form.completedMonth ?? '')}">
+<div class="manual-form-title"><span class="ocr-eyebrow">最後一步</span><h3>補登表單</h3><p class="note">核對區填入的數值會出現在這裡，也可以直接手動輸入。</p></div>
 <p id="manual-draft-status" role="status" aria-live="polite" class="note"></p>
 <p class="note">只需填月份與月造訪量即可儲存；其他欄位可留空，之後再補。</p>
 <div class="field-grid manual-basics">

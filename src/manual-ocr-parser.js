@@ -132,11 +132,16 @@ export async function reviewScreenshotCountries(tsv, primary, recognize) {
   const end = rows.find((r) => r.center > heading.center && /\bSee\s*more\s*countries\b|\bTraffic\s*Sources\b/i.test(r.text));
   const table = rows.filter((r) => r.center > heading.center && (!end || r.center < end.center));
   const expected = table.filter((r) => r.words.some((w) => /^\d+(?:\.\d+)?%$/.test(w.text))).length;
-  const sharesOf = (result) =>
-    (result.fields.countries || '')
+  const sharesOf = (result) => {
+    const shares = (result.fields.countries || '')
       .split('\n')
       .filter(Boolean)
       .map((line) => line.split(' '));
+    // An independently recognized Taiwan scalar stays usable even when another
+    // bad country made that pass reject its whole list (e.g. 0.57% read as 57%).
+    if (result.fields.taiwan !== undefined && !shares.some(([code]) => code === 'TW')) shares.push(['TW', result.fields.taiwan]);
+    return shares;
+  };
   const initial = sharesOf(primary);
   if (initial.length >= 5 && initial.length >= expected) return primary;
   const secondary = await recognize();
@@ -167,11 +172,35 @@ export async function reviewScreenshotCountries(tsv, primary, recognize) {
       .join('\n');
   if (shares.has('TW')) fields.taiwan = shares.get('TW');
   if (shares.size < expected) warnings.push('國家表仍有漏辨識，請核對台灣占比與國家列表，缺少的資料可手動補上。');
-  return { ...primary, fields, warnings: [...new Set(warnings)] };
+  const result = { ...primary, fields, warnings: [...new Set(warnings)] };
+  if (primary.sources) {
+    result.sources = { ...primary.sources };
+    for (const key of ['countries', 'taiwan']) {
+      result.sources[key] = [
+        ...(primary.sources[key] || []),
+        ...(secondary.sources?.[key] || []),
+        ...(key === 'countries'
+          ? [...(primary.sources.taiwan || []), ...(secondary.sources?.taiwan || [])].map((s) => ({ ...s, value: 'TW ' + s.value }))
+          : []),
+      ].filter((source) =>
+        key === 'countries' ? (fields.countries || '').split('\n').includes(source.value) : fields.taiwan === source.value,
+      );
+    }
+  }
+  return result;
 }
 
-export function parseScreenshot(tsv) {
+export function parseScreenshot(tsv, includeSources = false) {
   let rows = rowsOf(tsv);
+  const sourceRegions = {};
+  const record = (key, value, words) => {
+    if (!includeSources) return;
+    const x = Math.min(...words.map((w) => w.x)),
+      y = Math.min(...words.map((w) => w.y));
+    const right = Math.max(...words.map((w) => w.x + w.w)),
+      bottom = Math.max(...words.map((w) => w.y + w.h));
+    (sourceRegions[key] ||= []).push({ value, x, y, w: right - x, h: bottom - y });
+  };
   const fields = {},
     conflicts = new Set(),
     warnings = [],
@@ -205,7 +234,7 @@ export function parseScreenshot(tsv) {
   const usableText = rows.map((r) => r.text).join('\n');
   if (!/\bWorldwide\b/i.test(usableText) || !/\bAll\s*traffic\b/i.test(usableText))
     warnings.push('截圖未完整辨識出 Worldwide／All traffic，請核對範圍。');
-  const put = (key, word, row) => {
+  const put = (key, word, row, regionWords) => {
     if (conflicts.has(key)) return;
     if (word.confidence < 80 || bounded(row, word)) {
       warnings.push(`${screenshotFields[key]}不夠清楚或含有界限，請手動核對。`);
@@ -216,7 +245,10 @@ export function parseScreenshot(tsv) {
       delete fields[key];
       conflicts.add(key);
       warnings.push(`${screenshotFields[key]}出現多個不同數值，請手動輸入。`);
-    } else fields[key] = value;
+    } else {
+      fields[key] = value;
+      record(key, value, regionWords || row.words.filter((w) => w.x <= word.x + word.w));
+    }
   };
   for (const [key, pattern, valuePattern] of [
     ['visits', /\b(?:Monthly|Total)\s*visits\b/i, /^\d+(?:\.\d+)?[KMB]$/i],
@@ -248,6 +280,11 @@ export function parseScreenshot(tsv) {
         continue;
       }
       countryShares.push({ code, value: value.text.slice(0, -1) });
+      record(
+        'countries',
+        code + ' ' + value.text.slice(0, -1),
+        row.words.filter((w) => w.x <= value.x + value.w),
+      );
       if (code === 'TW') put('taiwan', value, row);
     }
   }
@@ -273,7 +310,7 @@ export function parseScreenshot(tsv) {
         const candidates = rows
           .filter((r) => r.center > heading.center && r.center < row.center - row.height)
           .flatMap((r) => r.words.filter((w) => percent(w) && Math.abs(w.x + w.w / 2 - label.center) < gap * 0.4).map((w) => ({ w, r })));
-        if (candidates.length === 1) put(label.key, candidates[0].w, candidates[0].r);
+        if (candidates.length === 1) put(label.key, candidates[0].w, candidates[0].r, [candidates[0].w]);
         else warnings.push(`${screenshotFields[label.key]}未能確定圖表數值，請手動核對。`);
       });
       break;
@@ -291,7 +328,12 @@ export function parseScreenshot(tsv) {
         }
     else warnings.push('流量來源未辨識出 Worldwide／All traffic，已略過該區塊。');
   }
-  return { fields, months: [...months], warnings: [...new Set(warnings)] };
+  const result = { fields, months: [...months], warnings: [...new Set(warnings)] };
+  if (includeSources) {
+    result.sources = Object.fromEntries(Object.entries(sourceRegions).filter(([key]) => fields[key] !== undefined));
+    if (geography) result.countryTable = true;
+  }
+  return result;
 }
 
 export function mergeScreenshots(results) {
@@ -311,5 +353,14 @@ export function mergeScreenshots(results) {
     delete fields[key];
     warnings.push(`不同截圖的${screenshotFields[key]}不一致，請手動輸入。`);
   }
-  return { fields, months: [...months], warnings: [...new Set(warnings)] };
+  const result = { fields, months: [...months], warnings: [...new Set(warnings)] };
+  if (results.some((r) => r.sources)) {
+    result.sources = {};
+    for (const source of results)
+      for (const [key, regions] of Object.entries(source.sources || {})) {
+        if (fields[key] !== undefined) (result.sources[key] ||= []).push(...regions);
+      }
+    result.countryTable = results.some((r) => r.countryTable);
+  }
+  return result;
 }

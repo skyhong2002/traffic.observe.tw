@@ -4,18 +4,22 @@ import type { FastifyInstance } from 'fastify';
 
 const parser = new URL('./manual-ocr-parser.js', import.meta.url);
 const importer = new URL('./manual-ocr-importer.js', import.meta.url);
+const stylesheet = new URL('./manual-ocr.css', import.meta.url);
 const version = createHash('sha256')
   .update(readFileSync(parser))
   .update(readFileSync(importer))
+  .update(readFileSync(stylesheet))
   .update('tesseract7.0.0-eng1.0.0')
   .digest('hex')
   .slice(0, 12);
 export const OCR_BASE = `/manual-ocr/${version}`;
 export const OCR_IMPORTER = `${OCR_BASE}/importer.js`;
+export const OCR_STYLE = `${OCR_BASE}/review.css`;
 
 /** Only these pinned package assets are served. OCR never needs an external CDN. */
 export function registerManualOcr(app: FastifyInstance) {
   const assets = new Map<string, { url: URL; type: string }>([
+    ['review.css', { url: stylesheet, type: 'text/css; charset=utf-8' }],
     ['parser.js', { url: parser, type: 'text/javascript; charset=utf-8' }],
     ['importer.js', { url: importer, type: 'text/javascript; charset=utf-8' }],
     ['tesseract.min.js', { url: new URL('../node_modules/tesseract.js/dist/tesseract.min.js', import.meta.url), type: 'text/javascript' }],

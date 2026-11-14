@@ -1,7 +1,17 @@
+export interface ScreenshotSource {
+  value: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  image?: number;
+}
 export interface ScreenshotResult {
   fields: Record<string, string>;
   months: string[];
   warnings: string[];
+  sources?: Record<string, ScreenshotSource[]>;
+  countryTable?: boolean;
 }
 export const screenshotFields: Record<string, string>;
 export function refineScreenshotNumbers(
@@ -13,5 +23,5 @@ export function reviewScreenshotCountries(
   primary: ScreenshotResult,
   recognize: () => Promise<ScreenshotResult>,
 ): Promise<ScreenshotResult>;
-export function parseScreenshot(tsv: string): ScreenshotResult;
+export function parseScreenshot(tsv: string, includeSources?: boolean): ScreenshotResult;
 export function mergeScreenshots(results: ScreenshotResult[]): ScreenshotResult;
