@@ -129,6 +129,7 @@ const comparisonValue = (key, value) => (key === 'countries' ? readableCountries
 function offerCountryUndo(rows, target, code, original, focus) {
   rows.parentElement.querySelector('.ocr-country-undo')?.remove();
   const notice = text('div', '', 'ocr-country-undo');
+  notice.setAttribute('role', 'status');
   notice.append(text('span', '已移除' + countryDisplayNames.of(code) + '。'));
   const undo = text('button', '復原移除' + countryDisplayNames.of(code));
   undo.type = 'button';
@@ -158,6 +159,10 @@ formCountryWarning.setAttribute('role', 'status');
 formCountryWarning.id = 'manual-country-consistency';
 formTaiwan.setAttribute('aria-describedby', 'manual-country-consistency');
 formCountryRaw.after(formCountryWarning);
+const formTaiwanWarning = text('p', '', 'ocr-cross-warning');
+formTaiwanWarning.id = 'manual-taiwan-consistency';
+formTaiwan.after(formTaiwanWarning);
+formTaiwan.setAttribute('aria-describedby', formTaiwanWarning.id);
 function renderFormCountries() {
   const names = new Intl.DisplayNames(['zh-Hant'], { type: 'region' });
   const listedTw = /^TW\s+(\d+(?:\.\d+)?)$/m.exec(formCountries.value);
@@ -167,6 +172,8 @@ function renderFormCountries() {
     ? '台灣占比 ' + formTaiwan.value + '% 與國家列表的台灣 ' + listedTw[1] + '% 不一致，請先修正再儲存。'
     : '';
   formTaiwan.setCustomValidity(mismatch ? formCountryWarning.textContent : '');
+  formTaiwanWarning.hidden = !mismatch;
+  formTaiwanWarning.textContent = formCountryWarning.textContent;
   const codes = new Set();
   for (const line of formCountries.value.split('\n').filter(Boolean)) {
     const [code, share = ''] = line.trim().toUpperCase().split(/\s+/);
@@ -1300,6 +1307,12 @@ function showReview(result) {
         const countryInputs = new Map();
         choice.renderCountryRows = () => {
           const lines = input.value.split('\n').filter(Boolean);
+          const oldShares = new Map(
+            choice.before
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => line.trim().split(/\s+/)),
+          );
           input.rows = Math.max(3, Math.min(10, lines.length));
           const codes = new Set();
           choice.namedError = '';
@@ -1310,7 +1323,10 @@ function showReview(result) {
             let entry = countryInputs.get(code);
             if (!entry) {
               const label = text('div', '', 'ocr-country-row');
-              label.append(text('span', countryNames.of(code)));
+              const name = text('span', '', 'ocr-country-name');
+              const oldValue = text('small', '', 'ocr-country-before');
+              name.append(text('span', countryNames.of(code)), oldValue);
+              label.append(name);
               const valueWrap = text('span', '', 'ocr-country-share');
               const percentInput = document.createElement('input');
               percentInput.setAttribute('aria-label', '國家列表・' + countryNames.of(code) + '占比');
@@ -1341,7 +1357,7 @@ function showReview(result) {
               error.setAttribute('role', 'status');
               percentInput.setAttribute('aria-describedby', error.id);
               label.append(error);
-              entry = { label, input: percentInput, remove, error };
+              entry = { label, input: percentInput, remove, error, oldValue };
               countryInputs.set(code, entry);
               percentInput.addEventListener('focus', () => selectField(key));
               percentInput.addEventListener('input', () => {
@@ -1356,6 +1372,12 @@ function showReview(result) {
             if (document.activeElement !== entry.input) entry.input.value = share.replace(/%$/, '');
             entry.input.readOnly = applied;
             entry.remove.hidden = applied;
+            const oldShare = oldShares.get(code);
+            const changed = oldShare !== undefined && Number(oldShare) !== Number(share);
+            entry.oldValue.hidden = oldShare === undefined;
+            entry.oldValue.textContent =
+              oldShare === undefined ? '' : (applied ? '填入前 ' : '目前 ') + oldShare + '%' + (changed ? ' → ' + share + '%' : '・相同');
+            entry.oldValue.classList.toggle('is-different', changed);
             const valid = /^\d+(?:\.\d+)?%?$/.test(share) && Number(share.replace(/%$/, '')) <= 100;
             entry.input.setAttribute('aria-invalid', String(!valid));
             entry.error.hidden = valid;
@@ -1371,6 +1393,13 @@ function showReview(result) {
               countryInputs.delete(code);
             }
           }
+          const removed = [...oldShares].filter(([code]) => !codes.has(code));
+          previous.hidden = !removed.length;
+          previous.textContent = removed.length
+            ? '目前另有：' +
+              readableCountries(removed.map(([code, share]) => code + ' ' + share + '%').join('、')) +
+              '；覆寫整份列表會移除。'
+            : '';
         };
         choice.renderCountryRows();
         const hint = text('small', '每行：TW 93.23（兩碼國家代碼＋百分比）', 'ocr-country-hint');
@@ -1396,6 +1425,13 @@ function showReview(result) {
             const repair = text('button', '補上原圖第 ' + item.row + ' 列・' + item.share + '% 的國家');
             repair.type = 'button';
             repair.addEventListener('click', () => {
+              if (applied) {
+                formCountryHelper.open = true;
+                formCountryTools.share.value = item.share;
+                formCountryTools.search.focus();
+                formCountryTools.search.scrollIntoView({ block: 'center' });
+                return;
+              }
               countryHelper.open = true;
               share.value = item.share;
               countrySearch.focus();
@@ -1611,6 +1647,7 @@ function showReview(result) {
         choice.check.checked = false;
         choice.previous.textContent = latest[choice.key] ? '目前：' + comparisonValue(choice.key, latest[choice.key]) + choice.unit : '';
         choice.status.textContent = '表單已變更，預設保留；確認覆寫才勾選';
+        choice.renderCountryRows?.();
       }
     }
     localError.hidden = true;
@@ -1627,9 +1664,11 @@ function showReview(result) {
   const shortcutButton = text('button', '前往填入確認 ↓');
   shortcutButton.type = 'button';
   function goToHandoff() {
-    const target = applied ? returnToForm || form.elements.namedItem('visits') : confirmed;
-    target.focus({ preventScroll: true });
-    (applied ? target.closest('.field') : confirmation).scrollIntoView({ block: 'center' });
+    if (applied) focusFormField(returnToForm?.name || 'visits');
+    else {
+      confirmed.focus({ preventScroll: true });
+      confirmation.scrollIntoView({ block: 'center' });
+    }
   }
   function focusFormField(key) {
     const field = form.elements.namedItem(key);
@@ -1656,8 +1695,7 @@ function showReview(result) {
   returnButton.type = 'button';
   returnButton.hidden = true;
   returnButton.addEventListener('click', () => {
-    returnToForm?.focus();
-    returnToForm?.closest('.field').scrollIntoView({ block: 'center' });
+    if (returnToForm) focusFormField(returnToForm.name);
   });
   navigation.append(returnButton);
   for (const [label, offset] of [['上一欄', -1]]) {
@@ -2026,6 +2064,9 @@ function showReview(result) {
       choice.renderCountryRows?.();
       if (!selected.length) choice.status.textContent = '與表單相同，已完成核對';
       if (choice.countryHelper) choice.countryHelper.hidden = true;
+      if (choice.unmatched)
+        for (const button of choice.unmatched.querySelectorAll('button'))
+          button.textContent = button.textContent.replace('補上原圖', '到表單補上原圖');
       if (choice.key === 'countries' && !choice.check.checked && choice.value && choice.needsReview) {
         const repair = text('div', '', 'ocr-partial-repair');
         const retained = choice.value.split('\n').filter(Boolean).length;
@@ -2033,11 +2074,37 @@ function showReview(result) {
         restore.type = 'button';
         const evidence = text('div', '', 'ocr-inline-evidence');
         renderEvidence(choice, evidence);
-        repair.append(text('p', '國家列表尚未填入；可沿用已辨識的部分，再補上缺少的國家。'), evidence, restore);
+        const repairStatus = text('p', '國家列表尚未填入；可沿用已辨識的部分，再補上缺少的國家。');
+        repairStatus.setAttribute('role', 'status');
+        repair.append(repairStatus, evidence, restore);
         restore.addEventListener('click', () => {
-          formCountries.value = choice.value;
+          const currentLines = formCountries.value.split('\n').filter(Boolean);
+          const currentCodes = new Set(currentLines.map((line) => line.trim().split(/\s+/)[0].toUpperCase()));
+          const additions = choice.value.split('\n').filter((line) => line && !currentCodes.has(line.trim().split(/\s+/)[0].toUpperCase()));
+          const kept = choice.value.split('\n').filter((line) => line && currentCodes.has(line.trim().split(/\s+/)[0].toUpperCase()));
+          formCountries.value = [...currentLines, ...additions].join('\n');
           formCountries.dispatchEvent(new Event('input', { bubbles: true }));
+          repairStatus.textContent =
+            (additions.length ? '已帶入：' + readableCountries(additions.join('、')) + '。' : '沒有新增國家。') +
+            (kept.length ? '已有國家的草稿值已保留。' : '') +
+            '列表仍不完整，請對照原圖補上缺項；尚未儲存。';
           restore.hidden = true;
+          if (additions.length) {
+            const undo = text('button', '復原這次帶入的國家');
+            undo.type = 'button';
+            repair.append(undo);
+            undo.addEventListener('click', () => {
+              formCountries.value = formCountries.value
+                .split('\n')
+                .filter((line) => !additions.includes(line))
+                .join('\n');
+              formCountries.dispatchEvent(new Event('input', { bubbles: true }));
+              undo.remove();
+              restore.hidden = false;
+              repairStatus.textContent = '已復原這次帶入，保留其後編輯過的國家；可重新帶入。';
+              restore.focus();
+            });
+          }
           formCountryHelper.open = true;
           formCountryTools.search.focus();
           formCountryHelper.scrollIntoView({ block: 'center' });

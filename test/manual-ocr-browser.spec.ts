@@ -147,8 +147,13 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#manual-taiwan').fill('93.22');
       expect(await page.locator('#manual-country-consistency').innerText()).toContain('不一致');
       expect(await page.locator('#manual-taiwan').evaluate((el) => el.validity.customError)).toBe(true);
+      expect(await page.locator('#manual-taiwan-consistency').isVisible()).toBe(true);
+      expect(await page.locator('#manual-taiwan-consistency').innerText()).toContain('93.22%');
       await page.locator('#manual-taiwan').fill('93.23');
       expect(await page.locator('#manual-taiwan').evaluate((el) => el.validity.customError)).toBe(false);
+      await page.getByRole('button', { name: /國家占比 · .*回到原圖核對/ }).click();
+      await page.getByRole('button', { name: '回到表單・國家占比 ↓', exact: true }).click();
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('表單國家列表・台灣占比');
       expect(await page.getByLabel('表單國家列表・美國占比', { exact: true }).inputValue()).toBe('2.13');
       await page.getByLabel('表單國家列表・美國占比', { exact: true }).fill('2.14');
       expect(await page.locator('#manual-countries').inputValue()).toContain('US 2.14');
@@ -615,8 +620,25 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await skipCountries.check();
       await page.locator('#ocr-apply').click();
       expect(await page.locator('#manual-countries').inputValue()).toBe('');
+      await page
+        .getByRole('button', { name: /到表單補上原圖第/ })
+        .first()
+        .click();
+      expect(await page.evaluate('document.activeElement?.getAttribute("aria-label")')).toBe('表單搜尋國家名稱或代碼');
+      expect(await page.getByLabel('表單新增國家占比', { exact: true }).inputValue()).toBe('2.13');
+      // Recovery adds absent countries, preserving values edited since Fill.
+      await page.locator('#manual-countries').evaluate((el) => {
+        el.value = 'HK 1.6\nJP 0.1';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
       await page.getByRole('button', { name: '帶入已讀到的 4 個國家，繼續補正', exact: true }).click();
-      expect(await page.locator('#manual-countries').inputValue()).toContain('HK 1.59');
+      expect(await page.locator('#manual-countries').inputValue()).toContain('HK 1.6');
+      expect(await page.locator('#manual-countries').inputValue()).toContain('JP 0.1');
+      expect(await page.locator('.ocr-partial-repair').innerText()).toContain('已有國家的草稿值已保留');
+      await page.getByLabel('表單國家列表・馬來西亞占比', { exact: true }).fill('0.6');
+      await page.getByRole('button', { name: '復原這次帶入的國家', exact: true }).click();
+      expect(await page.locator('#manual-countries').inputValue()).toBe('HK 1.6\nJP 0.1\nMY 0.6');
+      await page.getByRole('button', { name: '帶入已讀到的 4 個國家，繼續補正', exact: true }).click();
       expect(await page.locator('.ocr-partial-repair canvas').count()).toBeGreaterThan(0);
       await page.getByLabel('表單搜尋國家名稱或代碼', { exact: true }).fill('United States');
       await page.getByLabel('表單新增國家占比', { exact: true }).fill('2.13');

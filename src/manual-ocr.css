@@ -931,7 +931,7 @@
   margin-inline: auto;
 }
 .manual-save-bar {
-  position: sticky;
+  position: static;
   top: 8px;
   z-index: 3;
   display: flex;
@@ -1409,6 +1409,21 @@
   justify-content: space-between;
   gap: 12px;
   font-size: 15px;
+}
+.ocr-country-name {
+  display: grid;
+  gap: 3px;
+}
+.ocr-country-before {
+  font-size: 14px;
+  color: var(--muted);
+}
+.ocr-country-before.is-different {
+  color: var(--ink);
+  font-weight: 600;
+}
+.ocr-country-before[hidden] {
+  display: none;
 }
 .ocr-country-share {
   display: flex;
