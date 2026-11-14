@@ -233,7 +233,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   border-block: 1px solid var(--axis);
   align-items: stretch;
-  --ocr-workspace-height: clamp(560px, calc(100dvh - 240px), 820px);
+  --ocr-workspace-height: clamp(480px, calc(100dvh - 360px), 820px);
   height: var(--ocr-workspace-height);
 }
 .ocr-viewer,
@@ -1281,4 +1281,9 @@
   .ocr-review-heading h3 {
     margin-bottom: 4px;
   }
+}
+
+.manual-import [data-review] > .ocr-notices {
+  border-left-color: var(--axis);
+  padding-block: 8px;
 }

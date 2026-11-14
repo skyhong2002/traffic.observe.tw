@@ -497,7 +497,12 @@ function showReview(result) {
   const categorySelect = document.createElement('select');
   categorySelect.className = 'ocr-category-select';
   categorySelect.setAttribute('aria-label', '跳到核對分類');
-  categorySelect.addEventListener('change', () => revealChoice(choices.find((choice) => choice.key === categorySelect.value)));
+  categorySelect.addEventListener('change', () =>
+    revealChoice(
+      choices.find((choice) => choice.key === categorySelect.value),
+      false,
+    ),
+  );
   navigation.append(categorySelect);
   review.append(navigation, workspace);
   const current = () => {
@@ -566,9 +571,9 @@ function showReview(result) {
       return (result.countryContexts || []).map((r) => ({ ...r, context: '國家表上下文，非精確辨識位置' }));
     return precise;
   }
-  function revealChoice(choice) {
+  function revealChoice(choice, focusEditor = true) {
     selectField(choice.key);
-    choice.input.focus({ preventScroll: true });
+    (focusEditor ? choice.input : choice.row).focus({ preventScroll: true });
     requestAnimationFrame(() => choice.row.scrollIntoView({ block: 'nearest' }));
   }
   function selectField(key, move = true, imageIndex) {
@@ -593,7 +598,7 @@ function showReview(result) {
     }
     renderEvidence();
     const active = choices.find((choice) => choice.key === key);
-    if (active && document.activeElement === active.input) requestAnimationFrame(() => active.row.scrollIntoView({ block: 'nearest' }));
+    if (active?.row.contains(document.activeElement)) requestAnimationFrame(() => active.row.scrollIntoView({ block: 'nearest' }));
     renderImage();
     if (move)
       requestAnimationFrame(() => {
@@ -631,10 +636,10 @@ function showReview(result) {
         marker.tabIndex = -1;
         marker.setAttribute('aria-label', '查看' + screenshotFields[choice.key] + '：' + region.value);
         marker.title = screenshotFields[choice.key] + ' · ' + region.value;
-        marker.style.left = Math.max(0, ((region.x - 8) / image.width) * 100) + '%';
-        marker.style.top = Math.max(0, ((region.y - 6) / image.height) * 100) + '%';
-        marker.style.width = Math.min(100, ((region.w + 16) / image.width) * 100) + '%';
-        marker.style.height = ((region.h + 12) / image.height) * 100 + '%';
+        marker.style.left = Math.max(0, ((region.x - 16) / image.width) * 100) + '%';
+        marker.style.top = Math.max(0, ((region.y - 16) / image.height) * 100) + '%';
+        marker.style.width = Math.min(100, ((region.w + 32) / image.width) * 100) + '%';
+        marker.style.height = ((region.h + 32) / image.height) * 100 + '%';
         marker.addEventListener('click', () => {
           selectField(choice.key, false, activeImage);
           choice.input.focus({ preventScroll: true });
@@ -780,6 +785,22 @@ function showReview(result) {
     else resizeObserver.disconnect();
   });
   resizeObserver.observe(viewport);
+  const keepFocusedFieldVisible = () => {
+    if (!review.contains(workspace)) {
+      window.removeEventListener('resize', keepFocusedFieldVisible);
+      window.visualViewport?.removeEventListener('resize', keepFocusedFieldVisible);
+      return;
+    }
+    const choice = choices.find((entry) => entry.row.contains(document.activeElement));
+    if (choice)
+      requestAnimationFrame(() => {
+        selectField(choice.key);
+        choice.row.scrollIntoView({ block: 'nearest' });
+      });
+  };
+  window.addEventListener('resize', keepFocusedFieldVisible);
+  window.visualViewport?.addEventListener('resize', keepFocusedFieldVisible);
+
   markerToggle.addEventListener('change', () => {
     overlay.hidden = !markerToggle.checked;
   });
@@ -819,6 +840,7 @@ function showReview(result) {
     right.append(section);
     for (const [key, value] of fields) {
       const row = text('div', '', 'ocr-field-row');
+      row.tabIndex = -1;
       row.dataset.field = key;
       const check = document.createElement('input');
       check.type = 'checkbox';
@@ -950,6 +972,7 @@ function showReview(result) {
         }
       }
       input.addEventListener('focus', () => selectField(key));
+      check.addEventListener('focus', () => selectField(key));
       input.addEventListener('input', () => {
         input.removeAttribute('aria-invalid');
         choice.value = input.value.trim();
@@ -994,7 +1017,7 @@ function showReview(result) {
       confirmed.scrollIntoView({ block: 'center' });
       return;
     }
-    revealChoice(choices[Math.max(0, index)]);
+    revealChoice(choices[Math.max(0, index)], false);
   }
   nextAfter.addEventListener('click', () => advanceField(1));
   afterField.append(nextAfter);
@@ -1351,7 +1374,7 @@ function showReview(result) {
   });
   const startReview = text('button', '開始核對 ↓', 'primary ocr-start-review');
   startReview.type = 'button';
-  startReview.addEventListener('click', () => revealChoice(choices.find((choice) => choice.needsReview) || choices[0]));
+  startReview.addEventListener('click', () => revealChoice(choices.find((choice) => choice.needsReview) || choices[0], false));
   heading.append(startReview);
   renderImage();
   selectField(choices.find((choice) => choice.needsReview)?.key || choices[0].key);

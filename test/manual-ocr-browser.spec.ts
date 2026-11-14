@@ -215,6 +215,15 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         if (names.length === 2) {
           expect(await fresh.locator('#manual-visits').inputValue()).toBe('482.4K');
           expect(await fresh.locator('#manual-countries').inputValue()).toBe('TW 93.23\nUS 2.13\nHK 1.59\nID 0.58\nMY 0.57');
+          await fresh.getByLabel('跳到核對分類').selectOption({ label: '國家分布（2欄）' });
+          if ((await fresh.locator('.ocr-field-row.is-active').getAttribute('data-field')) !== 'countries')
+            await fresh.getByRole('button', { name: '下一欄', exact: true }).click();
+          await fresh.setViewportSize({ width: 390, height: 420 });
+          await fresh.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+          const countryCrop = await fresh.locator('.ocr-field-row.is-active canvas').boundingBox();
+          const countryEditor = await fresh.locator('#ocr-edit-countries').boundingBox();
+          expect(countryCrop && countryCrop.width > 250 && countryCrop.y >= 0 && countryCrop.y + countryCrop.height <= 420).toBe(true);
+          expect(countryEditor && countryEditor.y >= 0 && countryEditor.y + countryEditor.height <= 420).toBe(true);
         }
         await fresh.close();
       }
