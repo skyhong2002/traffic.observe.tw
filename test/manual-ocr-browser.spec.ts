@@ -162,6 +162,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('#manual-search').inputValue()).toBe('');
       expect(await page.locator('#manual-ai').inputValue()).toBe('');
       expect(await page.locator('#manual-visits').inputValue()).toBe('');
+      await page.locator('#manual-month').selectOption('202609');
+      expect(await page.locator('.ocr-month-notice').innerText()).toContain('已填入 2026/10');
+      await page.getByRole('button', { name: '返回 2026/10 表單 ↓', exact: true }).first().click();
+      expect(await page.locator('#manual-month').inputValue()).toBe('202610');
+      expect(await page.locator('.ocr-form-source').count()).toBe(16);
       expect(await page.locator('[data-desktop-channels]').getAttribute('open')).toBe('');
       await page
         .locator('#manual-screenshots')

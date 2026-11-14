@@ -1734,8 +1734,13 @@ function showReview(result) {
       const next = actionLine.querySelector('.ocr-handoff');
       if (next) next.textContent = label;
       if (month.value === targetMonth) {
-        for (const [field, source] of appliedSources) if (!source.isConnected) field.closest('.field').append(source);
-        for (const field of appliedFields) field.dataset.ocrFilled = 'true';
+        // Month change bubbles to the form's provenance reset. Restore after
+        // that reset has finished, using the draft's final rendered values.
+        queueMicrotask(() => {
+          if (month.value !== targetMonth) return;
+          for (const [field, source] of appliedSources) if (!source.isConnected) field.closest('.field').append(source);
+          for (const field of appliedFields) field.dataset.ocrFilled = 'true';
+        });
       }
     }
   };
