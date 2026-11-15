@@ -87,10 +87,10 @@ export const tw = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, dateStyle: 'short', timeStyle: 'short' }) : '';
 export const twDate = (iso: string) => new Date(iso).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' });
 
-export type Nav = 'report' | 'table' | 'topics' | 'tech' | 'status' | 'watch' | 'discover' | 'sites' | null;
+export type Nav = 'report' | 'table' | 'missing' | 'topics' | 'tech' | 'status' | 'watch' | 'discover' | 'sites' | null;
 /** The header holds the main pages; the ranking's two views are tabs above its title (sectionTabs). */
 const NAV: Array<[string, string, Nav[]]> = [
-  ['/', '流量排行', ['report', 'table']],
+  ['/', '流量排行', ['report', 'table', 'missing']],
   ['/tag/', '標籤概況', ['topics']],
   ['/tech/', '網站技術', ['tech']],
   ['/status/', '資料更新狀態', ['status']],
@@ -109,12 +109,16 @@ const SECTIONS: Array<[string, Array<[Exclude<Nav, null>, string, string]>]> = [
     [
       ['report', '/', '流量總覽'],
       ['table', '/table/', '完整數據'],
+      ['missing', '/status/collection/?state=all&amp;source=none', '尚未有資料'],
     ],
   ],
 ];
-const pills = (label: string, links: Array<[string, string, boolean]>) =>
+export const pills = (label: string, links: Array<[string, string, boolean]>) =>
   `<nav class="subnav" aria-label="${label}">${links
-    .map(([href, text, on]) => `<a href="${href}"${on ? ' aria-current="page"' : ''}>${text}</a>`)
+    .map(
+      ([href, text, on]) =>
+        `<a href="${href}"${href.includes('source=none') ? ' id="missing-data"' : ''}${on ? ' aria-current="page"' : ''}>${text}</a>`,
+    )
     .join('')}</nav>`;
 /** The pages of the section `nav` belongs to, as pills; empty for a page outside the sections. */
 export const sectionTabs = (nav: Nav) => {

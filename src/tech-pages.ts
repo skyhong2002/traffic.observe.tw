@@ -5,6 +5,7 @@ import {
   html,
   layout,
   methodPart,
+  pills,
   SOURCE_LABEL,
   section,
   siteCell,
@@ -204,9 +205,10 @@ export function techPage(o: TechOverview, view?: unknown) {
     `<label class="search-field tech-search"><input type="search" ${id === 'tech-catalog' ? 'data-tech-search' : `data-table-filter="${id}"`} aria-label="${label}" placeholder="${label}" autocomplete="off"></label>`;
   const filters = `<div class="tech-filters"><div><span class="tech-filter-label">網站來源</span>${sourceChips}</div>${!chosen ? `<div><span class="tech-filter-label">技術類別</span>${categoryChips}</div>` : ''}${showingSites ? `<div><span class="tech-filter-label">檢查結果</span>${statusChips}</div>` : ''}</div>`;
   const heading = chosen ? `用 ${chosen.name} 的網站` : showingSites ? '所有網站的技術' : '網站技術';
-  const navigation = showingSites
-    ? `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="${browseLink}">← 返回技術總覽</a><span aria-current="page">${chosen ? html(chosen.name) : '所有網站'}</span></nav>`
-    : `<nav class="tech-breadcrumb" aria-label="技術導覽"><span aria-current="page">技術總覽</span><a href="${link({ technology: null })}${link({ technology: null }).includes('?') ? '&amp;' : '?'}view=sites">瀏覽所有網站 →</a></nav>`;
+  const navigation = pills('技術導覽', [
+    [browseLink, '技術總覽', !showingSites],
+    [`${browseLink}${browseLink.includes('?') ? '&amp;' : '?'}view=sites`, '所有網站', showingSites],
+  ]);
   const content = showingSites
     ? `${chosen ? `<div class="tech-selection"><span>${CATEGORY_LABEL[chosen.category]}</span><p>找到 <b>${o.sites.length.toLocaleString('en-US')}</b> 個網站使用這項技術。</p></div>` : ''}${filters}
       ${section('網站清單', `<div class="tech-results"><p data-table-count="tech-sites" data-total="${o.sites.length}" role="status">${o.sites.length.toLocaleString('en-US')} 個網站</p>${search('tech-sites', '搜尋網站名稱或網域')}</div>${table('<th class="l">網站</th><th class="l">偵測到的技術</th><th class="l">檢查日期</th>', siteRows, `沒有符合條件的網站。<a href="${link({ status: null, category: null })}">清除結果與類別篩選</a>`, 3, 'tech-sites')}`)}`
@@ -281,6 +283,10 @@ ${section(
     `${title} 的網站技術`,
     {
       title,
+      tabs: pills('技術導覽', [
+        ['/tech/', '技術總覽', false],
+        ['/tech/?view=sites', '所有網站', true],
+      ]),
       dek: `${favicon(domain, title)}<a href="https://${html(domain)}/" rel="noopener">${displayHtml(domain)} ↗</a>${known ? `<span class="sep" aria-hidden="true">·</span><a href="/site/${html(domain)}/">流量資料</a>` : ''}`,
       actions: `${check}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
     },

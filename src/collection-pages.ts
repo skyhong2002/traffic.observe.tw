@@ -184,6 +184,6 @@ export function collectionPage(
     `${saved ? `<p class="flash" role="status">已儲存 ${html(saved)} 的優先級。</p>` : ''}<p class="results-line">追蹤 ${summary.total} 個，完整 ${summary.complete} 個；已有造訪量 ${summary.withVisits} 個，其中 ${summary.partial} 個仍缺其他欄位。需人工補登 ${summary.manualNeeded} 個。</p>${sources}${priorities}${schedulingNote(policy)}
     ${section('逐站收集狀況', `<p class="note">${source === 'none' ? '只列出所選月份沒有自動資料、也沒有人工補登的網站；已有部分資料的網站不列入。' : filter === 'missing' ? '目前只顯示尚未完成的網域。' : ''}台北時間；點時間欄標題可切換排序，點來源或缺漏可看明細。</p>${pagination('逐站缺漏上方分頁')}${table(`<th class="l">網站</th><th class="l">資料來源</th>${timeHeader('updated', '最新更新')}${timeHeader('request', '最近抓取')}<th class="l">狀態／缺漏</th><th class="l">優先級</th><th class="l">最早可重試</th><th class="l">操作</th>`, rows, '沒有符合條件的網域。', 8, 'collection-entries', { sortable: false, className: 'collection-table' })}${filtered.length > count ? pagination('逐站缺漏下方分頁') : ''}`)}
     ${editor ? `<details class="collection-tools"><summary>管理月份清單</summary><form class="month-form" method="post" action="/status/collection/month"><label>月份 <input name="month" pattern="20[0-9]{2}(0[1-9]|1[0-2])" inputmode="numeric" minlength="6" maxlength="6" size="8" placeholder="YYYYMM" required></label><button type="submit">建立</button></form><p class="note">輸入過去的月份，例如 202610。</p></details>` : ''}`,
-    { nav: 'status', method },
+    { nav: source === 'none' ? 'missing' : 'status', method },
   );
 }

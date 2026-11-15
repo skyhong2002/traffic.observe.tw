@@ -253,6 +253,11 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         await page.getByRole('button', { name: '次數' }).click();
         expect(await page.locator('tbody tr td:nth-child(2)').first().innerText()).toBe('100');
       }
+      await page.setViewportSize({ width: 320, height: 844 });
+      await page.goto(origin + '/status/collection/?source=none');
+      expect(await page.locator('.subnav [aria-current=page]').innerText()).toBe('尚未有資料');
+      expect(await page.locator('.subnav a:visible').count()).toBe(3);
+      expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       const noScript = await browser.newContext({ javaScriptEnabled: false });
       const plainPage = await noScript.newPage();
       await plainPage.goto(origin + '/status/collection/');
