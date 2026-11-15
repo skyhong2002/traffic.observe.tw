@@ -141,6 +141,32 @@ describe.skipIf(!url)('monthly collection database', () => {
     c = await loadCollection(pool, config(), '202610', at);
     expect(c.entries.find((e) => e.domain === 'done.tw')?.missing).toEqual(['channels.GenAi']);
   });
+  it('schedules manual entries after untouched work despite pinned priority and reserved retry slots', async () => {
+    await watch('fresh.tw', 'retry.tw', 'manual-fresh.tw', 'manual-retry.tw');
+    await syncCollections(pool, config(), at);
+    for (const domain of ['manual-fresh.tw', 'manual-retry.tw']) {
+      await setCollectionPriority(pool, domain, 1, 'editor@example.com');
+      await setManualMonth(pool, 'editor@example.com', domain, '202610', {
+        domain,
+        month: '202610',
+        visits: 100,
+        searchShare: null,
+        aiShare: null,
+        taiwanShare: null,
+        channels: {},
+        details: parseManualDetails({}),
+      });
+    }
+    for (const domain of ['retry.tw', 'manual-retry.tw'])
+      await recordCollectionAttempt(pool, '202610', domain, new Date(at.getTime() - 4 * DAY), 'response');
+    await pool.query('INSERT INTO sends (domain,at,outcome,target_month) VALUES ?', [
+      Array.from({ length: 4 }, () => ['used.tw', at, 'ok', '202610']),
+    ]);
+    const c = await loadCollection(pool, config(), '202610', at);
+    expect(c.queue.map((e) => e.domain)).toEqual(['retry.tw', 'fresh.tw', 'manual-fresh.tw', 'manual-retry.tw']);
+    expect(c.entries.map((e) => e.hasManual)).toEqual([false, false, true, true]);
+    expect(dueDomains(await loadCandidates(pool, config(), at), at)).toEqual(c.queue.map((e) => e.domain));
+  });
   it('automatically saves a target, records first-pass progress and never repeats completed work', async () => {
     await watch('a.tw', 'b.tw');
     const f = fetcher();

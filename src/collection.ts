@@ -186,6 +186,7 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
     })
     .sort(
       (a, b) =>
+        Number(a.hasManual) - Number(b.hasManual) ||
         a.priority - b.priority ||
         Number(a.attempts > 0) - Number(b.attempts > 0) ||
         b.score - a.score ||
@@ -200,6 +201,9 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
     queue.push(
       ((Number(allocation?.n ?? 0) + queue.length + 1) % 5 === 0 && retry.length ? retry.shift() : (fresh.shift() ?? retry.shift()))!,
     );
+  // Manual coverage lowers urgency even when a reserved retry slot is due.
+  // Stable sorting preserves the allocation order within each group.
+  queue.sort((a, b) => Number(a.hasManual) - Number(b.hasManual));
   const summary = {
     total: entries.length,
     complete: entries.filter((e) => e.complete).length,
