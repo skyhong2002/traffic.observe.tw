@@ -10,6 +10,7 @@ import { type Candidate, type SimilarListing, taiwanClue } from './similarsites.
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
+import { THEME_SCRIPT } from './theme.ts';
 import { taiwanVisits } from './taiwan-estimate.ts';
 import type { TopicOverview } from './topics.ts';
 import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } from './traffic-access.ts';
@@ -174,7 +175,7 @@ export const METHOD_LINK = '<a class="method-link" href="#method">本頁的資�
 export function siteHeader(nav: Nav) {
   return `<a class="skip-link" href="#main">跳至主要內容</a><header class="site"><div class="wrap site-inner"><a class="brand" href="/">${BRAND}</a><nav class="site-nav" aria-label="主要導覽">${NAV.map(
     ([href, label, keys]) => `<a href="${href}"${nav && keys.includes(nav) ? ' class="on" aria-current="true"' : ''}>${label}</a>`,
-  ).join('')}</nav><div class="site-tools"><span class="who"><!--who--></span></div></div></header>`;
+  ).join('')}</nav><div class="site-tools"><button type="button" class="theme-toggle" data-theme-toggle aria-label="切換為白底" aria-pressed="false" hidden>白底</button><span class="who"><!--who--></span></div></div></header>`;
 }
 
 export const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
@@ -294,7 +295,7 @@ export const SITE_CARD_SCRIPT = `<script>
 </script>`;
 
 /** Lets the stylesheet collapse long chip rows only when the script that expands them will run. */
-export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>" + DOMAIN_DISPLAY_SCRIPT;
+export const JS_FLAG = "<script>document.documentElement.classList.add('js')</script>" + THEME_SCRIPT + DOMAIN_DISPLAY_SCRIPT;
 
 export function layout(
   title: string,
@@ -1533,7 +1534,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, ma
             : ''
     }${activitiesSection}${stats}${egressSection}
 ${policy.recovery ? section('Similarweb 恢復探查', `<p>目前 ${html(policy.recovery.phase)}，連續 429 ${policy.recovery.refusals} 次，連續有效回應 ${policy.recovery.successes} / ${policy.recovery.requiredSuccesses} 次。過去 24 小時已用 ${policy.recovery.used} / ${policy.recovery.limit} 次恢復探查；每次只取一個待補網域，成功後至少隔 ${policy.recovery.intervalMinutes} 分鐘再觀察，確認穩定後才恢復一般限速。探查本身會用到 Similarweb 請求額度。</p><p>有有效 Retry-After 優先遵守；未提供時依本機 2 → 4 → 8 → 16 → 24 小時基礎退避，另加 0–10% 延遲。等待期間只讀本站排程，不會反覆打 Similarweb。<a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">429 規範</a></p>`) : ''}
-${status.collection ? section('月份收集進度', `<p>${monthLabel(status.collection.month)}：${status.collection.complete} / ${status.collection.total} 個完整，${status.collection.withVisits} 個有造訪量，${status.collection.partial} 個仍缺組成或互動資料，${status.collection.manualNeeded} 個需要補登。<a href="/status/collection/?month=${status.collection.month}">查看逐站缺漏與設定重要網域</a></p><p>所有入口共用本機過去一小時 ${policy.hourly.limit} 次上限（非已確認的伺服器額度）；請求至少間隔 ${policy.minIntervalSeconds} 秒。</p>`) : ''}
+${status.collection ? section('月份收集進度', `<p>${monthLabel(status.collection.month)}：${status.collection.complete} / ${status.collection.total} 個完整，${status.collection.withVisits} 個有造訪量，${status.collection.partial} 個仍缺組成或互動資料，${status.collection.manualNeeded} 個需要補登。<a href="/status/collection/?month=${status.collection.month}">查看逐站缺漏與設定重要網域</a> · <a href="/status/collection/?month=${status.collection.month}&state=all&source=none">本月尚未有資料</a></p><p>所有入口共用本機過去一小時 ${policy.hourly.limit} 次上限（非已確認的伺服器額度）；請求至少間隔 ${policy.minIntervalSeconds} 秒。</p>`) : ''}
 ${section(status.budget ? 'Similarweb 待抓佇列' : 'Similarweb 等候佇列', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
 ${manualSection}
 ${section(

@@ -15,7 +15,7 @@
   <!--tabs-->
   <div class="page-head">
     <div><h1>網站流量排行</h1><p class="dek">每月 Similarweb 造訪估算，依流量排名，可與任一月份比較<span class="sep" aria-hidden="true">·</span><!--method--></p></div>
-    <div class="page-actions"><a id="csv" href="/api/v1/rankings.csv">下載 CSV</a></div>
+    <div class="page-actions"><a id="missing-data" href="/status/collection/?state=all&amp;source=none">本月尚未有資料</a><a id="csv" href="/api/v1/rankings.csv">下載 CSV</a></div>
   </div>
   <div class="toolbar">
     <label class="search-field"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" aria-label="搜尋網站名稱或網域" placeholder="搜尋網站名稱或網域" autocomplete="off" disabled><button id="clear-search" type="button" aria-label="清除搜尋" hidden>✕</button></label>
@@ -384,6 +384,7 @@ async function render() {
   q.set('exclude', state.exclude.join(','));
   if (state.source) q.set('source', state.source);
   if (state.query) q.set('q', state.query);
+  document.getElementById('missing-data').href = `/status/collection/?month=${state.to}&state=all&source=none`;
   document.getElementById('csv').href = `/api/v1/rankings.csv?${q}`;
   renderResults(scoped);
 }

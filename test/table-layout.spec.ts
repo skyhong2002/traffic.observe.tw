@@ -55,6 +55,17 @@ const collection: Collection = {
   },
 };
 
+it('lists only sites without automatic or manual data in the selected month', () => {
+  const fixture = {
+    ...collection,
+    entries: [entries[0], { ...entries[1], hasAutomatic: true }, { ...entries[2], hasManual: true }],
+  };
+  const page = load(collectionPage(fixture, ['202610'], false, 'all', 0, 1, '', 'none'));
+  expect(page('h1').text()).toBe('2026/10 尚未有資料的網站');
+  expect(page('#collection-entries tbody tr')).toHaveLength(1);
+  expect(page('#collection-entries .collection-site a').attr('href')).toBe('/site/site-0.example.tw/');
+});
+
 it('sorts the whole collection by saved update time before pagination, keeps unknowns last, and preserves worker ordering', () => {
   const ordered: Collection['entries'] = entries.map((entry, i) => ({
     ...entry,
@@ -149,6 +160,13 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.collection-missing').evaluateAll((cells) => cells.every((c) => c.scrollWidth <= c.clientWidth))).toBe(
         true,
       );
+      await page.getByRole('button', { name: '切換為白底' }).click();
+      expect(await page.locator('html').getAttribute('data-theme')).toBe('light');
+      expect(await page.evaluate('getComputedStyle(document.documentElement).backgroundColor')).toBe('rgb(255, 255, 255)');
+      await page.reload();
+      expect(await page.getByRole('button', { name: '切換為黑底' }).getAttribute('aria-pressed')).toBe('true');
+      await page.getByRole('button', { name: '切換為黑底' }).click();
+      expect(await page.evaluate('getComputedStyle(document.documentElement).backgroundColor')).toBe('rgb(10, 10, 10)');
       const form = page.locator('.priority-form').first();
       await page.locator('.collection-edit > summary').first().click();
       expect(await form.locator('[name=state]').inputValue()).toBe('all');
