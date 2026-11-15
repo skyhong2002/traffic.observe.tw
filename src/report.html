@@ -384,7 +384,6 @@ async function render() {
   q.set('exclude', state.exclude.join(','));
   if (state.source) q.set('source', state.source);
   if (state.query) q.set('q', state.query);
-  document.getElementById('missing-data').href = `/status/collection/?month=${state.to}&state=all&source=none`;
   document.getElementById('csv').href = `/api/v1/rankings.csv?${q}`;
   renderResults(scoped);
 }

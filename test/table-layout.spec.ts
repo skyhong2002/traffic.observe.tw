@@ -256,7 +256,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.setViewportSize({ width: 320, height: 844 });
       await page.goto(origin + '/status/collection/?source=none');
       expect(await page.locator('.subnav [aria-current=page]').innerText()).toBe('尚未有資料');
-      expect(await page.locator('.subnav a:visible').count()).toBe(3);
+      expect(await page.locator('.subnav a:visible').count()).toBe(2);
       expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
       const noScript = await browser.newContext({ javaScriptEnabled: false });
       const plainPage = await noScript.newPage();
