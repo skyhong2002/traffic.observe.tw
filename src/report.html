@@ -379,6 +379,7 @@ async function render() {
   document.getElementById('clear-search').hidden = !state.query;
   document.getElementById('reset').hidden = !state.active.length && excludesDefault() && !state.source && !state.query;
   const q = new URLSearchParams({ month: state.to });
+  if (state.from && state.from !== state.to) q.set('from', state.from);
   if (state.active.length) q.set('topic', state.active.join(','));
   // The API leaves nothing out by default, so the download always says what to leave out.
   q.set('exclude', state.exclude.join(','));

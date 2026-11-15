@@ -35,3 +35,19 @@ it('does not invent Taiwan growth when a share or comparable baseline is missing
   expect(change(point(120, 0.5))).toBe('new');
   expect(change(point(120, 0), point(100, 0.8))).toBe(-1);
 });
+
+it('downloads the comparison month selected on the report instead of defaulting to the nearest month', () => {
+  const start = report.indexOf('  const q = new URLSearchParams({ month: state.to });');
+  const end = report.indexOf('  renderResults(scoped);', start);
+  const anchor = { href: '' };
+  runInNewContext(report.slice(start, end), {
+    URLSearchParams,
+    state: { to: '202610', from: '202608', active: ['電商'], exclude: ['非台灣'], source: 'manual', query: '購物' },
+    document: { getElementById: () => anchor },
+  });
+  const url = new URL(anchor.href, 'https://site.observe.tw');
+  expect(url.searchParams.get('from')).toBe('202608');
+  expect(url.searchParams.get('month')).toBe('202610');
+  expect(url.searchParams.get('topic')).toBe('電商');
+  expect(url.searchParams.get('source')).toBe('manual');
+});

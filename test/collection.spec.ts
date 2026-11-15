@@ -89,6 +89,57 @@ describe.skipIf(!url)('monthly collection database', () => {
     }) as unknown as typeof fetch;
     return { sent, request };
   };
+  it('filters missing report sites by tags and exports both selected months including prior-only websites', async () => {
+    await watch('current.tw', 'missing.tw', 'other.tw');
+    await save('current.tw', '202608', 4_000_000);
+    await save('missing.tw', '202608', 8_000_000);
+    await save('current.tw', '202609', 2_000_000);
+    await save('missing.tw', '202609', 6_000_000);
+    await save('current.tw', '202610', 3_000_000, { ...profile(), channels: { SearchOrganic: 0.2, GenAi: 0 } });
+    await pool.query('INSERT INTO site_metadata (domain,name,topics,updated_at,updated_by) VALUES ?', [
+      [
+        ['current.tw', '目前購物', JSON.stringify(['電商']), at, 'test'],
+        ['missing.tw', '待補購物', JSON.stringify(['電商']), at, 'test'],
+        ['other.tw', '其他網站', JSON.stringify(['部落格']), at, 'test'],
+      ],
+    ]);
+    const app = buildApp(pool, { config: config(), login: null, logger: false });
+    try {
+      const missing = await app.inject('/status/collection/?month=202610&from=202608&source=none&topic=電商&exclude=');
+      expect(missing.statusCode).toBe(200);
+      expect(missing.body).toContain('id="report-collection"');
+      expect(missing.body).toContain('/site/missing.tw/manual/?month=202610');
+      expect(missing.body).not.toContain('/site/other.tw/manual/');
+      expect(missing.body).toContain('部落格');
+      const response = await app.inject('/api/v1/rankings.csv?month=202610&from=202608&topic=電商&exclude=');
+      expect(response.statusCode).toBe(200);
+      const lines = response.body
+        .trim()
+        .replace(/^\uFEFF/, '')
+        .split('\n')
+        .map((line) => line.split(','));
+      const header = lines[0];
+      const index = (name: string) => {
+        const at = header.indexOf(name);
+        expect(at).toBeGreaterThanOrEqual(0);
+        return at;
+      };
+      const current = lines.find((row) => row[index('網域')] === 'current.tw')!;
+      const previousOnly = lines.find((row) => row[index('網域')] === 'missing.tw')!;
+      expect(current[index('比較月份')]).toBe('202608');
+      expect(current[index('比較月流量(百萬)')]).toBe('4');
+      expect(current[index('上月名次')]).toBe('2');
+      expect(current[index('AI排行')]).toBe('1');
+      expect(previousOnly[index('流量(百萬)')]).toBe('');
+      expect(previousOnly[index('比較月流量(百萬)')]).toBe('8');
+      expect(previousOnly[index('名次')]).toBe('');
+      expect(previousOnly[index('比較月造訪量排名')]).toBe('1');
+      expect(previousOnly[index('當月報表缺漏')]).toContain('造訪量');
+      expect(lines).toHaveLength(3);
+    } finally {
+      await app.close();
+    }
+  });
   it('uses importance and prior Taiwan traffic ahead of new-domain or source order', async () => {
     await watch('small.tw', 'large.tw', 'foreign.com', 'pinned.com');
     await save('small.tw', '202609', 100);

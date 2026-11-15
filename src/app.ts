@@ -13,6 +13,7 @@ import {
   validCollectionMonth,
 } from './collection.ts';
 import { collectionPage, validCollectionSort, validCollectionSource } from './collection-pages.ts';
+import { type CollectionReportQuery, collectionReportPage, loadCollectionReport } from './collection-report.ts';
 import {
   cleanTag,
   loadCrowd,
@@ -45,7 +46,7 @@ import { ManualInputError } from './manual-input.ts';
 import { registerManualOcr } from './manual-ocr.ts';
 import { EditError, editSites, loadMetadata, type ManagedSite, managedSites } from './metadata.ts';
 import { editSitePage, type ManualForm, manageSitesPage, manualPage, tagsByUse } from './metadata-pages.ts';
-import { availableMonths, monthView, ranking, type SiteMonth, topicSummary } from './metrics.ts';
+import { availableMonths, monthView, type SiteMonth, shiftMonth, topicSummary } from './metrics.ts';
 import { publicOrigin, registerLegacyOrigin } from './origin.ts';
 import {
   discoverPage,
@@ -70,6 +71,7 @@ import {
   whoSlot,
 } from './pages.ts';
 import { lastRadarRun, loadRadar } from './radar.ts';
+import { reportComparison } from './report-comparison.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { fetchProblems, runConfig } from './scheduler.ts';
 import { registerSeo } from './seo.ts';
@@ -217,8 +219,10 @@ export function buildApp(
   };
   // All sites participate; topic filters treat every label identically.
   /** One month ranked: only `topic` when given, never the tags in `exclude` (comma-separated), only `source`'s list. */
-  const rankingFor = async (query: RankingQuery) => {
-    const { months, month } = await pickMonth(query.month);
+  const rankingFor = async (query: RankingQuery, includePreviousOnly = false) => {
+    const picked = await pickMonth(query.month);
+    const months = picked.months;
+    const month = includePreviousOnly && validCollectionMonth(query.month) ? query.month : picked.month;
     if (!month) return null;
     const lists = await watched();
     const order = ['tag', 'blog', 'manual'];
@@ -232,32 +236,40 @@ export function buildApp(
     // Tag chips count before exclusion, so an excluded tag stays on the page to bring back.
     const topics = topicList(list);
     // topic may list several tags (comma-separated); a site must carry all of them.
-    const wanted = [...new Set(String(query.topic ?? '').split(','))].filter((t) => topics.some((x) => x.topic === t));
+    const wanted = [
+      ...new Set(
+        String(query.topic ?? '')
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      ),
+    ];
     const topic = wanted.length === 1 ? wanted[0] : null;
-    const exclude = [...new Set(String(query.exclude ?? '').split(','))].filter(
-      (t) => !wanted.includes(t) && topics.some((x) => x.topic === t),
-    );
+    const exclude = [
+      ...new Set(
+        String(query.exclude ?? '')
+          .split(',')
+          .filter(Boolean),
+      ),
+    ].filter((t) => !wanted.includes(t));
     const kept = list.filter((s) => wanted.every((t) => s.topics.includes(t)) && !s.topics.some((t) => exclude.includes(t)));
     // The comparison month (the nearest earlier month by default): growth, the earlier rank and every share's change are against it.
     const older = months.filter((m) => m < month);
-    const from = typeof query.from === 'string' && older.includes(query.from) ? query.from : (older[0] ?? null);
-    const before = new Map((from ? await view(from) : []).map((s) => [s.domain, s]));
-    const compared = kept.map((s) => {
-      const b = before.get(s.domain);
-      return {
-        ...s,
-        prevVisits: b?.visits ?? null,
-        prevSearchShare: b?.searchShare ?? null,
-        prevAiShare: b?.aiShare ?? null,
-        prevTaiwanShare: b?.taiwanShare ?? null,
-        prevTaiwanShareUsed: b?.taiwanShareUsed ?? null,
-        prevChannels: b?.channels ?? null,
-      };
-    });
-    const queryText = (query.q ?? '').trim().toLowerCase();
-    const placed = limitRows(
-      ranking(compared, topic).filter((s) => !queryText || `${s.name} ${s.domain}`.toLowerCase().includes(queryText)),
+    const from =
+      typeof query.from === 'string' &&
+      query.from < month &&
+      (includePreviousOnly ? validCollectionMonth(query.from) : older.includes(query.from))
+        ? query.from
+        : (older[0] ?? null);
+    const previous = (from ? await view(from) : []).filter(
+      (site) =>
+        (!only || only.has(site.domain)) &&
+        wanted.every((tag) => site.topics.includes(tag)) &&
+        !site.topics.some((tag) => exclude.includes(tag)),
     );
+    const compared = reportComparison(kept, previous, includePreviousOnly);
+    const queryText = (query.q ?? '').trim().toLowerCase();
+    const placed = limitRows(compared.filter((s) => !queryText || `${s.name} ${s.domain}`.toLowerCase().includes(queryText)));
     const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
     const unit: 'share' | 'count' | 'tw' = query.unit === 'count' || query.unit === 'tw' ? query.unit : 'share';
     return { months, month, from, show, unit, topics, topic, exclude, source, sources, list: placed };
@@ -851,7 +863,7 @@ export function buildApp(
     return statusPage(await serviceStatus(pool, config));
   });
   app.get<{
-    Querystring: { month?: string; state?: string; priority?: string; page?: string; saved?: string; source?: string; sort?: string };
+    Querystring: CollectionReportQuery & { saved?: string };
   }>('/status/collection/', async (request, reply) => {
     const month = request.query.month ?? collectionMonth(config);
     if (!validCollectionMonth(month)) return reply.code(400).send({ error: 'invalid month' });
@@ -865,6 +877,16 @@ export function buildApp(
       ? request.query.state!
       : 'all';
     reply.type('text/html; charset=utf-8');
+    if (request.query.view === 'report' || (request.query.source === 'none' && request.query.view !== 'collection')) {
+      const from = validCollectionMonth(request.query.from) && request.query.from < month ? request.query.from : shiftMonth(month, -1);
+      return collectionReportPage(
+        collection,
+        [...new Set([month, from, ...months])].sort().reverse(),
+        from,
+        await loadCollectionReport(pool, collection, from),
+        request.query,
+      );
+    }
     return collectionPage(
       collection,
       [...new Set([month, ...months])].sort().reverse(),
@@ -952,7 +974,7 @@ export function buildApp(
     return { month: r.month, from: r.from, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings.csv', async (request, reply) => {
-    const r = publicTraffic(await rankingFor(request.query));
+    const r = publicTraffic(await rankingFor(request.query, true));
     if (!r) return reply.code(404).send({ error: 'no_data' });
     const cell = (v: unknown) =>
       v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
@@ -978,6 +1000,24 @@ export function buildApp(
       '來源',
       ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([, label]) => `${label}占比`),
       '比較月份',
+      '報表月份',
+      '造訪量排名',
+      '搜尋排行',
+      'AI排行',
+      '比較月流量(百萬)',
+      '比較月台灣造訪(百萬)',
+      '比較月搜尋S(百萬)',
+      '比較月AI(百萬)',
+      '比較月台灣搜尋S(估算百萬)',
+      '比較月台灣AI(估算百萬)',
+      '比較月搜尋占比',
+      '比較月AI占比',
+      '比較月台灣占比',
+      '比較月名次',
+      '比較月造訪量排名',
+      '比較月搜尋排行',
+      '比較月AI排行',
+      '當月報表缺漏',
       ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([, label]) => `${label}占比差距`),
     ];
     const body = r.list.map((s) =>
@@ -1003,6 +1043,31 @@ export function buildApp(
         s.visitsSource,
         ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key]) => (s.channels ? (s.channels[key] ?? null) : null)),
         r.from,
+        r.month,
+        s.visitsRank,
+        s.searchRank,
+        s.aiRank,
+        s.prevVisits,
+        s.prevTaiwanVisits,
+        s.prevSearchVisits,
+        s.prevAiVisits,
+        s.prevTaiwanSearchVisits,
+        s.prevTaiwanAiVisits,
+        s.prevSearchShare,
+        s.prevAiShare,
+        s.prevTaiwanShare,
+        s.prevRank,
+        s.prevVisitsRank,
+        s.prevSearchRank,
+        s.prevAiRank,
+        [
+          s.visits === null ? '造訪量' : '',
+          s.searchVisits === null ? '搜尋S' : '',
+          s.aiVisits === null ? 'AI' : '',
+          s.taiwanVisits === null ? '台灣造訪量' : '',
+        ]
+          .filter(Boolean)
+          .join('、'),
         ...CSV_CHANNELS.filter(([key]) => visibleChannel(key)).map(([key]) =>
           s.channels?.[key] != null && s.prevChannels?.[key] != null
             ? trafficAccess.getStore()
@@ -1016,7 +1081,10 @@ export function buildApp(
     );
     reply
       .type('text/csv; charset=utf-8')
-      .header('content-disposition', `attachment; filename="traffic-${r.month}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`);
+      .header(
+        'content-disposition',
+        `attachment; filename="traffic-${r.month}${r.from ? `-vs-${r.from}` : ''}${r.topic ? `-${encodeURIComponent(r.topic)}` : ''}.csv"`,
+      );
     return `﻿${[head.join(','), ...body].join('\n')}\n`;
   });
   app.get<{ Querystring: { month?: string } }>('/api/v1/topics', async (request, reply) => {
