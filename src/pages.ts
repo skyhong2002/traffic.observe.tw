@@ -10,7 +10,7 @@ import { type Candidate, type SimilarListing, taiwanClue } from './similarsites.
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
-import { THEME_SCRIPT } from './theme.ts';
+import { THEME_SCRIPT, THEME_TOGGLE } from './theme.ts';
 import { taiwanVisits } from './taiwan-estimate.ts';
 import type { TopicOverview } from './topics.ts';
 import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } from './traffic-access.ts';
@@ -175,7 +175,7 @@ export const METHOD_LINK = '<a class="method-link" href="#method">本頁的資�
 export function siteHeader(nav: Nav) {
   return `<a class="skip-link" href="#main">跳至主要內容</a><header class="site"><div class="wrap site-inner"><a class="brand" href="/">${BRAND}</a><nav class="site-nav" aria-label="主要導覽">${NAV.map(
     ([href, label, keys]) => `<a href="${href}"${nav && keys.includes(nav) ? ' class="on" aria-current="true"' : ''}>${label}</a>`,
-  ).join('')}</nav><div class="site-tools"><button type="button" class="theme-toggle" data-theme-toggle aria-label="切換為白底" aria-pressed="false" hidden>白底</button><span class="who"><!--who--></span></div></div></header>`;
+  ).join('')}</nav><div class="site-tools">${THEME_TOGGLE}<span class="who"><!--who--></span></div></div></header>`;
 }
 
 export const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>

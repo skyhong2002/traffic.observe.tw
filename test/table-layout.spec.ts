@@ -146,7 +146,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
     const origin = await server.listen({ host: '127.0.0.1', port: 0 });
     const browser = await chromium.launch({ headless: true });
     try {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' });
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(origin + '/status/collection/?state=all&priority=2');
@@ -160,13 +160,26 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       expect(await page.locator('.collection-missing').evaluateAll((cells) => cells.every((c) => c.scrollWidth <= c.clientWidth))).toBe(
         true,
       );
-      await page.getByRole('button', { name: '切換為白底' }).click();
+      const toggle = page.getByRole('button', { name: '深色模式', exact: true });
+      expect(await toggle.getAttribute('aria-pressed')).toBe('true');
+      expect(await toggle.locator('.theme-sun').isVisible()).toBe(true);
+      await toggle.click();
       expect(await page.locator('html').getAttribute('data-theme')).toBe('light');
+      expect(await toggle.locator('.theme-moon').isVisible()).toBe(true);
       expect(await page.evaluate('getComputedStyle(document.documentElement).backgroundColor')).toBe('rgb(255, 255, 255)');
       await page.reload();
-      expect(await page.getByRole('button', { name: '切換為黑底' }).getAttribute('aria-pressed')).toBe('true');
-      await page.getByRole('button', { name: '切換為黑底' }).click();
+      expect(await toggle.getAttribute('aria-pressed')).toBe('false');
+      expect(await page.evaluate("localStorage.getItem('theme')")).toBe('light');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      expect(await toggle.getAttribute('aria-pressed')).toBe('false');
+      await toggle.click();
+      expect(await page.evaluate("localStorage.getItem('theme')")).toBe(null);
       expect(await page.evaluate('getComputedStyle(document.documentElement).backgroundColor')).toBe('rgb(10, 10, 10)');
+      await page.emulateMedia({ colorScheme: 'light' });
+      await page.waitForFunction("document.documentElement.dataset.theme === 'light'");
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await page.waitForFunction("document.documentElement.dataset.theme === 'dark'");
       const form = page.locator('.priority-form').first();
       await page.locator('.collection-edit > summary').first().click();
       expect(await form.locator('[name=state]').inputValue()).toBe('all');
