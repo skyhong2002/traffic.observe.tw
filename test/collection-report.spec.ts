@@ -88,8 +88,10 @@ const data = { entries: prepareCollectionReport(collection, current, previous, m
 it('keeps labels and previous volumes for sites with no current data and all tag chips visible', () => {
   const $ = load(collectionReportPage(collection, ['202610', '202609'], '202609', data, { source: 'none', topic: '電商', exclude: '' }));
   expect($('#report-collection tbody tr')).toHaveLength(1);
+  expect($('#report-collection thead th')).toHaveLength(7);
+  expect($('#report-collection thead th').eq(2).text()).toContain('2026/09 造訪');
   expect($('#report-collection tbody').text()).toContain('empty.tw');
-  expect($('#report-collection tbody').text()).toContain('30.0000');
+  expect($('#report-collection tbody').text()).toContain('30.00m');
   expect($('[aria-label=網站標籤]').text()).toContain('部落格');
   expect($('a[href="/site/empty.tw/manual/?month=202610"]')).toHaveLength(1);
   const sort = new URL($('th a').last().attr('href')!, 'https://site.observe.tw');
@@ -109,7 +111,7 @@ it('includes partially filled report rows, treats zero AI as known and preserves
   );
   expect($('#report-collection tbody tr')).toHaveLength(1);
   expect($('#report-collection tbody').text()).toContain('partial.tw');
-  expect($('#report-collection tbody').text()).toContain('缺：AI');
+  expect($('#report-collection summary').text()).toBe('缺 1 項');
   expect(data.entries.find((entry) => entry.domain === 'ready.tw')?.missing).toEqual([]);
   const csv = new URL(
     $('a')
@@ -145,11 +147,21 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       for (const width of [1280, 390, 320]) {
         await page.setViewportSize({ width, height: 844 });
         expect(await page.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true);
+        if (width === 1280) {
+          expect(await page.locator('#report-collection').evaluate((table) => table.scrollWidth <= table.parentElement!.clientWidth)).toBe(
+            true,
+          );
+        }
       }
       await page.getByRole('searchbox', { name: '搜尋網站名稱或網域' }).fill('partial');
       await page.getByRole('button', { name: '查看', exact: true }).click();
       expect(await page.locator('#report-collection tbody tr').count()).toBe(1);
-      expect(await page.locator('#report-collection tbody').innerText()).toContain('缺：AI');
+      expect(await page.locator('#report-collection thead th').count()).toBe(7);
+      expect(await page.locator('#report-collection thead th').nth(2).innerText()).toContain('2026/09 造訪');
+      expect(await page.locator('.report-missing summary').innerText()).toBe('缺 1 項');
+      expect(await page.locator('.report-missing li').isVisible()).toBe(false);
+      await page.locator('.report-missing summary').click();
+      expect(await page.locator('.report-missing li').innerText()).toBe('AI');
       expect(await page.getByRole('link', { name: '補登', exact: true }).getAttribute('href')).toBe(
         '/site/partial.tw/manual/?month=202610',
       );

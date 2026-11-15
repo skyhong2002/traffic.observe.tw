@@ -2,8 +2,8 @@ import type { Collection } from './collection.ts';
 import type { Pool } from './db.ts';
 import { type ManagedSite, managedSites } from './metadata.ts';
 import { monthView, type SiteMonth } from './metrics.ts';
-import { chipRow, favicon, html, layout, SOURCE_LABEL, section, sourceOf, table } from './pages.ts';
-import { limitRows, trafficNumber } from './traffic-access.ts';
+import { chipRow, favicon, html, layout, SOURCE_LABEL, section, sourceOf, table, vol } from './pages.ts';
+import { limitRows } from './traffic-access.ts';
 
 export interface CollectionReportQuery {
   month?: string;
@@ -238,14 +238,14 @@ export function collectionReportPage(
     ]),
     sort,
   )}<button type="submit">查看</button></form>`;
-  const numeric = (value: number | null) => (value === null ? '<span class="muted">—</span>' : html(trafficNumber(value, 4)));
+  const numeric = (value: number | null) => (value === null ? '<span class="muted">—</span>' : vol(value));
   const numberHeader = (value: string, text: string) =>
     `<th class="num"${key === value ? ` aria-sort="${direction === 'asc' ? 'ascending' : 'descending'}"` : ''}><a href="${html(href({ sort: `${value}-${key === value && direction === 'desc' ? 'asc' : 'desc'}` }))}">${text} ↕</a></th>`;
   const rows = visible
     .slice((page - 1) * 100, page * 100)
     .map(
       (entry) =>
-        `<tr><td class="l">${favicon(entry.domain, entry.name)}<a href="/site/${html(entry.domain)}/">${html(entry.name)}</a><small class="muted"> ${html(entry.domain)}</small></td><td class="l"><span class="tags">${entry.topics.map((tag) => `<a class="tag" href="${html(href({ topic: tag, exclude: excluded.filter((t) => t !== tag).join(',') }))}">${html(tag)}</a>`).join('')}</span></td><td class="l">${entry.missing.length ? `缺：${entry.missing.join('、')}` : '報表欄位已齊'}<small class="muted">${entry.hasManual ? ' · 已有人工補登' : !entry.hasAutomatic ? ' · 尚無自動或人工資料' : ' · 已有自動資料'}</small></td>${['visits', 'searchVisits', 'aiVisits', 'prevVisits', 'prevSearchVisits', 'prevAiVisits'].map((metric) => `<td class="num">${numeric(entry[metric as 'visits'])}</td>`).join('')}<td class="l"><a href="/site/${html(entry.domain)}/manual/?month=${month}">${entry.hasManual ? '編輯補登' : '補登'}</a></td></tr>`,
+        `<tr><td class="l"><div class="report-site">${favicon(entry.domain, entry.name)}<a href="/site/${html(entry.domain)}/" title="${html(`${entry.name} · ${entry.domain}`)}">${html(entry.name)}</a></div></td><td class="l"><span class="tags">${entry.topics.map((tag) => `<a class="tag" href="${html(href({ topic: tag, exclude: excluded.filter((t) => t !== tag).join(',') }))}">${html(tag)}</a>`).join('')}</span></td>${['prevVisits', 'prevSearchVisits', 'prevAiVisits'].map((metric) => `<td class="num">${numeric(entry[metric as 'prevVisits'])}</td>`).join('')}<td class="l">${entry.missing.length ? `<details class="report-missing"><summary>缺 ${entry.missing.length} 項</summary><ul>${entry.missing.map((field) => `<li>${html(field)}</li>`).join('')}</ul></details>` : '<span class="muted">已齊</span>'}</td><td class="l"><a href="/site/${html(entry.domain)}/manual/?month=${month}">${entry.hasManual ? '編輯' : '補登'}</a></td></tr>`,
     )
     .join('');
   const csvParams = new URLSearchParams({
@@ -273,7 +273,7 @@ export function collectionReportPage(
       toolbar: form,
       actions: `<a href="/api/v1/rankings.csv?${html(csvParams.toString())}">下載報表 CSV（含比較月）</a><a href="/#${html(reportHash.toString())}">查看此範圍的流量報表</a>`,
     },
-    ` ${query.saved ? `<p class="flash" role="status">已儲存 ${html(query.saved)} 的優先級。</p>` : ''}<div class="chip-rows">${chips}</div><p class="results-line">此範圍追蹤 ${scoped.length} 個網站，${scoped.filter((entry) => entry.missing.length).length} 個仍缺報表欄位。<a href="${html(href({ source: 'all', needs: 'report', state: 'all' }))}">查看所有報表缺資料的網站（含部分資料）</a></p><p class="note">數值單位：百萬次。當月與比較月都顯示造訪量、自然搜尋S、AI 導流；未知顯示「—」，不當作零。標籤數量以追蹤名單計算，包含當月尚無流量的網站。已有試算表資料時可能足以產出報表，但仍沒有當月自動或人工資料。</p>${section('報表待補清單', pager + table(`<th class="l">網站</th><th class="l">標籤</th><th class="l">報表缺漏</th>${numberHeader('visits', `${label(month)} 造訪`)}${numberHeader('searchVisits', '搜尋S')}${numberHeader('aiVisits', 'AI')}${numberHeader('prevVisits', `${label(from)} 造訪`)}${numberHeader('prevSearchVisits', '比較月搜尋S')}${numberHeader('prevAiVisits', '比較月 AI')}<th class="l">操作</th>`, rows, '沒有符合條件的網站。', 10, 'report-collection', { sortable: false }) + pager)}<p class="note"><a href="${html(href({ view: 'collection', sort: 'updated-desc' }))}">查看收集排程、完整欄位缺漏與優先級</a></p>`,
+    ` ${query.saved ? `<p class="flash" role="status">已儲存 ${html(query.saved)} 的優先級。</p>` : ''}<div class="chip-rows">${chips}</div><p class="results-line">此範圍追蹤 ${scoped.length} 個網站，${scoped.filter((entry) => entry.missing.length).length} 個仍缺報表欄位。<a href="${html(href({ source: 'all', needs: 'report', state: 'all' }))}">查看所有報表缺資料的網站（含部分資料）</a></p><p class="note">參考比較月的造訪量、搜尋S、AI 決定補登順序；k、m、b 分別代表千、百萬、十億次，未知顯示「—」。點「缺幾項」查看缺漏明細。</p>${section('報表待補清單', pager + table(`<th class="l">網站</th><th class="l">標籤</th>${numberHeader('prevVisits', `${label(from)} 造訪`)}${numberHeader('prevSearchVisits', '搜尋S')}${numberHeader('prevAiVisits', 'AI')}<th class="l">缺漏</th><th class="l">操作</th>`, rows, '沒有符合條件的網站。', 7, 'report-collection', { sortable: false, className: 'report-collection-table' }) + pager)}<p class="note"><a href="${html(href({ view: 'collection', sort: 'updated-desc' }))}">查看收集排程、完整欄位缺漏與優先級</a></p>`,
     {
       nav: 'missing',
       method:

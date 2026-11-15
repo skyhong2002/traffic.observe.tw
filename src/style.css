@@ -3240,3 +3240,60 @@ a.tag:hover,
     margin: 4px 0 0 16px;
   }
 }
+
+/* A short work list: identity, comparison-month traffic, and the next action. */
+.report-collection-table {
+  min-width: 860px;
+  width: 100%;
+  table-layout: fixed;
+  font-size: 13px;
+  line-height: 22px;
+}
+.report-collection-table th:nth-child(1) {
+  width: 26%;
+}
+.report-collection-table th:nth-child(2) {
+  width: 24%;
+}
+.report-collection-table th:nth-child(3) {
+  width: 13%;
+}
+.report-collection-table th:nth-child(4) {
+  width: 11%;
+}
+.report-collection-table th:nth-child(5) {
+  width: 9%;
+}
+.report-collection-table th:nth-child(6) {
+  width: 10%;
+}
+.report-collection-table th:nth-child(7) {
+  width: 7%;
+}
+.report-site {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.report-site > a {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-collection-table .table-lead-box {
+  width: 100%;
+}
+.report-collection-table .tags {
+  max-width: 100%;
+}
+.report-missing summary {
+  cursor: pointer;
+  white-space: nowrap;
+}
+.report-missing ul {
+  margin: 4px 0;
+  padding-left: 16px;
+  white-space: normal;
+}
