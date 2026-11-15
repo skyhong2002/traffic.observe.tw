@@ -1,7 +1,7 @@
 import { BRAND, BRAND_HEAD } from './brand.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
 import { DOMAIN_DISPLAY_SCRIPT, displayDomainText } from './domain-display.ts';
-import { type manualCandidates, proUrl } from './manual.ts';
+import { proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals, reportedPercentText } from './manual-breakdowns.ts';
 import { type ranking, shiftMonth } from './metrics.ts';
 import type { RadarPeriod } from './radar.ts';
@@ -10,8 +10,8 @@ import { type Candidate, type SimilarListing, taiwanClue } from './similarsites.
 import type { TrafficChannel, TrafficProfile } from './similarweb.ts';
 import type { QueueEntry, serviceStatus } from './status.ts';
 import { STYLE_HREF, TABLES_HREF } from './style.ts';
-import { THEME_SCRIPT, THEME_TOGGLE } from './theme.ts';
 import { taiwanVisits } from './taiwan-estimate.ts';
+import { THEME_SCRIPT, THEME_TOGGLE } from './theme.ts';
 import type { TopicOverview } from './topics.ts';
 import { limitedTraffic, limitRows, trafficNumber, twoDigits, visibleChannel } from './traffic-access.ts';
 
@@ -1388,226 +1388,178 @@ export function notFoundPage(raw: string) {
   );
 }
 
-export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>, manual: Awaited<ReturnType<typeof manualCandidates>> = []) {
-  const manualRows = manual
-    .map(
-      (c) =>
-        `<tr>${siteCell(c.domain, c.domain)}${sortCell('num', c.sheet?.visits ?? null, c.sheet ? `${vol(c.sheet.visits)} <span class="muted">${monthLabel(c.sheet.month)}</span>` : '—')}${sortCell('l', c.manual?.month ?? null, c.manual ? `${monthLabel(c.manual.month)}・${volText(c.manual.visits)}` : '<span class="muted">還沒有</span>')}<td class="l"><span class="links-inline"><a href="${html(proUrl(c.domain))}" rel="noopener">Similarweb 平台 ↗</a><a href="/site/${html(c.domain)}/manual/">補登</a></span></td></tr>`,
-    )
-    .join('');
-  const manualSection = manualRows
-    ? section(
-        '需要從 Similarweb 平台補登',
-        `${table(
-          '<th class="l">網域</th><th class="num">試算表最新</th><th class="l" aria-sort="descending">最新補登</th><th class="l" data-nosort>操作</th>',
-          manualRows,
-          '',
-          4,
-        )}`,
-        ' id="manual"',
-      )
-    : '';
-  const runs = status.runs
-    .map(
-      (r) =>
-        `<tr>${sortCell('l', r.startedAt, tw(r.startedAt))}<td class="l">${r.sent ? 'Similarweb 資料請求' : '排程檢查（只讀本站）'}</td><td class="num">${r.budget}</td><td class="num">${r.sent}</td><td class="num">${r.ok}</td><td class="num">${r.failed}</td><td class="l prose-cell">${r.refused ? '<span class="down">▼ 被拒</span> ' : ''}${tableDescription(`${r.sent ? '' : '未向 Similarweb 送出請求。'}${r.note ?? ''}`)}</td></tr>`,
-    )
-    .join('');
-  const sent24 = Object.values(status.last24h).reduce((a, b) => a + b, 0);
-  // The sheet's domains count as 手動 here too, so its rows merge into that one.
-  const watchers = [
-    ...status.watchers
-      .reduce((m, w) => {
-        const key = `${sourceOf(w.requester)}|${w.kind}`;
-        return m.set(key, { ...w, requester: sourceOf(w.requester), domains: (m.get(key)?.domains ?? 0) + w.domains });
-      }, new Map<string, (typeof status.watchers)[number]>())
-      .values(),
-  ];
-  const priority = [...new Set(status.priority.map(sourceOf))];
-  const q = status.queue;
+export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
   const policy = status.policy;
+  const activity = status.activities;
+  const collection = status.collection;
+  const collectionHref = `/status/collection/${collection ? `?month=${collection.month}` : ''}`;
+  const icon = (kind: 'clock' | 'check' | 'pause' | 'activity' | 'layers' | 'arrow') => {
+    const paths = {
+      clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+      check: '<path d="m5 12 4 4L19 6"/>',
+      pause: '<path d="M9 5v14M15 5v14"/>',
+      activity: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+      layers: '<path d="m3 7 9-4 9 4-9 4-9-4Zm0 5 9 4 9-4M3 17l9 4 9-4"/>',
+      arrow: '<path d="M5 12h14m-5-5 5 5-5 5"/>',
+    };
+    return `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind]}</svg>`;
+  };
+  const time = (at: string | null) =>
+    at
+      ? `<time datetime="${html(at)}" title="${html(tw(at))}">${html(tw(at).replace(/^\d{4}\//, ''))}</time>`
+      : '<span class="muted">尚無紀錄</span>';
+  const recovery = policy.recovery;
+  const isRecovery = !!recovery;
+  const stateLabel =
+    policy.reason === 'disabled'
+      ? '自動抓取已暫停'
+      : policy.reason === 'provider-cooldown'
+        ? recovery?.source === 'local-recovery'
+          ? '恢復觀察中'
+          : '拒絕後冷卻'
+        : policy.reason === 'recovery-probe-limit'
+          ? '等待探查名額'
+          : policy.reason === 'weekly-limit'
+            ? '本週額度已滿'
+            : policy.reason === 'waiting-for-month'
+              ? '等待新月份'
+              : isRecovery
+                ? '恢復觀察中'
+                : policy.reason
+                  ? '等待下一筆'
+                  : '依排程收集';
   const policyMessage =
     policy.reason === 'disabled'
       ? 'Similarweb 自動抓取已暫停，既有資料仍可查詢。'
       : policy.reason === 'weekly-limit'
-        ? `本週請求額度已用完；最早於 ${tw(policy.resumeAt)} 後恢復。`
+        ? '本週請求額度已用完（本機設定）。'
         : policy.reason === 'recovery-probe-limit'
-          ? `已達本機恢復探查上限；不早於 ${tw(policy.resumeAt)} 再查一站。`
+          ? '已達本機滾動探查上限，等待名額恢復。'
           : policy.reason === 'hourly-limit'
-            ? `本機過去一小時請求上限已達；不早於 ${tw(policy.resumeAt)} 再試。`
+            ? '已達本機每小時上限，等待較早的請求移出計算區間。'
             : policy.reason === 'request-spacing'
-              ? `請求間隔等待中；不早於 ${tw(policy.resumeAt)} 送出。`
+              ? '遵守請求間隔，下一筆由排程自動安排。'
               : policy.reason === 'provider-cooldown'
-                ? policy.recovery?.source === 'provider'
-                  ? `遵守 Similarweb 指定的等待時間，不早於 ${tw(policy.resumeAt)} 再查一站。`
-                  : policy.recovery?.source === 'local-recovery'
-                    ? `Similarweb 恢復觀察中，已連續成功 ${policy.recovery.successes} 次；下一站不早於 ${tw(policy.resumeAt)}。`
-                    : policy.recovery
-                      ? `Similarweb 拒絕或探查未成功，依本機退避設定等到 ${tw(policy.resumeAt)} 再查一站；這不是官方解封時間。`
-                      : `Similarweb 拒絕請求，暫停至 ${tw(policy.resumeAt)}。`
+                ? recovery?.source === 'provider'
+                  ? 'Similarweb 拒絕請求，依上游指定的 Retry-After 等待。'
+                  : recovery?.source === 'local-recovery'
+                    ? '逐筆觀察有效回應，確認穩定後恢復一般限速。'
+                    : 'Similarweb 拒絕請求，依本機退避設定等待；這不是官方解封時間。'
                 : policy.reason === 'waiting-for-month'
-                  ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料；下一次探查不早於 ${tw(policy.resumeAt)}。`
-                  : '';
-  const queueRows = q.map(
-    (e) =>
-      `<tr${policy.maxPerRun && e.position <= policy.maxPerRun && e.expectedAt ? ' class="hl"' : ''}><td class="rank">${e.position}</td>${siteCell(e.domain, e.domain)}<td class="l">${e.requester ? requesterLabel(e.requester) : ''}</td><td class="l">${e.importance ? `${html(e.importance)}・${html(e.targetMonth)} 缺漏` : (DUE_LABEL[e.reason] ?? html(e.reason))}</td>${sortCell('l', e.lastSuccessAt, e.lastSuccessAt ? twDate(e.lastSuccessAt) : '<span class="muted">從未</span>')}${sortCell('l', e.expectedAt, e.expectedAt ? tw(e.expectedAt) : `<span class="muted">${policy.reason === 'disabled' ? '已暫停' : '未定'}</span>`)}</tr>`,
+                  ? `尚未取得 ${monthLabel(policy.targetMonth)} 組成資料，等待例行探查。`
+                  : isRecovery
+                    ? '逐筆觀察有效回應，確認穩定後恢復一般限速。'
+                    : '依重要程度補齊缺漏，已完成的網域自動移出月份佇列。';
+  const outcomes = status.last24h;
+  const requests24 = Object.values(outcomes).reduce((sum, count) => sum + count, 0);
+  const saved24 = outcomes.ok ?? 0;
+  const refused24 = outcomes.refused ?? 0;
+  const pending24 = outcomes.pending ?? 0;
+  const errors24 = Object.entries(outcomes).reduce(
+    (sum, [key, count]) => sum + (['ok', 'refused', 'pending'].includes(key) ? 0 : count),
+    0,
   );
-  const queueHead =
-    '<th class="rank" aria-sort="ascending" title="抓取順序">#</th><th class="l">網域</th><th class="l">來源</th><th class="l">原因</th><th class="l">上次成功</th><th class="l">預計抓取</th>';
-  const queueNote = q.length
-    ? `<p>共 ${q.length} 個網域等候抓取。${
-        policy.reason
-          ? `${policyMessage}表格是等候順序。`
-          : status.refusedSince
-            ? 'Similarweb 目前拒絕每一輪的請求，恢復前沒有預計時間，表格是等候順序。'
-            : q[0].expectedAt
-              ? `下一輪預計 ${tw(q[0].expectedAt)}，最多 ${policy.maxPerRun} 個（底色標示）。`
-              : '目前暫停送出，表格是等候順序。'
-      }排程之後到期的網域會依同樣規則接在後面。${
-        status.collection
-          ? policy.waitingForMonth
-            ? `尚未取得目標月份組成時，每 ${policy.probeIntervalHours} 小時最多探查一次；取得後依重要性與共用限速補抓。`
-            : '已完成的網域會移出該月份佇列，缺漏依重要性與重試規則安排。'
-          : policy.waitingForMonth
-            ? `新網域先抓目前可用的月份，每輪最多 ${status.budget} 個；已抓過的網域在尚未取得 ${monthLabel(policy.targetMonth)} 組成資料時，每 ${policy.probeIntervalHours} 小時最多探查一次。新網域的請求也算探查，取得新月份後恢復每月更新。`
-            : status.lastMonth.catchUpPerRun >= status.budget
-              ? ''
-              : `近一天回應中 ${status.lastMonth.found}／${status.lastMonth.sampled} 個已有 ${monthLabel(status.lastMonth.month)} 的資料，缺這個月的網域每輪只補抓 ${status.lastMonth.catchUpPerRun} 個（依這個比例調整），其餘等 Similarweb 給出後再抓。`
-      }</p>`
-    : '<p>目前沒有到期的網域。</p>';
-  const activity = status.activities;
-  const activityRows = [
-    `<tr><td class="l">Similarweb 流量資料</td><td class="l">data.similarweb.com</td><td>會（實際送出時）</td><td class="l prose-cell">${html(`可送出時至少間隔 ${policy.minIntervalSeconds} 秒，過去一小時最多 ${policy.hourly.limit} 次；冷卻／等待發布時每小時只檢查排程`)}</td><td class="l prose-cell">${html(`近 24 小時 ${activity.similarweb.last24hRequests} 次請求；最近送出 ${tw(activity.similarweb.lastRequestAt) || '尚無'}`)}</td></tr>`,
-    `<tr><td class="l"><a href="/tech/">網站技術掃描</a></td><td class="l">各網站首頁</td><td>否</td><td class="l prose-cell">${html(`每 ${activity.websiteTechnology.intervalHours} 小時最多一批、每批最多 ${activity.websiteTechnology.maxDomainsPerBatch} 站，站間至少 ${activity.websiteTechnology.pauseSeconds} 秒；成功後 30 天才再自動掃描`)}</td><td class="l prose-cell">${html(`近 24 小時自動掃描 ${activity.websiteTechnology.last24hAutomaticDomainScans} 站次；最近批次 ${tw(activity.websiteTechnology.lastRunAt) || '尚無'}`)}</td></tr>`,
-    `<tr><td class="l">Cloudflare Radar 排名</td><td class="l">api.cloudflare.com</td><td>否</td><td class="l prose-cell">${html(`每天一次、請求間至少 ${activity.cloudflareRadar.pauseSeconds} 秒，只補尚未嘗試且沒有排名的網域`)}</td><td class="l prose-cell">${html(`近 24 小時 ${activity.cloudflareRadar.last24hRequests} 次 API 請求`)}</td></tr>`,
-    `<tr><td class="l">查看本站頁面／資料 API</td><td class="l">本站已儲存資料</td><td>否</td><td class="l prose-cell">${html(`按需查看；程式自動查詢建議每小時一次`)}</td><td class="l prose-cell">${html(`狀態、流量與技術查詢只讀資料，不觸發上述抓取`)}</td></tr>`,
-  ].join('');
-  const activitiesSection = section(
-    '請求來源與用途',
-    `<p>Similarweb 額度只與向 Similarweb 送出的資料請求有關。網站技術掃描、Radar 與本站資料查詢分別列在下方。</p>${table('<th class="l">工作</th><th class="l">請求對象</th><th>使用 Similarweb 額度</th><th class="l">頻率</th><th class="l">實際活動</th>', activityRows, '', 5, '', { pin: false })}`,
-  );
-  const weeklyStat =
-    policy.weekly.limit === null
-      ? `<span>本週 Similarweb 請求</span><b>${policy.weekly.used}</b><small>依實際回應退避；伺服器週額度未確認</small>`
-      : `<span>Similarweb 本機每週上限</span><b>${policy.weekly.used} / ${policy.weekly.limit}</b><small>剩餘 ${policy.weekly.remaining} 次・${tw(policy.weekly.resetsAt)} 重置</small>`;
-  const stats = `<div class="stats"><div>${weeklyStat}</div>
-<div><span>最新流量月份</span><b>${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'}</b><small>最新組成：${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</small></div>
-<div><span>Similarweb 每輪上限</span><b>${status.budget}</b><small>${status.budget ? (policy.minIntervalSeconds ? `可送出時至少間隔 ${policy.minIntervalSeconds} 秒；等待中每小時只檢查排程` : '每小時檢查排程，依探查間隔及退避狀態送出') : '0：目前不送出任何請求'}</small></div>
-<div><span>追蹤網域</span><b>${status.watched}</b></div><div><span>目前到期</span><b>${status.due}</b><small><a href="#queue">看排程</a></small></div>
-<div><span>近 24 小時 Similarweb 請求</span><b>${sent24}</b><small>${
-    Object.entries(status.last24h)
-      .map(([k, v]) => `${html(k)} ${v}`)
-      .join('・') || '沒有請求'
-  }</small></div></div>`;
-  const experiment = status.egressExperiment;
-  const egressLabels = { direct: '台灣（原出口）', 'vessel-tokyo': '日本', 'vessel-singapore': '新加坡' };
-  const egressSection = experiment
-    ? section(
-        'Similarweb 出口實驗',
-        `<p>已預留 ${experiment.trials.length} / ${experiment.limit} 次；${experiment.nextRoute ? `下一個出口：${egressLabels[experiment.nextRoute]}。` : '這輪出口比較已用完。'}實驗只使用原定恢復探查，共用全部限速與冷卻，收到拒絕不會立即換出口。每個出口最多一筆，這輪只能觀察連通性與實際收到的資料，不能據此推算各出口額度。</p>${table(
-          '<th class="l">出口</th><th class="l">網域</th><th>時間</th><th>回應</th><th>流量月份</th><th>組成月份</th>',
-          experiment.trials
-            .map(
-              (trial) =>
-                `<tr><td class="l">${trial.egressRoute ? egressLabels[trial.egressRoute] : '未知'}</td><td class="l">${html(trial.domain)}</td><td>${tw(trial.at)}</td><td>${trial.httpStatus ?? '—'} / ${html(trial.outcome)}</td><td>${trial.latestMonth ? monthLabel(trial.latestMonth) : '—'}</td><td>${trial.latestProfileMonth ? monthLabel(trial.latestProfileMonth) : '—'}</td></tr>`,
-            )
-            .join(''),
-          '等待既有冷卻到期，尚未發出實驗請求。',
-          6,
-        )}`,
-      )
-    : '';
+  const nextAt = policy.resumeAt ?? status.queue[0]?.expectedAt ?? null;
+  const hero = `<section class="status-panel status-current" aria-labelledby="sw-heading">
+    <header class="status-heading"><h2 id="sw-heading">${icon('activity')}Similarweb 流量</h2><span class="status-badge${policy.reason === 'provider-cooldown' && recovery?.source !== 'local-recovery' ? ' warning' : ''}">${icon(policy.reason === 'disabled' ? 'pause' : policy.reason || isRecovery ? 'clock' : 'activity')}${stateLabel}</span></header>
+    <p class="status-explanation">${policyMessage}</p>
+    <div class="status-next"><span>${icon('clock')}下次最早可送出</span><strong>${policy.reason === 'disabled' ? '已暫停' : nextAt ? tw(nextAt) : status.due ? '由排程安排' : '目前無待抓網域'}</strong></div>
+    <p class="status-caption">最近請求／預留 ${time(activity.similarweb.lastRequestAt)} · 時間為台北時間</p>
+    <dl class="status-counts"><div><dt>24h 已存</dt><dd>${saved24}</dd></div><div><dt>拒絕</dt><dd${refused24 ? ' class="down"' : ''}>${refused24}</dd></div><div><dt title="錯誤或未取得有效資料，不含拒絕">其他失敗</dt><dd>${errors24}</dd></div><div><dt title="已預留，但尚未確認有效回應">待確認</dt><dd>${pending24}</dd></div></dl>
+  </section>`;
+  const progress = collection
+    ? `<section class="status-panel status-collection" aria-labelledby="collection-heading"><header class="status-heading"><h2 id="collection-heading">${icon('layers')}${monthLabel(collection.month)} 收集進度</h2><a href="${collectionHref}">逐站明細 ${icon('arrow')}</a></header>
+      <div class="status-progress-number"><strong>${collection.complete.toLocaleString('en-US')}</strong><span> / ${collection.total.toLocaleString('en-US')} 個完整</span><b>${collection.total ? Math.round((collection.complete / collection.total) * 100) : 0}%</b></div>
+      <progress max="${collection.total || 1}" value="${collection.complete}" aria-label="${monthLabel(collection.month)} 完整網域">${collection.complete} / ${collection.total}</progress>
+      <p><a href="/status/collection/?month=${collection.month}&state=all&source=none">查看本月尚未有資料的網站</a></p>
+      <p class="status-caption">${collection.withVisits} 個有造訪量 · ${collection.partial} 個缺其他欄位 · ${collection.manualNeeded} 個需補登</p>
+      <div class="status-priorities">${collection.priorities
+        .filter((p) => p.total > 0)
+        .map(
+          (p) =>
+            `<a href="${collectionHref}&priority=${p.priority}"><span>${html(p.label)}</span><strong>${p.complete} <small>/ ${p.total}</small></strong></a>`,
+        )
+        .join('')}</div>
+      <p class="status-caption">最新收到：流量 ${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無'} · 組成 ${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無'}</p></section>`
+    : `<section class="status-panel"><h2>${icon('layers')}資料月份</h2><p>最新流量 ${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'} · 組成 ${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</p><a href="${collectionHref}">查看月份收集 ${icon('arrow')}</a></section>`;
+
+  // Keep provider outcomes separate from DB-only scheduler checks. A reservation is not a confirmed request.
+  const recent = [...status.requests].sort((a, b) => b.at.localeCompare(a.at) || b.sendId - a.sendId).slice(0, 12);
+  const requestRows = recent
+    .map((r) => {
+      const refused = r.quotaExceeded || r.outcome === 'refused';
+      const saved = r.outcome === 'ok' && !refused;
+      const outcome = refused
+        ? '拒絕'
+        : saved
+          ? '已存資料'
+          : r.outcome === 'pending'
+            ? '預留・待確認'
+            : r.outcome === 'no-data'
+              ? '無有效資料'
+              : '錯誤';
+      const route =
+        r.egressRoute === 'direct'
+          ? '台灣（原出口）'
+          : r.egressRoute === 'vessel-tokyo'
+            ? '日本'
+            : r.egressRoute === 'vessel-singapore'
+              ? '新加坡'
+              : '未記錄';
+      const evidence = [
+        ['出口／傳輸', `${route} / ${r.httpClient ?? '未記錄'}`],
+        ['Provider', r.provider ?? '未記錄'],
+        ['Cache', r.cache ?? '未記錄'],
+        ['POP', r.pop ?? '未記錄'],
+        ['Content-Type', r.contentType ?? '未記錄'],
+        ['Retry-After', r.retryAfter ?? '未記錄'],
+        ['退避依據', r.retrySource ?? '未記錄'],
+      ]
+        .map(([label, value]) => `<div><dt>${label}</dt><dd>${html(value)}</dd></div>`)
+        .join('');
+      return `<tr><td class="l">${time(r.at)}</td>${siteCell(r.domain, r.domain)}<td class="l"><span class="status-result${refused || (!saved && r.outcome !== 'pending') ? ' down' : saved ? ' up' : ''}">${icon(saved ? 'check' : refused ? 'pause' : 'clock')}${outcome}</span>${r.httpStatus !== null ? `<span class="status-http">HTTP ${r.httpStatus}</span>` : ''}${r.quotaExceeded ? '<span class="status-http down">quota exceeded</span>' : ''}</td><td class="l status-months">${r.latestMonth ? monthLabel(r.latestMonth) : '—'}<span class="muted"> / </span>${r.latestProfileMonth ? monthLabel(r.latestProfileMonth) : '—'}</td><td class="l"><details class="status-request-detail"><summary aria-label="${html(r.domain)} ${html(tw(r.at))} 回應證據">詳情</summary><dl>${evidence}</dl>${!r.diagnosticsRecorded ? '<p>此筆未保存診斷標頭，無法事後補判。</p>' : ''}</details></td></tr>`;
+    })
+    .join('');
+  const requests = `<section class="status-recent" aria-labelledby="requests-heading"><header class="status-heading"><h2 id="requests-heading">最近 Similarweb 請求 <small>最新在前 · 最多 12 筆</small></h2><a href="/api/v1/status">完整 JSON ${icon('arrow')}</a></header>
+    ${table('<th class="l" aria-sort="descending">送出／預留時間 ↓</th><th class="l">網域</th><th class="l">結果</th><th class="l">流量 / 組成月份</th><th class="l">診斷</th>', requestRows, '尚無請求或預留紀錄；排程檢查不代表已向 Similarweb 送出。', 5, 'status-requests', { sortable: false, pin: false, className: 'status-table' })}
+    <p class="status-caption">僅列自動資料請求；人工補登見<a href="${collectionHref}">月份收集</a>。預留不代表已收到回應，HTTP 200 仍可能因額度訊息被拒絕。</p></section>`;
+  const others = `<section class="status-other" aria-labelledby="other-heading"><header class="status-heading"><h2 id="other-heading">其他資料來源</h2><span class="status-caption">各自排程，不使用 Similarweb 額度</span></header>${table(
+    '<th class="l">來源</th><th class="l">最近活動</th><th class="l">頻率</th>',
+    `<tr><td class="l"><a href="/tech/">${icon('layers')}網站技術掃描</a></td><td class="l">24h ${activity.websiteTechnology.last24hAutomaticDomainScans} 站 · ${time(activity.websiteTechnology.lastRunAt)}</td><td class="l">每 ${activity.websiteTechnology.intervalHours} 小時一批</td></tr>
+     <tr><td class="l">${icon('activity')}Cloudflare Radar</td><td class="l">24h ${activity.cloudflareRadar.last24hRequests} 次 · ${time(activity.cloudflareRadar.lastRunAt)}</td><td class="l">每日一次</td></tr>`,
+    '',
+    3,
+    '',
+    { sortable: false, pin: false, className: 'status-table' },
+  )}</section>`;
+  const runs = [...status.runs]
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .slice(0, 8)
+    .map(
+      (r) =>
+        `<tr><td class="l">${time(r.startedAt)}</td><td class="l">${r.sent ? 'Similarweb 資料請求' : '排程檢查（只讀本站）'}</td><td class="num">${r.sent}</td><td class="num">${r.ok} / ${r.failed}</td><td class="l prose-cell">${html(r.note ?? '')}</td></tr>`,
+    )
+    .join('');
+  const details = `<details class="status-diagnostics"><summary>排程與診斷 <span>本機限速、恢復探查、最近排程檢查</span></summary><div class="status-diagnostics-body">
+    <h3>本機限速</h3><p>全站共用每小時 ${policy.hourly.limit} 筆，至少間隔 ${policy.minIntervalSeconds} 秒；目前計入 ${policy.hourly.used} 筆。本週已計入 ${policy.weekly.used} 筆${policy.weekly.limit === null ? '，伺服器週額度未確認' : `，本機每週上限 ${policy.weekly.limit} 筆`}。近 24 小時共 ${requests24} 筆請求／預留紀錄。</p>
+    <p>最新流量：${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'}；最新組成：${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}。${policy.waitingForMonth ? `新網域先抓目前可用的月份；新月份依既有 ${policy.probeIntervalHours} 小時探查間隔確認。` : ''}追蹤 ${status.watched} 個網域，${status.due} 個到期；逐站安排見<a href="${collectionHref}">月份收集</a>。</p>
+    ${recovery ? `<h3>恢復探查</h3><p>狀態 ${html(recovery.phase)} · 連續有效回應 ${recovery.successes} / ${recovery.requiredSuccesses} · 連續拒絕 ${recovery.refusals} 次。滾動 24 小時已用 ${recovery.used} / ${recovery.limit} 次，恢復觀察至少間隔 ${recovery.intervalMinutes} 分鐘。${recovery.budgetResumesAt ? `探查名額最早恢復：${tw(recovery.budgetResumesAt)}。` : ''}${recovery.providerRetryAt ? `上游 Retry-After：${tw(recovery.providerRetryAt)}。` : ''}</p>` : ''}
+    <h3>最近排程紀錄</h3><p class="status-caption">只讀本站的檢查不消耗 Similarweb 額度，也不能視為抓取成功。</p>${table('<th class="l">時間 ↓</th><th class="l">活動</th><th class="num">請求／預留</th><th class="num">成功 / 錯誤</th><th class="l">備註</th>', runs, '尚無排程紀錄。', 5, '', { sortable: false, pin: false, className: 'status-table' })}
+    <p class="status-caption">Provider、Cache、POP 僅為傳遞證據；CloudFront 本身不能確認拒絕根因。舊紀錄缺少的標頭維持未知；完整資料與已結束的出口實驗保留於 <a href="/api/v1/status">JSON</a>。</p>
+  </div></details>`;
   return layout(
     '資料更新狀態',
     {
       title: '資料更新狀態',
-      dek: '分別查看 Similarweb 流量請求、網站技術掃描、Radar 與本站資料查詢。',
-      actions: '<a href="/api/v1/status">JSON</a>',
+      dek: '抓取狀態、月份進度與最近回應。查看本頁只讀取本站資料。',
     },
-    `${
-      policyMessage
-        ? `<p class="flash">${policyMessage}</p>`
-        : status.refusedSince
-          ? `<p class="flash"><span class="down">▼</span> Similarweb 從 ${tw(status.refusedSince)} 起拒絕每一輪的請求，一筆都沒有抓到${status.coolingDownUntil ? `；下次嘗試在 ${tw(status.coolingDownUntil)} 之後` : ''}</p>`
-          : status.coolingDownUntil
-            ? `<p class="flash"><span class="down">▼</span> 被拒後暫停至 ${tw(status.coolingDownUntil)}</p>`
-            : ''
-    }${activitiesSection}${stats}${egressSection}
-${policy.recovery ? section('Similarweb 恢復探查', `<p>目前 ${html(policy.recovery.phase)}，連續 429 ${policy.recovery.refusals} 次，連續有效回應 ${policy.recovery.successes} / ${policy.recovery.requiredSuccesses} 次。過去 24 小時已用 ${policy.recovery.used} / ${policy.recovery.limit} 次恢復探查；每次只取一個待補網域，成功後至少隔 ${policy.recovery.intervalMinutes} 分鐘再觀察，確認穩定後才恢復一般限速。探查本身會用到 Similarweb 請求額度。</p><p>有有效 Retry-After 優先遵守；未提供時依本機 2 → 4 → 8 → 16 → 24 小時基礎退避，另加 0–10% 延遲。等待期間只讀本站排程，不會反覆打 Similarweb。<a href="https://www.rfc-editor.org/rfc/rfc6585.html#section-4">429 規範</a></p>`) : ''}
-${status.collection ? section('月份收集進度', `<p>${monthLabel(status.collection.month)}：${status.collection.complete} / ${status.collection.total} 個完整，${status.collection.withVisits} 個有造訪量，${status.collection.partial} 個仍缺組成或互動資料，${status.collection.manualNeeded} 個需要補登。<a href="/status/collection/?month=${status.collection.month}">查看逐站缺漏與設定重要網域</a> · <a href="/status/collection/?month=${status.collection.month}&state=all&source=none">本月尚未有資料</a></p><p>所有入口共用本機過去一小時 ${policy.hourly.limit} 次上限（非已確認的伺服器額度）；請求至少間隔 ${policy.minIntervalSeconds} 秒。</p>`) : ''}
-${section(status.budget ? 'Similarweb 待抓佇列' : 'Similarweb 等候佇列', table(queueHead, queueRows.join(''), '目前沒有到期的網域。', 6), ' id="queue"')}
-${manualSection}
-${section(
-  'Similarweb 實際請求診斷',
-  `<p>只顯示已保存的請求；未知欄位不代表成功。CloudFront 表示回應經過該服務，單憑它不能確認拒絕原因。舊紀錄沒有保存標頭時，無法事後補判。</p>${table(
-    '<th class="l">時間</th><th class="l">網域</th><th class="l">出口／傳輸</th><th>HTTP／結果</th><th class="l">回應證據</th><th>流量／組成月份</th>',
-    status.requests
-      .map((request) => {
-        const route =
-          request.egressRoute === 'direct'
-            ? '台灣（原出口）'
-            : request.egressRoute === 'vessel-tokyo'
-              ? '日本'
-              : request.egressRoute === 'vessel-singapore'
-                ? '新加坡'
-                : '未記錄';
-        const evidence = [
-          request.diagnosticsRecorded ? (request.provider ?? '未辨識 CDN') : '舊紀錄：未保存診斷標頭',
-          request.cache,
-          request.pop,
-          request.retryAfter ? `Retry-After: ${request.retryAfter}` : null,
-          request.quotaExceeded ? 'quota exceeded' : null,
-        ]
-          .filter(Boolean)
-          .map((text) => html(text!))
-          .join(' · ');
-        return `<tr><td>${tw(request.at)}</td><td class="l">${html(request.domain)}</td><td class="l">${route} / ${html(request.httpClient ?? '未記錄')}</td><td>${request.httpStatus ?? '—'} / ${html(request.outcome)}</td><td class="l prose-cell"><div>${evidence}</div></td><td>${request.latestMonth ? monthLabel(request.latestMonth) : '—'} / ${request.latestProfileMonth ? monthLabel(request.latestProfileMonth) : '—'}</td></tr>`;
-      })
-      .join(''),
-    '尚無實際請求。',
-    6,
-  )}`,
-)}
-${section(
-  '排程方式與追蹤來源',
-  `${table(
-    '<th class="l">來源</th><th class="l">類型</th><th class="num">網域</th>',
-    watchers
-      .map(
-        (w) =>
-          `<tr><td class="l">${requesterLabel(w.requester)}</td><td class="l">${KIND_LABEL[w.kind] ?? html(w.kind)}</td><td class="num">${w.domains}</td></tr>`,
-      )
-      .join(''),
-    '沒有追蹤者。',
-    3,
-  )}`,
-)}
-${section(
-  'Similarweb 請求與排程檢查紀錄',
-  table(
-    '<th class="l" aria-sort="descending">時間</th><th class="l">活動</th><th class="num">上限</th><th class="num">Similarweb 請求</th><th class="num">成功</th><th class="num">失敗</th><th class="l">備註</th>',
-    runs,
-    '尚未執行。',
-    7,
-    '',
-    { pin: false },
-  ),
-)}`,
+    `<div class="status-dashboard"><div class="status-overview">${hero}${progress}</div>${requests}${others}${details}</div>`,
     {
       nav: 'status',
-      method: `${TRAFFIC_METHOD}${methodPart(status.budget ? '下一輪抓取' : '等候抓取', queueNote)}${
-        manualRows
-          ? methodPart(
-              '需要從 Similarweb 平台補登',
-              '<p>這些網站在 Similarweb 免費資料裡沒有估算（最近一次抓取每個月都回傳 0），但試算表曾記錄到百萬次以上的造訪，登入 Similarweb 平台後可能查得到。登入編輯後，每月打開平台頁面把數字補登進來；免費帳號只看得到最近一個月。</p>',
-            )
-          : ''
-      }${methodPart(
-        '排程方式與追蹤來源',
-        status.collection
-          ? '<p>必抓 → 核心 → 台灣 → 其他；同級依上月台灣流量安排第一輪，每五個可送名額保留一個延後重試。完成後移出該月份佇列。</p>'
-          : `<p>優先序：${priority.map(requesterLabel).join(' → ')}。每小時一輪；預計時間假設中途沒有被 Similarweb 擋，也沒有新網域插隊。</p>`,
-      )}`,
+      method: methodPart(
+        '如何閱讀本頁',
+        '<p>月份進度包含自動資料與人工補登；最近請求只列 Similarweb 請求／預留紀錄，成功代表程式已解析並保存資料，不代表所有網域都已發布該月份。</p><p>最早可送出時間綜合本機限速、冷卻與探查預算，並非逐站預約時間。等待期間的排程檢查只讀本站資料庫。</p>',
+      ),
     },
   );
 }

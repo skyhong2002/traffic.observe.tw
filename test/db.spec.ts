@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { load } from 'cheerio';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
@@ -432,6 +433,58 @@ describe.skipIf(!url)('with a database', () => {
     expect(statusPage(paused)).toContain('Similarweb 自動抓取已暫停');
   });
 
+  it('keeps status compact and distinguishes saved data, quota refusals and unconfirmed reservations', async () => {
+    const base = await serviceStatus(pool, runConfig({}), new Date('2026-11-14T08:00:00Z'));
+    const requests: typeof base.requests = Array.from({ length: 16 }, (_, i) => ({
+      sendId: i + 1,
+      at: new Date(Date.UTC(2026, 10, 14, 0, i)).toISOString(),
+      domain: `site-${i}.tw`,
+      outcome: i === 15 ? 'pending' : i === 14 ? 'refused' : i === 13 ? 'no-data' : 'ok',
+      httpStatus: i === 15 ? null : 200,
+      egressRoute: null,
+      httpClient: null,
+      experiment: null,
+      diagnosticsRecorded: i === 14,
+      provider: i === 14 ? 'CloudFront' : null,
+      cache: i === 14 ? '<unsafe>' : null,
+      pop: null,
+      contentType: null,
+      retryAfter: i === 14 ? '7200' : null,
+      retrySource: null,
+      quotaExceeded: i === 14,
+      latestMonth: i < 13 ? '202610' : null,
+      latestProfileMonth: i < 13 ? '202609' : null,
+    }));
+    const originalOrder = requests.map((r) => r.sendId);
+    const $ = load(statusPage({ ...base, requests }));
+    const rows = $('#status-requests tbody tr');
+    expect(rows).toHaveLength(12);
+    expect(rows.first().text()).toContain('site-15.tw');
+    expect(rows.first().text()).toContain('預留・待確認');
+    expect(rows.first().text()).not.toContain('已存資料');
+    expect(rows.eq(1).text()).toContain('拒絕');
+    expect(rows.eq(1).text()).toContain('HTTP 200');
+    expect(rows.eq(1).text()).toContain('quota exceeded');
+    expect(rows.eq(1).text()).not.toContain('已存資料');
+    expect(rows.eq(2).text()).toContain('無有效資料');
+    expect(rows.eq(3).text()).toContain('已存資料');
+    expect(rows.eq(3).find('.status-months').text()).toBe('2026/10 / 2026/09');
+    expect(rows.eq(3).find('dl').text()).toContain('未記錄');
+    expect(rows.eq(3).find('dl').text()).not.toContain('台灣');
+    expect(rows.eq(1).find('dl').text()).toContain('<unsafe>');
+    expect($('unsafe')).toHaveLength(0);
+    expect($('#status-requests .favicon img')).toHaveLength(12);
+    expect($('#status-requests').attr('data-sortable')).toBeUndefined();
+    expect($('.status-request-detail[open], .status-diagnostics[open]')).toHaveLength(0);
+    expect($('.status-dashboard').text()).not.toContain('Chrome 台灣熱門但尚未追蹤');
+    expect($('.status-dashboard').text()).not.toContain('Similarweb 出口實驗');
+    expect($('.status-dashboard').text()).not.toContain('Similarweb 待抓佇列');
+    expect(requests.map((r) => r.sendId)).toEqual(originalOrder);
+    const empty = load(statusPage(base));
+    expect(empty('#status-requests .empty').text()).toContain('尚無請求或預留紀錄');
+    expect(empty('.status-current').text()).not.toContain('恢復正常');
+  });
+
   it('keeps the request contract tag served to blog at /internal/similarweb', async () => {
     const server = app();
     const auth = { authorization: `Bearer ${TOKEN}` };
@@ -821,8 +874,8 @@ describe.skipIf(!url)('with a database', () => {
       displayTotal: '<1%',
       displayPublishers: 'zh.wikipedia.org | <0.01% | New',
     };
-    // The status page lists the domain until it is filled in, and links to the form.
-    expect((await server.inject('/status/')).body).toContain('/site/news.example.tw/manual/');
+    // Status points to the collection page; per-domain manual editing stays on its own page.
+    expect((await server.inject('/status/')).body).toContain('/status/collection/');
     expect((await server.inject('/site/news.example.tw/manual/')).statusCode).toBe(303);
     // The page says what the free data last answered and links to the platform.
     const blank = (await server.inject({ url: '/site/news.example.tw/manual/', headers: { cookie } })).body;

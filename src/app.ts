@@ -33,7 +33,6 @@ import { iconStore } from './icons.ts';
 import { type CodeExchange, loginConfig, registerLogin } from './login.ts';
 import {
   loadManualMonths,
-  manualCandidates,
   manualProfile,
   parseManualChannels,
   parseManualDetails,
@@ -849,8 +848,7 @@ export function buildApp(
   });
   app.get('/status/', async (_request, reply) => {
     reply.type('text/html; charset=utf-8');
-    const [status, manual] = await Promise.all([serviceStatus(pool, config), manualCandidates(pool)]);
-    return statusPage(status, manual);
+    return statusPage(await serviceStatus(pool, config));
   });
   app.get<{
     Querystring: { month?: string; state?: string; priority?: string; page?: string; saved?: string; source?: string; sort?: string };
