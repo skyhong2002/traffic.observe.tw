@@ -47,7 +47,12 @@ describe('monthly collection fields', () => {
     expect(coverageFields(100, [profile()]).missing).toEqual([]);
     expect(coverageFields(0, [profile()]).missing).toEqual(['visits']);
     const partial = { ...profile(), channels: { SearchOrganic: 0 }, countries: [], timeOnSite: null };
+    expect(coverageFields(100, [partial]).missing).toContain('channels.Direct');
     expect(coverageFields(100, [partial]).missing).toContain('channels.GenAi');
+    expect(coverageFields(100, [partial]).missing).not.toContain('channels.SearchPaid');
+    expect(coverageFields(100, [partial]).missing).not.toContain('channels.SocialPaid');
+    expect(coverageFields(100, [partial]).missing).not.toContain('channels.Mail');
+    expect(coverageFields(100, [partial]).missing).not.toContain('channels.Affiliate');
     expect(
       coverageFields(100, [partial, { channels: { ...profile().channels }, countries: profile().countries, timeOnSite: 0 }]).missing,
     ).toEqual([]);

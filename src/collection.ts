@@ -14,6 +14,12 @@ export const FIELD_LABELS: Record<string, string> = {
   timeOnSite: '停留時間',
   ...Object.fromEntries(trafficChannels.map((c) => [`channels.${c}`, `渠道 ${c}`])),
 };
+/**
+ * Optional Similarweb channels. Small or sparse sites often have no measurable
+ * share in these channels; an absent value therefore does not keep a month in
+ * the collection queue. AI remains a required field.
+ */
+export const OPTIONAL_COLLECTION_CHANNELS = new Set(['SearchPaid', 'SocialPaid', 'Mail', 'Affiliate']);
 /** A tag on at most this many collected sites is rare; such sites count RARE_TAG_BOOST times their traffic in the queue. */
 export const RARE_TAG_SITES = 20;
 export const RARE_TAG_BOOST = 10;
@@ -38,7 +44,9 @@ export function coverageFields(visits: number | null, profiles: Array<Partial<Tr
     pagesPerVisit: has('pagesPerVisit'),
     timeOnSite: has('timeOnSite'),
     ...Object.fromEntries(
-      trafficChannels.map((key) => [`channels.${key}`, profiles.some((p) => measured(p?.channels?.[key]) && p!.channels![key]! <= 1)]),
+      trafficChannels
+        .filter((key) => !OPTIONAL_COLLECTION_CHANNELS.has(key))
+        .map((key) => [`channels.${key}`, profiles.some((p) => measured(p?.channels?.[key]) && p!.channels![key]! <= 1)]),
     ),
   };
   return { fields, missing: Object.keys(fields).filter((key) => !fields[key]) };

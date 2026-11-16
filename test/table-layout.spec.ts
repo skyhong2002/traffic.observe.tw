@@ -194,7 +194,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.locator('#collection-summary').getByRole('button', { name: '追蹤' }).click();
       expect(await page.locator('#collection-summary tbody tr').first().innerText()).toContain('100');
       const missing = page.locator('.collection-missing').first();
-      expect(await missing.innerText()).toContain('缺 15 項');
+      expect(await missing.innerText()).toContain('缺 11 項');
       expect(await missing.locator('li').first().isVisible()).toBe(false);
       expect(
         await page
@@ -203,7 +203,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
           .evaluate((r) => r.getBoundingClientRect().height),
       ).toBeLessThanOrEqual(40);
       await missing.locator('summary').click();
-      expect(await missing.locator('li').count()).toBe(15);
+      expect(await missing.locator('li').count()).toBe(11);
       expect(await missing.innerText()).toContain('渠道：自然搜尋');
       await missing.locator('summary').click();
       for (const width of [768, 390, 320]) {

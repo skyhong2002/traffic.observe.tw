@@ -27,7 +27,7 @@
 
 - `TRAFFIC_COLLECTION_ENABLED=1` 啟用通用月份收集。`TRAFFIC_TARGET_MONTH=auto` 每月自動以 UTC 上一個月為目標，也可指定已結束的 `YYYYMM`。worker 把定期追蹤網域登記到 `collection_domains`；跨月及重啟保留缺漏，不清除歷史。編輯可在 `/status/collection/` 建立其他月份清單，舊月份也可人工補登。
 - 優先順序：編輯指定「必抓」→ 核心 → 台灣 → 其他。核心預設是上月台灣估計造訪量最高的 100 個台灣網域（`TRAFFIC_CORE_DOMAINS`）；台灣判定使用 .tw 或上月台灣占比至少一半，排除「非台灣」標籤。編輯可逐站覆寫優先級，或恢復自動。第一輪依重要性擴大覆蓋，每五個可送名額保留一個給重試，分次執行、重啟後仍保留這個比例。
-- `/status/collection/?month=YYYYMM` 與 `/api/v1/collection?month=YYYYMM` 逐站列出缺漏、優先級、嘗試次數及重試時間。完整定義是正數造訪量、十個渠道明確占比、國家占比、跳出率、每次頁數及停留時間；缺值保留未知，明確的零占比／零秒才算已收到。自動資料與人工補登可合併滿足不同欄位，試算表不當作已抓到 Similarweb 組成。完成即移出該月份佇列，刪除補登後若有缺漏會重新排入。
+- `/status/collection/?month=YYYYMM` 與 `/api/v1/collection?month=YYYYMM` 逐站列出缺漏、優先級、嘗試次數及重試時間。完整定義是正數造訪量、Direct／Search Organic／Social Organic／Referrals／Display Ads／AI 六個渠道明確占比、國家占比、跳出率、每次頁數及停留時間；搜尋廣告、社群廣告、電子郵件、聯盟行銷沒有數值時不列為缺漏。缺值保留未知，明確的零占比／零秒才算已收到；平台顯示 `<0.1%` 時留白表示未知，界線值可在平台詳細分布保存。自動資料與人工補登可合併滿足不同欄位，試算表不當作已抓到 Similarweb 組成。完成即移出該月份佇列，刪除補登後若有缺漏會重新排入。
 - 同站同月預設至少隔 72 小時重試（`TRAFFIC_COLLECTION_RETRY_HOURS`），最多計入 3 次（`TRAFFIC_COLLECTION_MAX_ATTEMPTS`），達上限列為需要人工補登；只回舊月份的成功回應不耗目標月份重試次數，尚未發布時依每日探查間隔重試，避免發布前就耗完重試預算；401／403／429 是全域拒絕，不消耗個別網域的重試次數。若該站已回傳較新的 profile，舊月份尚缺的組成列為需補登；不能由另一站已更新推論本站也更新。舊月份缺造訪量且仍在可取的最近三個月內時，可在當前月份完成或等待重試時繼續補抓。
 - 所有自動與手動入口共用 `GET_LOCK('traffic-similarweb')`、送出前 `sends` 預留、滾動一小時上限 `TRAFFIC_HOURLY_BUDGET=15` 及最短間隔 `TRAFFIC_MIN_INTERVAL_SECONDS=240`。這是**本機上限，不是已確認的 Similarweb 伺服器額度**。成功、無資料、錯誤、拒絕及 pending 都計入。設定間隔時每輪最多送一筆，可送出時 worker 依間隔執行；冷卻、週限額或等待發布時只作每小時的本機資料庫心跳，恢復探查另有一次性的到期喚醒，Radar／技術另用每日排程；任何入口都不能繞過限制。
 - 每輪上限 `TRAFFIC_RUN_BUDGET` 預設 0（完全不送）。本機週上限 `TRAFFIC_WEEKLY_BUDGET` 預設 15，週一 00:00 UTC 重置；設 `auto` 取消固定本機週上限，仍遵守其他保護。插件 15／25 本地顯示不是資料端點的已確認額度，不單憑它停抓。
