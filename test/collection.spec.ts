@@ -6,6 +6,7 @@ import {
   collectionMonths,
   coverageFields,
   loadCollection,
+  publicCollection,
   recordCollectionAttempt,
   setCollectionPriority,
   syncCollections,
@@ -154,6 +155,33 @@ describe.skipIf(!url)('monthly collection database', () => {
       ['foreign.com', 4],
     ]);
     expect(dueDomains(await loadCandidates(pool, config(), at), at)).toEqual(c.queue.map((e) => e.domain));
+  });
+  it('lets a site with a rare tag go ahead of a bigger site with only common tags', async () => {
+    const common = Array.from({ length: 21 }, (_, i) => `common${i}.tw`);
+    await watch('core.tw', 'rare.tw', 'small-rare.tw', ...common);
+    await save('core.tw', '202609', 1_000_000);
+    await save('rare.tw', '202609', 2000);
+    await save('small-rare.tw', '202609', 10);
+    for (const [i, d] of common.entries()) await save(d, '202609', 5000 + i);
+    await pool.query('INSERT INTO site_metadata (domain,name,topics,updated_at,updated_by) VALUES ?', [
+      [
+        ['rare.tw', '稀有', JSON.stringify(['宗教', '新聞']), at, 'test'],
+        ['small-rare.tw', '小稀有', JSON.stringify(['宗教']), at, 'test'],
+        ...common.map((d) => [d, d, JSON.stringify(['新聞', '其他']), at, 'test']),
+      ],
+    ]);
+    const c = await loadCollection(pool, config(), '202610', at);
+    const order = c.queue.map((e) => e.domain);
+    // core.tw is the single core domain; then 2000 × 10 beats every common site, which in turn beat 10 × 10.
+    expect(order.slice(0, 3)).toEqual(['core.tw', 'rare.tw', 'common20.tw']);
+    expect(order.at(-1)).toBe('small-rare.tw');
+    expect(c.entries.find((e) => e.domain === 'rare.tw')?.rareTags).toEqual(['宗教']);
+    expect(c.entries.find((e) => e.domain === 'common0.tw')?.rareTags).toEqual([]);
+    expect(dueDomains(await loadCandidates(pool, config(), at), at)).toEqual(order);
+    const entry = publicCollection(c).entries.find((e) => e.domain === 'rare.tw');
+    expect(entry?.rareTags).toEqual(['宗教']);
+    expect(entry).not.toHaveProperty('score');
+    expect(entry).not.toHaveProperty('queueScore');
   });
   it('merges manual fields, removes completed work, and reopens deleted data', async () => {
     await watch('done.tw', 'partial.tw', 'zero.tw');

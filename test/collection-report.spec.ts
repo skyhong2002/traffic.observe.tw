@@ -38,6 +38,8 @@ const entries: Collection['entries'] = ['empty.tw', 'partial.tw', 'ready.tw', 'o
   priorityOverride: 0,
   score: 0,
   cruxRank: null,
+  rareTags: [],
+  queueScore: 0,
   ...coverageFields(null, []),
   complete: false,
   status: 'pending',

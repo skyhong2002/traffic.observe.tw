@@ -1,4 +1,5 @@
 import { collectionMonth, loadCollection } from './collection.ts';
+import { cruxStatus, untrackedPopular } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { egressExperimentStatus } from './egress-experiment.ts';
 import { type FetchPolicy, fetchPolicy } from './fetch-policy.ts';
@@ -102,6 +103,8 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     [radar],
     egressExperiment,
     requests,
+    crux,
+    untracked,
   ] = await Promise.all([
     rows<{
       id: number;
@@ -140,6 +143,8 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     ),
     egressExperimentStatus(pool),
     recentRequestDiagnostics(pool),
+    cruxStatus(pool),
+    untrackedPopular(pool, 5000),
   ]);
   const queue = fetchQueue(candidates, config, cooling, now, share, refused, policy);
   const tech = techConfig();
@@ -177,6 +182,13 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
         lastRunAt: radar?.at?.toISOString() ?? null,
         last24hRequests: Number(radar?.requests ?? 0),
       },
+      chromeUxReport: {
+        label: 'Chrome UX Report 台灣熱門度',
+        destination: 'bigquery.googleapis.com',
+        usesSimilarwebQuota: false,
+        intervalHours: 24,
+        ...crux,
+      },
       storedDataApi: {
         label: '本站狀態／流量／技術查詢',
         destination: '本站資料庫',
@@ -186,6 +198,8 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
       },
     },
     budget: config.budget,
+    /** Hosts in Chrome's Taiwan top 5,000 (latest CrUX month) that no watched domain covers. */
+    cruxUntracked: { month: untracked.month, top: 5000, hosts: untracked.hosts.slice(0, 300), total: untracked.hosts.length },
     policy,
     egressExperiment,
     requests,

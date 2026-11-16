@@ -77,6 +77,11 @@ function radarText(r) {
   return '';
 }
 
+/** Chrome UX Report bucket: 前 1 千名, 前 5 萬名 … */
+function cruxText(n) {
+  if (n == null) return '';
+  return n >= 10000 ? `前 ${(n / 10000).toLocaleString('en-US')} 萬名` : n >= 1000 ? `前 ${(n / 1000).toLocaleString('en-US')} 千名` : `前 ${n} 名`;
+}
 // ---------- data helpers ----------
 // Per month: visits, search, AI, Taiwan share, and where the visits came from.
 const V = 0, S = 1, A = 2, T = 3, ORIGIN = 4, USED = 5, BASIS = 6, CAPPED = 8;
@@ -113,6 +118,12 @@ const twVisits = (m) => (m && m[V] != null && twShare(m) != null ? m[V] * twShar
 /** Larger 台灣造訪量 first; sites without a Taiwan share follow, among themselves by visits. */
 const byTaiwan = (a, b) => (a.tw != null && b.tw != null && a.tw !== b.tw ? b.tw - a.tw : (a.tw == null) !== (b.tw == null) ? (a.tw == null ? 1 : -1) : (b.visits ?? 0) - (a.visits ?? 0));
 const byRow = (a, b) => byTaiwan({ tw: a.twVisits, visits: a.visits }, { tw: b.twVisits, visits: b.visits });
+/** The latest CrUX month up to `month`: [YYYYMM, top N] or null. */
+function cruxAt(domain, month) {
+  const list = state.data.crux?.[domain] || [];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i][0] <= month) return list[i];
+  return null;
+}
 function row(domain, s) {
   const now = s.m[state.to];
   if (!now || now[V] == null) return null;
@@ -122,10 +133,12 @@ function row(domain, s) {
   const change = state.from === state.to || taiwanNow == null ? null
     : taiwanBefore > 0 ? taiwanNow / taiwanBefore - 1 : before ? null : 'new';
   const radar = (state.data.radar[domain] || []).at(-1) || null;
+  const crux = cruxAt(domain, state.to);
   return {
     domain, displayDomain: window.displayDomainText(domain), name: window.displayDomainText(s.name || domain), group: s.group, topics: topicsOf(s), visits: now[V], twVisits: taiwanNow, twBasis: now[BASIS] || 0, twShare: twShare(now), twCapped: now[CAPPED] === 1, prev: before ? before[V] : null,
     change, search: now[S], ai: now[A], twSearch: now[S] != null && twShare(now) != null ? now[S] * twShare(now) : null, twAi: now[A] != null && twShare(now) != null ? now[A] * twShare(now) : null, taiwan: now[T], origin: now[ORIGIN], radar,
     radarSort: radar ? (radar.rank ?? radar.bucket ?? (radar.gt != null ? radar.gt * 10 : null)) : null,
+    crux: crux ? crux[1] : null, cruxMonth: crux ? crux[0] : null,
   };
 }
 function rowsFor(topic) {
@@ -399,6 +412,7 @@ const COLS = [
   { key: 'twSearch', label: '台灣搜尋', cls: 'num', sort: (r) => r.twSearch, dir: -1, title: '台灣自然搜尋造訪（估算）＝ 造訪量 × 自然搜尋占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
   { key: 'twAi', label: '台灣 AI', cls: 'num', sort: (r) => r.twAi, dir: -1, title: '台灣 GenAI 導流造訪（估算）＝ 造訪量 × AI 導流占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
   { key: 'taiwan', label: '台灣占比', cls: 'num', sort: (r) => r.taiwan, dir: -1 },
+  { key: 'crux', label: 'Chrome 台灣', cls: 'l radar', sort: (r) => r.crux, dir: 1, title: 'Chrome UX Report 台灣熱門度級距（依 Chrome 使用者造訪次數，只有級距）；顯示所選月份或之前最近一期' },
   { key: 'radar', label: 'Radar 全球', cls: 'l radar', sort: (r) => r.radarSort, dir: 1, title: 'Cloudflare Radar 最新一期' },
 ];
 function currentSort() {
@@ -443,6 +457,7 @@ function rankingRow(r, cal) {
     visits: millions(r.visits),
     change: `<span class="trend-cell"><span class="spark-cell" title="近一年台灣造訪趨勢；空心點為比較月份"></span>${deltaHtml(r.change)}</span>`,
     twSearch: twCell(r, r.twSearch), twAi: twCell(r, r.twAi), taiwan: pct(r.taiwan), radar: radarText(r.radar) || '—',
+    crux: r.crux == null ? '—' : r.cruxMonth === state.to ? cruxText(r.crux) : `<span title="${esc(`${monthLabel(r.cruxMonth)} 的資料`)}">${cruxText(r.crux)}</span>`,
   };
   tr.innerHTML = COLS.map((c) => `<td class="${c.cls}">${cells[c.key]}</td>`).join('');
   const pts = cal.map((k) => ({ key: k, value: twVisits(state.data.sites[r.domain].m[k]) }));

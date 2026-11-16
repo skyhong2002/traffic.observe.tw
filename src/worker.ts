@@ -1,3 +1,4 @@
+import { cruxConfig, runCrux } from './crux.ts';
 import { createPool } from './db.ts';
 import { experimentalRequest } from './egress-experiment.ts';
 import { fetchPolicy } from './fetch-policy.ts';
@@ -9,11 +10,13 @@ import { nextPacedRun } from './worker-timing.ts';
 
 // Similarweb sends are paced only while eligible; long waits keep an hourly database-only heartbeat.
 // Homepage scans have their own persisted daily interval. Radar retains its daily schedule.
+// CrUX checks BigQuery once a day for a new month (metadata only) and downloads it whole.
 
 const pool = createPool();
 const similarwebRequest = experimentalRequest(pool);
 const minute = runConfig().runMinute;
 const radarHour = Number(process.env.TRAFFIC_RADAR_HOUR ?? 3);
+const cruxHour = cruxConfig().hour;
 const taipeiHour = (now: Date) => (now.getUTCHours() + 8) % 24;
 let timer: NodeJS.Timeout | undefined;
 let running: Promise<unknown> | null = null;
@@ -48,7 +51,9 @@ const log = <T>(job: string, work: Promise<T>) =>
               ? 'data.similarweb.com'
               : job === 'radar'
                 ? 'api.cloudflare.com'
-                : 'website-homepages',
+                : job === 'crux'
+                  ? 'bigquery.googleapis.com'
+                  : 'website-homepages',
           usesSimilarwebQuota: job === 'similarweb' && sent > 0,
           result,
         }),
@@ -92,9 +97,10 @@ const techRun = async () => {
   }
 };
 async function tick() {
-  const radar = taipeiHour(new Date()) === radarHour;
+  const hour = taipeiHour(new Date());
   running = similarwebRun()
-    .then(() => (radar ? log('radar', runRadar(pool)) : undefined))
+    .then(() => (hour === radarHour ? log('radar', runRadar(pool)) : undefined))
+    .then(() => (hour === cruxHour && !stopping ? log('crux', runCrux(pool, { stopping: () => stopping })) : undefined))
     .then(() => (stopping ? undefined : log('website-technology', techRun())))
     .finally(() => {
       running = null;

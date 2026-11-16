@@ -190,6 +190,11 @@ export const ENDPOINTS: Endpoint[] = [
       { name: 'radar.<domain>[].rank', type: 'integer | null', desc: '前 100 名的確切名次' },
       { name: 'radar.<domain>[].bucket', type: 'integer | null', desc: '「前 N 名」級距' },
       { name: 'radar.<domain>[].gt', type: 'integer | null', desc: '「未入前 N 名」' },
+      {
+        name: 'crux',
+        type: 'object',
+        desc: '以網域為鍵的 Chrome UX Report 台灣熱門度，舊到新：[YYYYMM, N]，N 是「前 N 名」級距（同一網域取各子網域中最好的名次）',
+      },
     ],
   },
   {
@@ -239,6 +244,11 @@ export const ENDPOINTS: Endpoint[] = [
       { name: 'tags', type: 'object[]', desc: '每個標籤的來源與票數，同 /api/v1/tags/{domain}' },
       { name: 'watchers', type: 'object[]', desc: '追蹤這個網域的來源：requester、kind、requestedAt' },
       { name: 'radar', type: 'object[]', desc: 'Cloudflare Radar：dateStart、dateEnd、rank、bucket、bucketLowerBound、fetchedAt' },
+      {
+        name: 'crux',
+        type: 'object[]',
+        desc: 'Chrome UX Report 台灣熱門度，舊到新：month、rank（前 N 名級距）、host（取得這個名次的網址）',
+      },
       {
         name: 'state',
         type: 'object | null',
@@ -405,9 +415,14 @@ export const ENDPOINTS: Endpoint[] = [
     fields: [
       { name: 'budget', type: 'integer', desc: 'Similarweb 每輪上限' },
       {
+        name: 'cruxUntracked',
+        type: 'object',
+        desc: 'Chrome UX Report 最新一期台灣前 5,000 名中，不屬於任何追蹤網域的網址：month、top、total、hosts（host、rank，最多 300 個）',
+      },
+      {
         name: 'activities',
         type: 'object',
-        desc: 'similarweb、websiteTechnology、cloudflareRadar、storedDataApi；各自的 label、destination、usesSimilarwebQuota，以及適用的頻率、最後時間與近 24 小時計數。首頁掃描以網域站次計算，並非 HTTP 請求總數；storedDataApi 指狀態／流量／技術 GET 查詢，只讀已儲存資料。',
+        desc: 'similarweb、websiteTechnology、cloudflareRadar、chromeUxReport、storedDataApi；各自的 label、destination、usesSimilarwebQuota，以及適用的頻率、最後時間與近 24 小時計數。首頁掃描以網域站次計算，並非 HTTP 請求總數；storedDataApi 指狀態／流量／技術 GET 查詢，只讀已儲存資料。',
       },
       {
         name: 'policy',
@@ -485,7 +500,7 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'entries',
         type: 'object[]',
-        desc: 'domain、name、month、priority（1 必抓／2 核心／3 台灣／4 其他）、priorityOverride（0 自動）、priorityLabel、status（complete／pending／retry／retry-wait／manual-needed）、complete、missing、availableFields、attempts（總嘗試）、budgetAttempts（不含只收到舊月份的嘗試）、lastAttemptAt、lastResult、nextAttemptAt、automatic、hasAutomatic、hasManual、sources；nextAttemptAt 不含全域冷卻，實際政策請讀 status',
+        desc: 'domain、name、month、priority（1 必抓／2 核心／3 台灣／4 其他）、priorityOverride（0 自動）、priorityLabel、status（complete／pending／retry／retry-wait／manual-needed）、complete、missing、availableFields、attempts（總嘗試）、budgetAttempts（不含只收到舊月份的嘗試）、lastAttemptAt、lastResult、nextAttemptAt、automatic、hasAutomatic、hasManual、sources、cruxRank、rareTags（至多 20 個收集網站才有的標籤；同優先級內，有稀有標籤的網站以 10 倍台灣流量排序）；nextAttemptAt 不含全域冷卻，實際政策請讀 status',
       },
     ],
   },
@@ -646,7 +661,7 @@ for s in r.json()["sites"][:10]:
     `允許跨網域（CORS ${code('Access-Control-Allow-Origin: *')}），瀏覽器前端可直接呼叫。`,
     `造訪量單位是<b>百萬次</b>（${code('757.3')} ＝ 757.3m）；占比與成長率是 0–1 的小數（${code('0.36')} ＝ 36%）；月份寫成 ${code('YYYYMM')}；時間一律是 UTC 的 ISO 8601。`,
     `數字是 Similarweb 的造訪估算，不是 page views。Similarweb 沒有估算的月份改用從 Similarweb 平台補登的數字或 GeneHong 試算表，以 ${code('visitsSource')} 標明；Similarweb 回傳 0 視為沒有估算。`,
-    `狀態／流量／技術 GET API 只讀已儲存資料，不會觸發 Similarweb 或首頁掃描；自動查詢建議每小時一次。網站技術每天一批，Cloudflare Radar 每天一次；Similarweb 依限速與冷卻決定是否送出。`,
+    `狀態／流量／技術 GET API 只讀已儲存資料，不會觸發 Similarweb 或首頁掃描；自動查詢建議每小時一次。網站技術每天一批，Cloudflare Radar 每天一次，Chrome UX Report 每天檢查一次新月份；Similarweb 依限速與冷卻決定是否送出。`,
     `錯誤回 ${code('{"error": "..."}')} 加上 HTTP 狀態碼，例如 ${code('404')} 找不到網域或標籤。`,
     `路徑與參數中的網域、標籤請 URL 編碼。網頁上的排行預設排除「非台灣」，API 不會，需要時請自行傳 ${code('exclude')}。`,
     `${code('v1')} 只做向後相容的變更（新增欄位、新增端點）；移除或改名會先在這份文件公告。`,

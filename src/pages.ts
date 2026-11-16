@@ -1,5 +1,6 @@
 import { BRAND, BRAND_HEAD } from './brand.ts';
 import { TAG_LIMIT, type TagItem } from './crowd.ts';
+import { type CruxRank, cruxLabel } from './crux.ts';
 import { DOMAIN_DISPLAY_SCRIPT, displayDomainText } from './domain-display.ts';
 import { proUrl } from './manual.ts';
 import { breakdownFields, breakdownTotals, reportedPercentText } from './manual-breakdowns.ts';
@@ -188,6 +189,7 @@ export function siteHeader(nav: Nav) {
 export const TRAFFIC_METHOD = `<p>流量是 Similarweb 對整個網域的每月造訪估算，數字後的 k、m、b 分別代表千、百萬、十億次（公開資料兩位有效數字，管理員可查看完整資料；其他使用者每次篩選最多顯示 30 個網站）；不是 page views 或不重複讀者。搜尋S＝造訪 × 自然搜尋占比（不含付費搜尋），AI＝造訪 × GenAI 導流占比，與 GeneHong「<a href="${SHEET_URL}">Similar Web</a>」試算表的算法相同。</p>
 <p>Similarweb 沒有的月份以試算表數字補上並標「表」，人工調整（如「/5」）的列不採用。Similarweb 回傳 0 代表那個月沒有估算（小網站，或它不單獨計算的子網域如 tw.news.yahoo.com），視同沒有資料，不當成 0 次造訪。搜尋與 AI 占比只提供抓取時最新一個月，缺少的月份不推算；試算表中的 Ahrefs 搜尋數字與 A/S 比值不在本站資料範圍內。</p>
 <p>Cloudflare Radar 是依 1.1.1.1 DNS 查詢的全球熱門排名：前 100 名才有名次，其餘只有「前 N 名」級距，不能換算成造訪量。</p>
+<p>Chrome 台灣是 Google <a href="https://developer.chrome.com/docs/crux">Chrome UX Report</a> 的台灣熱門度級距（前 1 千、5 千、1 萬、5 萬名…），依台灣 Chrome 使用者（開啟使用統計者）的造訪次數排名，每月第二個星期二前後發布上個月的資料。它只有級距、按網址分開計算，同一網域取各子網域中最好的名次；不能換算成造訪量，也不含其他瀏覽器。Similarweb 沒有資料的網站，可先以它比較熱門程度。</p>
 `;
 
 /** One part of a page's method note, titled after the section of the page it explains. */
@@ -197,11 +199,11 @@ export function siteFooter(nav: Nav = null, method = '') {
   return `<div class="wrap"><details class="method" id="method"><summary>資料來源與計算方式</summary>
 ${method || TRAFFIC_METHOD}
 </details></div>
-<footer class="site-footer"><div class="wrap"><div class="footer-main"><div class="footer-about"><a class="brand" href="/">${BRAND}</a><p>台灣網站每月的 Similarweb 造訪估算、搜尋與 AI 導流，以及 Cloudflare Radar 排名。</p></div><nav class="footer-nav" aria-label="其他頁面">${FOOTER_NAV.map(
+<footer class="site-footer"><div class="wrap"><div class="footer-main"><div class="footer-about"><a class="brand" href="/">${BRAND}</a><p>台灣網站每月的 Similarweb 造訪估算、搜尋與 AI 導流，以及 Cloudflare Radar 與 Chrome UX Report 熱門度。</p></div><nav class="footer-nav" aria-label="其他頁面">${FOOTER_NAV.map(
     ([title, links]) => `<div><h2>${title}</h2>${links.map((n) => navLink(nav, n)).join('')}</div>`,
   ).join(
     '',
-  )}<div><h2>資料來源</h2><a href="${SHEET_URL}" rel="noopener">GeneHong 試算表 ↗</a><a href="https://radar.cloudflare.com/" rel="noopener">Cloudflare Radar ↗</a></div></nav></div><div class="footer-bottom"><span>網站雷達 · 數字為估算值，僅供比較參考</span><a href="#">回到頂端 ↑</a></div></div></footer>`;
+  )}<div><h2>資料來源</h2><a href="${SHEET_URL}" rel="noopener">GeneHong 試算表 ↗</a><a href="https://radar.cloudflare.com/" rel="noopener">Cloudflare Radar ↗</a><a href="https://developer.chrome.com/docs/crux" rel="noopener">Chrome UX Report ↗</a></div></nav></div><div class="footer-bottom"><span>網站雷達 · 數字為估算值，僅供比較參考</span><a href="#">回到頂端 ↑</a></div></div></footer>`;
 }
 
 const TIP_SCRIPT = `<script>
@@ -790,6 +792,8 @@ export interface SitePage {
   similarGrades?: Record<string, number>;
   watchers: Array<{ requester: string; kind: string; requestedAt: string }>;
   radar: RadarPeriod[];
+  /** Chrome UX Report Taiwan rank buckets, oldest first. */
+  crux?: CruxRank[];
   state: {
     lastSuccessAt: string | null;
     lastAttemptAt: string | null;
@@ -1286,13 +1290,15 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
   const latest = [...ordered].reverse().find((m) => visitsAt(m) !== null);
   const latestShare = (key: 'searchShare' | 'aiShare' | 'taiwanShare') => [...ordered].reverse().find((m) => m[key] !== null);
   const radarNow = site.radar.at(-1);
+  const crux = site.crux ?? [];
+  const cruxNow = crux.at(-1);
   const stat = (label: string, value: string, sub = '') =>
     `<div><span>${label}</span><b>${value || '—'}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
   const shareStat = (label: string, key: 'searchShare' | 'aiShare' | 'taiwanShare', digits = 1) => {
     const m = latestShare(key);
     return stat(label, m ? pct(m[key], digits) : '', m ? monthLabel(m.month) : '');
   };
-  const stats = `<div class="stats">${stat('最新造訪量', latest ? vol(visitsAt(latest)) : '', latest ? `${monthLabel(latest.month)}${originOf(latest)}` : '')}${shareStat('搜尋占比', 'searchShare')}${shareStat('AI 占比', 'aiShare', 2)}${shareStat('台灣占比', 'taiwanShare')}${stat('Radar 最新', radarNow ? radarLabel(radarNow) : '', radarNow ? twDate(radarNow.dateEnd) : '')}</div>`;
+  const stats = `<div class="stats">${stat('最新造訪量', latest ? vol(visitsAt(latest)) : '', latest ? `${monthLabel(latest.month)}${originOf(latest)}` : '')}${shareStat('搜尋占比', 'searchShare')}${shareStat('AI 占比', 'aiShare', 2)}${shareStat('台灣占比', 'taiwanShare')}${stat('Chrome 台灣', cruxNow ? cruxLabel(cruxNow.rank) : '', cruxNow ? monthLabel(cruxNow.month) : '')}${stat('Radar 最新', radarNow ? radarLabel(radarNow) : '', radarNow ? twDate(radarNow.dateEnd) : '')}</div>`;
 
   const visitsChart = lineChart(
     ordered.map((m) => ({ month: m.month, value: visitsAt(m), sheet: m.similarweb === null && visitsAt(m) !== null })),
@@ -1315,6 +1321,13 @@ export function sitePage(site: SitePage, canEdit = false, viewer?: TagViewer, te
     .map(
       (r) =>
         `<tr>${sortCell('l', r.dateEnd, twDate(r.dateEnd))}${sortCell('l', radarSort(r), radarLabel(r))}${sortCell('l', r.fetchedAt, tw(r.fetchedAt))}</tr>`,
+    )
+    .join('');
+  const cruxRows = [...crux]
+    .reverse()
+    .map(
+      (r) =>
+        `<tr><td class="l" data-v="${r.month}">${monthLabel(r.month)}</td>${sortCell('l', r.rank, cruxLabel(r.rank))}<td class="l"><span class="site-domain">${displayHtml(r.host)}</span></td></tr>`,
     )
     .join('');
   const topics = site.topics;
@@ -1358,6 +1371,14 @@ ${section(
     hasManual ? 7 : 6,
   )}`,
 )}
+${
+  cruxRows
+    ? section(
+        'Chrome 台灣熱門度',
+        `<p class="note">Chrome UX Report 的台灣級距，依 Chrome 使用者的造訪次數排名，只有「前 N 名」級距，不能換算成造訪量。同一網域取各子網域中最好的名次，右欄是取得這個名次的網址。</p>${table('<th class="l" aria-sort="descending">月份</th><th class="l">級距</th><th class="l">網址</th>', cruxRows, '', 3)}`,
+      )
+    : ''
+}
 ${
   radarRows
     ? section(
@@ -1533,7 +1554,8 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
   const others = `<section class="status-other" aria-labelledby="other-heading"><header class="status-heading"><h2 id="other-heading">其他資料來源</h2><span class="status-caption">各自排程，不使用 Similarweb 額度</span></header>${table(
     '<th class="l">來源</th><th class="l">最近活動</th><th class="l">頻率</th>',
     `<tr><td class="l"><a href="/tech/">${icon('layers')}網站技術掃描</a></td><td class="l">24h ${activity.websiteTechnology.last24hAutomaticDomainScans} 站 · ${time(activity.websiteTechnology.lastRunAt)}</td><td class="l">每 ${activity.websiteTechnology.intervalHours} 小時一批</td></tr>
-     <tr><td class="l">${icon('activity')}Cloudflare Radar</td><td class="l">24h ${activity.cloudflareRadar.last24hRequests} 次 · ${time(activity.cloudflareRadar.lastRunAt)}</td><td class="l">每日一次</td></tr>`,
+     <tr><td class="l">${icon('activity')}Cloudflare Radar</td><td class="l">24h ${activity.cloudflareRadar.last24hRequests} 次 · ${time(activity.cloudflareRadar.lastRunAt)}</td><td class="l">每日一次</td></tr>
+     <tr><td class="l">${icon('layers')}Chrome UX Report</td><td class="l">${activity.chromeUxReport.latestMonth ? monthLabel(activity.chromeUxReport.latestMonth) : '尚無月份'} · ${activity.chromeUxReport.latestMonthDomains} 站有級距 · ${time(activity.chromeUxReport.lastRunAt)}</td><td class="l">每日檢查新月份</td></tr>`,
     '',
     3,
     '',

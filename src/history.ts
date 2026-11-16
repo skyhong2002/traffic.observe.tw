@@ -1,3 +1,4 @@
+import { loadCrux } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { availableMonths, monthView } from './metrics.ts';
 import { sourceOf } from './pages.ts';
@@ -44,6 +45,8 @@ export interface History {
   >;
   /** Cloudflare Radar periods, oldest first: rank (top 100 place), bucket (top N) or gt (not in the top N). */
   radar: Record<string, Array<{ date: string; rank: number | null; bucket: number | null; gt: number | null }>>;
+  /** Chrome UX Report (Taiwan) rank buckets per month, oldest first: [YYYYMM, top N]. */
+  crux: Record<string, Array<[string, number]>>;
 }
 
 const BASIS_CODE = { measured: 0, manual: 1, history: 2, bound: 3 } as const;
@@ -52,10 +55,11 @@ const GROUP_ORDER = ['tag', 'blog', 'manual'];
 
 export async function buildHistory(pool: Pool, now = new Date()): Promise<History> {
   const months = [...(await availableMonths(pool))].reverse();
-  const [views, watched, radar] = await Promise.all([
+  const [views, watched, radar, crux] = await Promise.all([
     Promise.all(months.map((month) => monthView(pool, month))),
     rows<{ requester: string; domain: string }>(pool, "SELECT DISTINCT requester, domain FROM watches WHERE kind = 'watch'"),
     loadRadar(pool),
+    loadCrux(pool),
   ]);
   const src = new Map<string, string[]>();
   const groups = new Map<string, Set<string>>();
@@ -111,6 +115,11 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
         domain,
         periods.map((p) => ({ date: p.dateEnd.slice(0, 10), rank: p.rank, bucket: p.bucket, gt: p.bucketLowerBound })),
       ]),
+    ),
+    crux: Object.fromEntries(
+      [...crux]
+        .filter(([domain]) => domain in sites)
+        .map(([domain, ranks]) => [domain, ranks.map((r) => [r.month, r.rank] as [string, number])]),
     ),
   };
 }

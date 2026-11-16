@@ -27,6 +27,7 @@ import {
   voterStats,
   votesOf,
 } from './crowd.ts';
+import { loadCrux } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { fetchPolicy } from './fetch-policy.ts';
 import { buildHistory, type History } from './history.ts';
@@ -966,6 +967,7 @@ export function buildApp(
       filterTopics: result?.topics ?? [],
       sites: Object.fromEntries(Object.entries(data.sites).filter(([domain]) => domains.has(domain))),
       radar: Object.fromEntries(Object.entries(data.radar).filter(([domain]) => domains.has(domain))),
+      crux: Object.fromEntries(Object.entries(data.crux).filter(([domain]) => domains.has(domain))),
     };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings', async (request, reply) => {
@@ -1364,7 +1366,7 @@ export function buildApp(
 }
 
 export async function siteData(pool: Pool, domain: string): Promise<SitePage | null> {
-  const [traffic, labels, watchers, [state], radar, metadata, manual, crowd] = await Promise.all([
+  const [traffic, labels, watchers, [state], radar, metadata, manual, crowd, crux] = await Promise.all([
     loadTraffic(pool, [domain]),
     rows<{
       month: string;
@@ -1400,6 +1402,7 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
     loadMetadata(pool),
     loadManualMonths(pool, { domain }),
     loadCrowd(pool, [domain]),
+    loadCrux(pool, [domain]),
   ]);
   const t = traffic.get(domain);
   if (!t && !labels.length && !watchers.length && !radar.size && !metadata.has(domain) && !manual.length && !crowd.size) return null;
@@ -1468,6 +1471,7 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
     trackedSimilar: [...(await loadTraffic(pool, similarSites)).keys()],
     watchers: watchers.map((w) => ({ requester: w.requester, kind: w.kind, requestedAt: w.requested_at.toISOString() })),
     radar: radar.get(domain) ?? [],
+    crux: crux.get(domain) ?? [],
     state: state
       ? {
           lastSuccessAt: state.last_success_at?.toISOString() ?? null,

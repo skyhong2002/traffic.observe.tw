@@ -55,6 +55,16 @@
 
 Similarweb 冷卻或等待新月份時，只保留每小時的排程檢查，不再每四分鐘寫零請求批次。`runs.activity=schedule-check`、`sent=0` 明確代表只查資料庫；`provider-request` 才是有向 Similarweb 送出／預留資料請求的批次。worker 日誌同樣附 `activity`、`destination`、`usesSimilarwebQuota`。網站技術的數量是自動掃描的網域站次，不能當成 HTTP 請求總數（轉址及瀏覽器重試可能增加連線）。原有每日 15:40 T3 監看依使用者選擇繼續停用。
 
+## Chrome 台灣熱門度（`src/crux.ts`）
+
+- 從 BigQuery 公開資料集 `chrome-ux-report.country_tw.<YYYYMM>` 讀取 Chrome 使用者的台灣熱門度級距，不能換算成造訪量。同網域取自身與子網域中最好的級距，保留取得該級距的 host。
+- `CRUX_CREDENTIALS` 指向服務帳號 JSON（只放機器上的設定目錄，不提交）；`CRUX_BIGQUERY_PROJECT` 指定查詢專案，`CRUX_COUNTRY` 預設 `tw`。worker 每天台北時間 `CRUX_HOUR`（預設 4）點的例行心跳檢查新月份，不使用 Similarweb 額度。
+- 新月份整份下載一次，首次補齊自 202102 起的歷史；新追蹤網域直接比對本機已存資料。`crux_months`／`crux_origins` 保存整月資料，`crux_ranks` 保存逐站級距，`crux_runs` 記錄執行結果。部署先套用 `0015_crux.sql`；手動補同步使用 `node --env-file=.env tools/crux-sync.ts`。
+- 報表、單站頁與月份收集頁顯示「Chrome 台灣」，API 在 history／單站資料提供 `crux`，collection 提供 `cruxRank`，status 的 `activities.chromeUxReport` 顯示月份與同步狀態。
+- Similarweb 排隊保留既有優先級、已有人工作業的降級與重試配額。同級先擴大覆蓋，依上月台灣流量排序；被至多 20 個收集網站使用的標籤視為稀有（排除「其他」「非台灣」），其網域以 10 倍流量分數排序。流量分數相同時，依最新 Chrome 台灣級距排序。`rareTags` 公開，內部排序分數不公開。
+
+2026-11-16 正式 Similarweb 設定為滾動一小時最多 2 次、至少間隔 2000 秒，恢復探查滾動 24 小時上限 5 次；這些是本機設定，不代表已確認的上游額度。既有拒絕、Retry-After 與退避保護繼續生效。
+
 ## Cloudflare Radar（`src/radar.ts`）
 
 2026-10-21 從 tag 搬過來，token `CLOUDFLARE_RADAR_API_TOKEN` 只放在本服務。用的是官方 API，權限為 Account → Radar → Read，沒有 Similarweb 那種 IP 限制。

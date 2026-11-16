@@ -1,3 +1,4 @@
+import { latestCruxRanks } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { loadManualMonths, manualProfile } from './manual.ts';
 import { monthView, shiftMonth } from './metrics.ts';
@@ -13,6 +14,11 @@ export const FIELD_LABELS: Record<string, string> = {
   timeOnSite: '停留時間',
   ...Object.fromEntries(trafficChannels.map((c) => [`channels.${c}`, `渠道 ${c}`])),
 };
+/** A tag on at most this many collected sites is rare; such sites count RARE_TAG_BOOST times their traffic in the queue. */
+export const RARE_TAG_SITES = 20;
+export const RARE_TAG_BOOST = 10;
+/** Catch-all labels that say nothing about the topic. */
+const COMMON_TAGS = new Set(['其他', '非台灣']);
 const parse = <T>(v: unknown): T => (typeof v === 'string' ? JSON.parse(v) : v) as T;
 const measured = (v: unknown) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
 export const validCollectionMonth = (v: unknown): v is string => typeof v === 'string' && /^20\d{2}(0[1-9]|1[0-2])$/.test(v);
@@ -62,42 +68,44 @@ export async function collectionMonths(pool: Pool, config: RunConfig, now = new 
 
 export async function loadCollection(pool: Pool, config: RunConfig, month = collectionMonth(config), now = new Date()) {
   if (!validCollectionMonth(month)) throw Error('Invalid collection month');
-  const [domains, traffic, profiles, manual, overrides, attempts, states, before, provider, [allocation], requests] = await Promise.all([
-    rows<{ domain: string; sources: string | null }>(
-      pool,
-      `SELECT d.domain, GROUP_CONCAT(DISTINCT w.requester ORDER BY w.requester) AS sources
+  const [domains, traffic, profiles, manual, overrides, attempts, states, before, provider, [allocation], requests, crux] =
+    await Promise.all([
+      rows<{ domain: string; sources: string | null }>(
+        pool,
+        `SELECT d.domain, GROUP_CONCAT(DISTINCT w.requester ORDER BY w.requester) AS sources
        FROM (SELECT domain FROM collection_domains WHERE month = ? UNION SELECT domain FROM watches WHERE kind = 'watch') d
        LEFT JOIN watches w ON w.domain = d.domain AND w.kind = 'watch' GROUP BY d.domain`,
-      [month],
-    ),
-    rows<{ domain: string; visits: number; fetched_at: Date }>(
-      pool,
-      'SELECT domain, visits, fetched_at FROM traffic_months WHERE month = ?',
-      [month],
-    ),
-    rows<{ domain: string; profile: unknown; fetched_at: Date }>(
-      pool,
-      'SELECT domain, profile, fetched_at FROM traffic_profiles WHERE month = ?',
-      [month],
-    ),
-    loadManualMonths(pool, { months: [month] }),
-    rows<{ domain: string; priority: number }>(pool, 'SELECT domain, priority FROM collection_priorities'),
-    rows<{ domain: string; attempts: number; old_month_attempts: number; last_attempt_at: Date | null; last_result: string | null }>(
-      pool,
-      'SELECT domain, attempts, old_month_attempts, last_attempt_at, last_result FROM collection_domains WHERE month = ?',
-      [month],
-    ),
-    rows<{ domain: string; next_attempt_at: Date | null }>(pool, 'SELECT domain, next_attempt_at FROM fetch_state'),
-    monthView(pool, shiftMonth(month, -1)),
-    rows<{ domain: string; month: string }>(pool, 'SELECT domain, MAX(month) AS month FROM traffic_profiles GROUP BY domain'),
-    rows<{ n: number }>(pool, "SELECT COUNT(*) AS n FROM sends WHERE target_month = ? AND outcome <> 'refused'", [month]),
-    rows<{ domain: string; at: Date; outcome: string; http_status: number | null }>(
-      pool,
-      `SELECT s.domain, s.at, s.outcome, s.http_status FROM sends s
+        [month],
+      ),
+      rows<{ domain: string; visits: number; fetched_at: Date }>(
+        pool,
+        'SELECT domain, visits, fetched_at FROM traffic_months WHERE month = ?',
+        [month],
+      ),
+      rows<{ domain: string; profile: unknown; fetched_at: Date }>(
+        pool,
+        'SELECT domain, profile, fetched_at FROM traffic_profiles WHERE month = ?',
+        [month],
+      ),
+      loadManualMonths(pool, { months: [month] }),
+      rows<{ domain: string; priority: number }>(pool, 'SELECT domain, priority FROM collection_priorities'),
+      rows<{ domain: string; attempts: number; old_month_attempts: number; last_attempt_at: Date | null; last_result: string | null }>(
+        pool,
+        'SELECT domain, attempts, old_month_attempts, last_attempt_at, last_result FROM collection_domains WHERE month = ?',
+        [month],
+      ),
+      rows<{ domain: string; next_attempt_at: Date | null }>(pool, 'SELECT domain, next_attempt_at FROM fetch_state'),
+      monthView(pool, shiftMonth(month, -1)),
+      rows<{ domain: string; month: string }>(pool, 'SELECT domain, MAX(month) AS month FROM traffic_profiles GROUP BY domain'),
+      rows<{ n: number }>(pool, "SELECT COUNT(*) AS n FROM sends WHERE target_month = ? AND outcome <> 'refused'", [month]),
+      rows<{ domain: string; at: Date; outcome: string; http_status: number | null }>(
+        pool,
+        `SELECT s.domain, s.at, s.outcome, s.http_status FROM sends s
        JOIN (SELECT MAX(id) AS id FROM sends WHERE target_month = ? GROUP BY domain) latest USING (id)`,
-      [month],
-    ),
-  ]);
+        [month],
+      ),
+      latestCruxRanks(pool),
+    ]);
   const visits = new Map(traffic.map((r) => [r.domain, Number(r.visits)]));
   const profile = new Map(profiles.map((r) => [r.domain, parse<Partial<TrafficProfile>>(r.profile)]));
   const hands = new Map(manual.map((r) => [r.domain, r]));
@@ -117,6 +125,13 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
     const h = history.get(domain);
     return (h?.visits ?? 0) * (h?.taiwanShareUsed ?? (domain.endsWith('.tw') ? 1 : 0));
   };
+  // Tags few collected sites carry: their sites go ahead of equally popular ones, so the month
+  // covers every topic early instead of only the biggest ones.
+  const tagSites = new Map<string, number>();
+  for (const { domain } of domains) for (const tag of history.get(domain)?.topics ?? []) tagSites.set(tag, (tagSites.get(tag) ?? 0) + 1);
+  const rareTags = (domain: string) =>
+    (history.get(domain)?.topics ?? []).filter((tag) => !COMMON_TAGS.has(tag) && (tagSites.get(tag) ?? 0) <= RARE_TAG_SITES);
+  const queueScore = (domain: string) => score(domain) * (rareTags(domain).length ? RARE_TAG_BOOST : 1);
   const core = new Set(
     domains
       .filter((r) => domestic(r.domain))
@@ -165,6 +180,11 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         priorityLabel: PRIORITY_LABELS[priority],
         priorityOverride: pinned.get(domain) ?? 0,
         score: score(domain),
+        /** Tags held by at most RARE_TAG_SITES collected sites; they multiply queueScore. */
+        rareTags: rareTags(domain),
+        queueScore: queueScore(domain),
+        /** Chrome UX Report Taiwan bucket in the latest CrUX month (top N), null when absent. */
+        cruxRank: crux.get(domain) ?? null,
         ...coverage,
         complete,
         status,
@@ -189,7 +209,9 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         Number(a.hasManual) - Number(b.hasManual) ||
         a.priority - b.priority ||
         Number(a.attempts > 0) - Number(b.attempts > 0) ||
-        b.score - a.score ||
+        b.queueScore - a.queueScore ||
+        // Without last month's Similarweb numbers, Chrome's Taiwan popularity picks who goes first.
+        (a.cruxRank ?? 1e12) - (b.cruxRank ?? 1e12) ||
         (a.lastAttemptAt ?? '').localeCompare(b.lastAttemptAt ?? '') ||
         a.domain.localeCompare(b.domain),
     );
@@ -257,7 +279,7 @@ export const publicCollection = (collection: Collection) => ({
   month: collection.month,
   summary: collection.summary,
   settings: collection.settings,
-  entries: collection.entries.map(({ score: _score, fields, ...entry }) => ({
+  entries: collection.entries.map(({ score: _score, queueScore: _queueScore, fields, ...entry }) => ({
     ...entry,
     availableFields: Object.keys(fields).filter((key) => fields[key]),
   })),

@@ -1,4 +1,5 @@
 import { type Collection, type CollectionEntry, FIELD_LABELS, PRIORITY_LABELS } from './collection.ts';
+import { cruxLabel } from './crux.ts';
 import type { FetchPolicy } from './fetch-policy.ts';
 import { CHANNELS, favicon, html, layout, section, table, tw } from './pages.ts';
 
@@ -22,6 +23,7 @@ const SORTS = [
   ['request-desc', '抓取時間：新到舊'],
   ['request-asc', '抓取時間：舊到新'],
   ['priority', '收集優先順序'],
+  ['crux', 'Chrome 台灣熱門度：高到低'],
 ];
 export const validCollectionSort = (value = '') => (SORTS.some(([key]) => value === key) ? value : 'updated-desc');
 const updatedAt = (e: CollectionEntry) =>
@@ -31,6 +33,7 @@ export function sortCollectionEntries(entries: CollectionEntry[], sort = 'update
   const selected = validCollectionSort(sort);
   return [...entries].sort((a, b) => {
     if (selected === 'priority') return 0;
+    if (selected === 'crux') return (a.cruxRank ?? 1e12) - (b.cruxRank ?? 1e12);
     const left = selected.startsWith('request-') ? a.lastRequestAt : updatedAt(a);
     const right = selected.startsWith('request-') ? b.lastRequestAt : updatedAt(b);
     if (!left || !right) return Number(!left) - Number(!right);
@@ -155,7 +158,7 @@ export function collectionPage(
           : e.nextAttemptAt
             ? stamp(e.nextAttemptAt)
             : '待排程安排';
-      return `<tr><td class="l"><div class="collection-site" title="${html(`${e.name} · ${e.domain}`)}">${favicon(e.domain, e.name)}<a href="/site/${html(e.domain)}/" title="${html(`${e.name} · ${e.domain}`)}">${html(e.name)}</a></div></td><td class="l">${sourceCell(e)}</td><td class="l">${updatedAt(e) ? stamp(updatedAt(e)) : '<span class="collection-muted">—</span>'}</td><td class="l">${requestCell(e)}</td><td class="l">${missingCell(e)}</td><td class="l">${edit}</td><td class="l">${next}</td><td class="l"><a class="collection-action" href="/site/${html(e.domain)}/manual/?month=${month}" aria-label="${e.hasManual ? '編輯補登' : '補登'}">${glyph('manual')}${e.hasManual ? '編輯' : '補登'}</a></td></tr>`;
+      return `<tr><td class="l"><div class="collection-site" title="${html(`${e.name} · ${e.domain}`)}">${favicon(e.domain, e.name)}<a href="/site/${html(e.domain)}/" title="${html(`${e.name} · ${e.domain}`)}">${html(e.name)}</a></div></td><td class="l">${e.cruxRank ? cruxLabel(e.cruxRank) : '<span class="collection-muted">—</span>'}</td><td class="l">${sourceCell(e)}</td><td class="l">${updatedAt(e) ? stamp(updatedAt(e)) : '<span class="collection-muted">—</span>'}</td><td class="l">${requestCell(e)}</td><td class="l">${missingCell(e)}</td><td class="l">${edit}</td><td class="l">${next}</td><td class="l"><a class="collection-action" href="/site/${html(e.domain)}/manual/?month=${month}" aria-label="${e.hasManual ? '編輯補登' : '補登'}">${glyph('manual')}${e.hasManual ? '編輯' : '補登'}</a></td></tr>`;
     })
     .join('');
   const orderControl = `<label class="select-field"><span>排序</span><select name="sort">${SORTS.map(([value, label]) => `<option value="${value}"${sort === value ? ' selected' : ''}>${label}</option>`).join('')}</select></label>`;
@@ -182,7 +185,7 @@ export function collectionPage(
       toolbar: controls,
     },
     `${saved ? `<p class="flash" role="status">已儲存 ${html(saved)} 的優先級。</p>` : ''}<p class="results-line">追蹤 ${summary.total} 個，完整 ${summary.complete} 個；已有造訪量 ${summary.withVisits} 個，其中 ${summary.partial} 個仍缺其他欄位。需人工補登 ${summary.manualNeeded} 個。</p>${sources}${priorities}${schedulingNote(policy)}
-    ${section('逐站收集狀況', `<p class="note">${source === 'none' ? '只列出所選月份沒有自動資料、也沒有人工補登的網站；已有部分資料的網站不列入。' : filter === 'missing' ? '目前只顯示尚未完成的網域。' : ''}台北時間；點時間欄標題可切換排序，點來源或缺漏可看明細。</p>${pagination('逐站缺漏上方分頁')}${table(`<th class="l">網站</th><th class="l">資料來源</th>${timeHeader('updated', '最新更新')}${timeHeader('request', '最近抓取')}<th class="l">狀態／缺漏</th><th class="l">優先級</th><th class="l">最早可重試</th><th class="l">操作</th>`, rows, '沒有符合條件的網域。', 8, 'collection-entries', { sortable: false, className: 'collection-table' })}${filtered.length > count ? pagination('逐站缺漏下方分頁') : ''}`)}
+    ${section('逐站收集狀況', `<p class="note">${source === 'none' ? '只列出所選月份沒有自動資料、也沒有人工補登的網站；已有部分資料的網站不列入。' : filter === 'missing' ? '目前只顯示尚未完成的網域。' : ''}台北時間；點時間欄標題可切換排序，點來源或缺漏可看明細。</p>${pagination('逐站缺漏上方分頁')}${table(`<th class="l">網站</th><th class="l"${sort === 'crux' ? ' aria-sort="ascending"' : ''}><a class="collection-sort${sort === 'crux' ? ' active' : ''}" href="${html(query(1, 'crux'))}" title="Chrome UX Report 最新一期的台灣級距">Chrome 台灣<span aria-hidden="true">${sort === 'crux' ? '↑' : '↕'}</span></a></th><th class="l">資料來源</th>${timeHeader('updated', '最新更新')}${timeHeader('request', '最近抓取')}<th class="l">狀態／缺漏</th><th class="l">優先級</th><th class="l">最早可重試</th><th class="l">操作</th>`, rows, '沒有符合條件的網域。', 9, 'collection-entries', { sortable: false, className: 'collection-table' })}${filtered.length > count ? pagination('逐站缺漏下方分頁') : ''}`)}
     ${editor ? `<details class="collection-tools"><summary>管理月份清單</summary><form class="month-form" method="post" action="/status/collection/month"><label>月份 <input name="month" pattern="20[0-9]{2}(0[1-9]|1[0-2])" inputmode="numeric" minlength="6" maxlength="6" size="8" placeholder="YYYYMM" required></label><button type="submit">建立</button></form><p class="note">輸入過去的月份，例如 202610。</p></details>` : ''}`,
     { nav: source === 'none' ? 'missing' : 'status', method },
   );
