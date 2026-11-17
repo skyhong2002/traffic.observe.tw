@@ -1,4 +1,4 @@
-/* Compact tables: pinned identity, horizontal scroll hints, and a header that
+/* Compact tables: pinned identity and a header that
    follows page scrolling, including browsers without scroll-driven CSS.
    Server-rendered tables (data-sortable) sort by their headers the way the
    report's ranking does, show 50 rows until 「瀏覽更多」, and search boxes
@@ -18,9 +18,8 @@
         tables.delete(table);
         continue;
       }
-      const { scroller, shell, head, hint } = entry;
+      const { scroller, shell, head } = entry;
       const max = scroller.scrollWidth - scroller.clientWidth;
-      hint.hidden = max <= 1;
       // Only compact when enough overflow remains after the 152 → 88px shrink.
       // Include the width already removed so the decision stays stable while
       // animating. Otherwise a barely overflowing table alternates sizes and
@@ -72,11 +71,6 @@
       const scroller = table.parentElement;
       const shell = document.createElement('div');
       shell.className = 'table-frame';
-      const hint = document.createElement('p');
-      hint.className = 'table-scroll-hint';
-      hint.textContent = '左右捲動查看其餘欄位';
-      hint.hidden = true;
-      scroller.before(hint);
       scroller.before(shell);
       shell.append(scroller);
       scroller.tabIndex = 0;
@@ -101,7 +95,7 @@
       }
       scroller.addEventListener('scroll', schedule, { passive: true });
       resize.observe(table);
-      tables.set(table, { scroller, shell, head, pin, hint });
+      tables.set(table, { scroller, shell, head, pin });
     }
     schedule();
   }

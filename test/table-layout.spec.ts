@@ -229,7 +229,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
             return box.right <= viewport.right && box.left >= viewport.left;
           }),
         ).toBe(true);
-        expect(await scroller.locator('..').locator('..').locator('.table-scroll-hint:visible').count()).toBe(1);
+        expect(await page.locator('.table-scroll-hint').count()).toBe(0);
       }
       await page.getByRole('navigation', { name: '逐站缺漏上方分頁' }).getByRole('link', { name: '下一頁' }).click();
       expect(new URL(page.url()).searchParams.get('priority')).toBe('2');

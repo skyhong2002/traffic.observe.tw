@@ -615,11 +615,6 @@ button.primary {
 .scroll:focus-visible {
   outline-offset: -3px;
 }
-.table-scroll-hint {
-  margin: 0 0 8px;
-  color: var(--muted);
-  font-size: 12px;
-}
 table {
   border-collapse: separate;
   border-spacing: 0;

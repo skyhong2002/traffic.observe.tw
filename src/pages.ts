@@ -540,7 +540,6 @@ export function rankingPage(
       };
     }),
     15,
-    TAG_CHIP_NOTE,
   )}`;
   // Every share column at the end, sortable: 搜尋占比 and AI 占比 fall back to the sheet like the rankings,
   // the other channels are Similarweb's only. In 「差距」 mode each shows (and sorts by) the change from `from`.
@@ -611,6 +610,7 @@ ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
   const sourceNote = source
     ? `${html(SOURCE_LABEL[source] ?? source)}・<a href="/watch/${source === 'manual' ? '' : `?list=${encodeURIComponent(source)}#list`}">查看追蹤清單</a>`
     : '';
+  const tableMethod = `${TRAFFIC_METHOD}${methodPart('完整數據', `<p>名次依「台灣造訪」（流量 × 台灣占比；沒有台灣占比的網站排在最後）。台灣造訪、流量與次數都是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「占比 %」是占全站造訪的比例（Similarweb 的導流組成不分國家）；「台灣次數」是台灣造訪 × 比例，屬於估算，假設台灣訪客的導流組成與全站相同，台灣占比低的網站誤差較大；「全球次數」是流量 × 比例（搜尋即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p>`)}`;
   return layout(
     month ? `${monthLabel(month)} ${topic ?? '全部'}・完整數據` : '完整數據',
     {
@@ -619,7 +619,7 @@ ${shareCols.map((c) => shareCell(s, c)).join('')}</tr>`,
       actions: month ? `<a href="${csv}">下載 CSV</a>` : '',
       toolbar: month ? filters : '',
     },
-    `${coverage ? `<p class="coverage-note is-low">${coverage.withVisits} / ${coverage.tracked} 個追蹤網站有資料，${coverage.complete} 個完整。以下為已取得資料的排行，缺漏不代表零。<a href="/status/collection/?month=${month}">收集進度</a></p>` : ''}${month ? `<div class="chip-rows">${chips}</div>` : ''}<section class="block"><p class="results-line" data-table-count="ranking" data-total="${list.length}">${html(topic ?? '全部網站')}${exclude.length ? `・排除 ${html(exclude.join('、'))}` : ''}・${list.length} 個網站${sourceNote ? `・${sourceNote}` : ''}</p>
+    `${month ? `<div class="chip-rows">${chips}</div>` : ''}<section class="block"><div class="report-meta"><p class="results-line" data-table-count="ranking" data-total="${list.length}">${topic ? `${html(topic)}・` : ''}已收錄 ${list.length} 個網站${sourceNote ? `・${sourceNote}` : ''}</p>${coverage ? `<details class="coverage-disclosure"><summary>${coverage.withVisits < coverage.tracked || coverage.complete < coverage.tracked ? '資料收集中' : '收集進度'}</summary><p>${coverage.withVisits} / ${coverage.tracked} 個追蹤網站有資料，欄位完整 ${coverage.complete} 個。排行依已收錄的資料計算，未收錄不代表零流量。<a href="/status/collection/?month=${month}">查看收集進度</a></p></details>` : ''}</div>
 ${table(
   `<th class="rank" aria-sort="ascending" title="名次（依台灣造訪量）">#</th><th class="l">網站</th><th class="l">標籤</th><th class="num" title="台灣造訪量 ＝ 流量 × 台灣占比；名次依此排序">台灣造訪</th><th class="num">流量</th><th class="l" title="流量數字不是 Similarweb 自己的時，標出來源">來源</th><th class="num">成長</th><th class="num" title="比較月份的名次">${prevHead}</th>${shareCols
     .map((c) => `<th class="num" title="${html(c.title)}">${c.head}${unit === 'share' ? ' %' : ''}${show === 'change' ? ' ±' : ''}</th>`)
@@ -629,8 +629,8 @@ ${table(
   6 + shareCols.length,
   'ranking',
 )}
-<p class="note table-note">名次依「台灣造訪」（流量 × 台灣占比；沒有台灣占比的網站排在最後）。台灣造訪、流量與次數都是每月造訪次數，k、m、b 分別是千、百萬、十億。成長與「${prevHead}」名次都與${from ? ` ${monthLong(from)} ` : '前一個月'}比較。流量之後各欄是導流來源（台灣是台灣訪客）：「占比 %」是占全站造訪的比例（Similarweb 的導流組成不分國家）；「台灣次數」是台灣造訪 × 比例，屬於估算，假設台灣訪客的導流組成與全站相同，台灣占比低的網站誤差較大；「全球次數」是流量 × 比例（搜尋即試算表的「搜尋S」）${show === 'change' ? `；目前顯示與 ${from ? monthLong(from) : ''} 的差距，${unit === 'share' ? '▲1.2 表示多 1.2 個百分點' : '▲ 為增加的造訪次數'}` : ''}。直接、社群等來源只有 Similarweb 有，搜尋、AI、台灣在 Similarweb 沒有的月份用試算表；Similarweb 每月只給最新一個月的組成。點表頭可排序。</p></section>`,
-    { nav: 'table' },
+</section>`,
+    { nav: 'table', method: tableMethod },
   );
 }
 
