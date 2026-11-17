@@ -4,6 +4,8 @@
 
 ## 啟動與資料契約
 
+自動抓取節點現在另提供 [Docker 部署](../deploy/contributor/README.md)：以專屬節點金鑰向主站領取已通過全站配額與退避檢查的任務，自動抓取並持久回傳。需 migration 0019；原本的 JSON 匯入模式仍可獨立使用。
+
 乾淨環境使用 Node 24、`npm ci`，本站先執行 `npm run db:migrate`（0016 contributor 原始紀錄／canonical／安全拒絕紀錄、0017 技術人工紀錄與異動 log、0018 canary 與預留決策）。節點不需要資料庫。
 
 節點從 `--input` JSON 讀取已合法取得的 Similarweb 標準化結果，支援單筆或陣列。上游取得方式由貢獻者自行授權與實作，再定期更新此檔；節點不呼叫 Similarweb、不使用本站的裝置身分。範例 [observations.json](../examples/contributor/observations.json) 沒有憑證，可直接 dry-run：

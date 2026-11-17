@@ -1,6 +1,6 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { type Pool, rows } from './db.ts';
-import { publicDomain, type TrafficChannel, type TrafficProfile, trafficChannels } from './similarweb.ts';
+import { type DomainTraffic, publicDomain, type TrafficChannel, type TrafficProfile, trafficChannels } from './similarweb.ts';
 
 export const CONTRIBUTOR_SCHEMA = 1;
 const NODE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -341,4 +341,31 @@ export function communityProfile(r: ContributorPayload): TrafficProfile {
     pagesPerVisit: r.payload.pagesPerVisit ?? null,
     timeOnSite: r.payload.timeOnSite ?? null,
   };
+}
+
+export function contributorTraffic(traffic: DomainTraffic, node: string, version: string) {
+  return traffic.monthly
+    .filter((month) => month.visits > 0)
+    .map(({ month, visits }) => {
+      const profile = traffic.profiles[month];
+      const payload = createContributorPayload({
+        domain: traffic.domain,
+        targetMonth: month,
+        fetchedAt: traffic.fetchedAt,
+        sourceNode: node,
+        sourceVersion: version,
+        responseStatus: 200,
+        payload: {
+          visits: Math.round(visits),
+          ...(profile?.countries.length ? { countries: profile.countries } : {}),
+          ...(profile && Object.keys(profile.channels).length ? { channels: profile.channels } : {}),
+          ...(profile?.bounceRate != null ? { bounceRate: profile.bounceRate } : {}),
+          ...(profile?.pagesPerVisit != null ? { pagesPerVisit: profile.pagesPerVisit } : {}),
+          ...(profile?.timeOnSite != null ? { timeOnSite: profile.timeOnSite } : {}),
+        },
+      });
+      const checked = validateContributorPayload(payload);
+      if (!checked.ok) throw Error(`invalid contributor traffic: ${checked.error}`);
+      return checked.payload;
+    });
 }

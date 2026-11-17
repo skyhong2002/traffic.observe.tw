@@ -327,6 +327,7 @@ export async function runOnce(
     deadlineMs = 5 * 60_000,
     delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
     only,
+    save = saveTraffic,
   }: {
     config?: RunConfig;
     request?: typeof fetch;
@@ -336,6 +337,8 @@ export async function runOnce(
     delay?: (ms: number) => Promise<void>;
     /** Fetch just these domains, still within every shared limit and cooldown. */
     only?: string[];
+    /** Alternate persistence for provenance-bearing contributor observations. */
+    save?: typeof saveTraffic;
   } = {},
 ) {
   if (config.budget <= 0) return { skipped: 'budget is 0' };
@@ -497,7 +500,7 @@ export async function runOnce(
       let collectionOutcome = 'no-data';
       try {
         const traffic = parseDomainTraffic(data, domain, at);
-        await saveTraffic(pool, [traffic]);
+        await save(pool, [traffic]);
         await pool.query(
           `UPDATE sends SET outcome = ?, http_status = 200,
            response_meta=JSON_MERGE_PATCH(COALESCE(response_meta,'{}'),?) WHERE id = ?`,

@@ -1,3 +1,7 @@
+import { communityEnabled, contributorTrust } from './contributor.ts';
+import { configuredNodes } from './contributor-jobs.ts';
+import { recoverContributorRefusals } from './contributor-recovery.ts';
+import { contributorTransport } from './contributor-transport.ts';
 import { cruxConfig, runCrux } from './crux.ts';
 import { createPool } from './db.ts';
 import { experimentalRequest } from './egress-experiment.ts';
@@ -14,7 +18,9 @@ import { nextPacedRun } from './worker-timing.ts';
 // CrUX checks BigQuery once a day for a new month (metadata only) and downloads it whole.
 
 const pool = createPool();
-const similarwebRequest = experimentalRequest(pool);
+const contributorNodes = communityEnabled() ? configuredNodes() : [];
+if (contributorNodes.some((node) => !contributorTrust()[node])) throw Error('Automatic contributors require explicit contributor trust');
+const contributors = contributorTransport(pool, contributorNodes, releaseRevision() ?? 'development', experimentalRequest(pool));
 const minute = runConfig().runMinute;
 const radarHour = Number(process.env.TRAFFIC_RADAR_HOUR ?? 3);
 const cruxHour = cruxConfig().hour;
@@ -86,7 +92,12 @@ const schedulePaced = async (idle = false) => {
   }
 };
 const similarwebRun = async () => {
-  const result = await log('similarweb', runOnce(pool, { config: runConfig(), request: similarwebRequest }));
+  const result = await log(
+    'similarweb',
+    recoverContributorRefusals(pool, runConfig()).then(() =>
+      runOnce(pool, { config: runConfig(), request: contributors.request, save: contributors.save }),
+    ),
+  );
   await schedulePaced(!!result && 'due' in result && result.due === 0);
 };
 /** Homepages for /tech/; only network errors/timeouts may get a browser retry; WAF/429 stop immediately. */

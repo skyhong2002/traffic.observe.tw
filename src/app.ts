@@ -22,8 +22,8 @@ import {
   loadCommunity,
   saveContributorPayload,
   validateContributorPayload,
-  verifyContributorToken,
 } from './contributor.ts';
+import { claimContributorJob, completeContributorJob, configuredNodes, validJobResult, verifyNodeToken } from './contributor-jobs.ts';
 import { COVERAGE_THRESHOLD, defaultCoverageMonth, loadMonthCoverage } from './coverage.ts';
 import {
   cleanTag,
@@ -1263,12 +1263,39 @@ export function buildApp(
   // HMAC token. The endpoint never receives credentials, cookies, or request
   // headers from the upstream provider.
   const uploads = new Map<string, { window: number; count: number }>();
+  const contributorNode = (authorization?: string) => verifyNodeToken(authorization?.startsWith('Bearer ') ? authorization.slice(7) : null);
+  app.post<{ Body: { sourceVersion?: string } }>('/api/v1/contributors/jobs/claim', async (request, reply) => {
+    const node = contributorNode(request.headers.authorization);
+    if (!node) return reply.code(401).send({ error: 'invalid_contributor_token' });
+    if (!communityEnabled() || !configuredNodes().includes(node) || !contributorTrust()[node])
+      return reply.code(403).send({ error: 'contributor_disabled' });
+    const version = request.body?.sourceVersion;
+    if (typeof version !== 'string' || !/^[a-zA-Z0-9._+-]{1,64}$/.test(version))
+      return reply.code(400).send({ error: 'invalid_source_version' });
+    return { job: await claimContributorJob(pool, node, version), pollAfterSeconds: 5 };
+  });
+  app.post<{ Params: { id: string }; Body: unknown }>(
+    '/api/v1/contributors/jobs/:id/result',
+    { bodyLimit: 10 * 1024 * 1024 },
+    async (request, reply) => {
+      const node = contributorNode(request.headers.authorization);
+      if (!node) return reply.code(401).send({ error: 'invalid_contributor_token' });
+      if (!validJobResult(request.body)) return reply.code(400).send({ error: 'invalid_job_result' });
+      const accepted = await completeContributorJob(pool, node, request.params.id, request.body);
+      if (accepted) {
+        views.clear();
+        coverageCache.clear();
+        historyCache = null;
+      }
+      return accepted ? { ok: true } : reply.code(400).send({ error: 'invalid_job_result' });
+    },
+  );
   app.post<{ Body: unknown }>('/api/v1/contributors/upload', { bodyLimit: 1024 * 1024 }, async (request, reply) => {
     const token =
       typeof request.headers.authorization === 'string' && request.headers.authorization.startsWith('Bearer ')
         ? request.headers.authorization.slice(7)
         : null;
-    const node = verifyContributorToken(token);
+    const node = verifyNodeToken(token);
     if (!node) return reply.code(401).send({ error: 'invalid_contributor_token' });
     const window = Math.floor(Date.now() / 60_000);
     for (const [key, state] of uploads) if (state.window !== window) uploads.delete(key);

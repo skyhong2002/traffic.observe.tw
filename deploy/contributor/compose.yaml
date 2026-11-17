@@ -1,0 +1,24 @@
+services:
+  contributor:
+    build:
+      context: ../..
+      dockerfile: deploy/contributor/Dockerfile
+      args:
+        SOURCE_VERSION: ${SOURCE_VERSION:-development}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      CONTRIBUTOR_URL: ${CONTRIBUTOR_URL:?Set the main site HTTPS URL}
+      TRAFFIC_CONTRIBUTOR_TOKEN_FILE: /run/secrets/node-key
+    secrets: [node-key]
+    volumes: [contributor-state:/state]
+    tmpfs: [/tmp]
+    stop_grace_period: 40s
+secrets:
+  node-key:
+    file: ${NODE_KEY_FILE:-./node-key}
+volumes:
+  contributor-state:
