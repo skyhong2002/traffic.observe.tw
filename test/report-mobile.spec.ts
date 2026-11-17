@@ -65,7 +65,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
       await page.waitForFunction("document.querySelectorAll('.ranking-table tbody tr').length === 5", undefined, { timeout: 3000 });
       expect(await page.locator('.ranking-table tbody tr').count()).toBe(5);
       await page.locator('.mobile-filter-drawer summary').click();
-      await page.locator('#tag-action').selectOption('exclude');
+      expect(await page.locator('#tag-action').count()).toBe(0);
       const tag = page.locator('[data-pick-topic="新聞"]');
       // Native buttons support keyboard activation; exclusion state is announced.
       await tag.first().focus();
@@ -76,6 +76,10 @@ it.skipIf(!existsSync(chromium.executablePath()))(
         { timeout: 3000 },
       );
       expect(await tag.first().getAttribute('aria-label')).toContain('已排除');
+      expect(await page.locator('.ranking-table tbody tr').count()).toBe(1);
+      await tag.first().click();
+      await page.waitForFunction("document.querySelector('[data-pick-topic=\"新聞\"]')?.getAttribute('aria-pressed') === 'false'");
+      expect(await page.locator('.ranking-table tbody tr').count()).toBe(5);
       await page.goto(`${address}/?month=202610`);
       await page.waitForSelector('.ranking-table tbody tr');
       expect(await page.locator('#to').inputValue()).toBe('202610');

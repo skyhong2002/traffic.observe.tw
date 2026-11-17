@@ -25,7 +25,6 @@
     <label class="select-field"><span>比較</span><select id="from" disabled></select></label>
     <button id="reset" type="button" class="quiet" hidden>重設篩選</button>
   </div>
-  <label>標籤操作 <select id="tag-action"><option value="include">包含</option><option value="exclude">排除</option></select></label>
   <div class="chip-rows" id="chips"></div>
   </details>
   <button id="show-all-sites" class="quiet" type="button">清除所有條件，顯示全部觀測網站</button>
@@ -352,7 +351,7 @@ function sourceCounts() {
 }
 // Sources and tags as chip rows like tag.observe.tw/media/; past the first
 // CHIPS tags the rest fold behind 「更多」 (tables.js) unless a chosen or excluded tag is there.
-// The explicit tag action chooses inclusion or exclusion; selecting an active tag clears it.
+// Tag buttons toggle exclusion directly; existing topic links can still scope the report.
 const CHIPS = 15;
 /** Tags left out when the page opens, until a visitor brings them back. */
 const DEFAULT_EXCLUDE = ['非台灣'];
@@ -364,12 +363,12 @@ function renderChips(topics, sources) {
     `<button type="button" class="chip-filter${extra ? ' extra' : ''}${excluded ? ' excluded' : ''}" data-pick-${kind}="${esc(value)}" aria-pressed="${on || excluded}" aria-label="${esc(text)}：${excluded ? '已排除' : on ? '已包含' : '未選取'}"${hint ? ` title="${hint}"` : ''}>${excluded ? '−' : ''}${esc(text)}${count != null ? ` <span>${count.toLocaleString('zh-TW')}</span>` : ''}</button>`;
   const hidden = topics.length - CHIPS;
   const open = wasOpen || topics.slice(CHIPS).some((t) => state.active.includes(t.value) || state.exclude.includes(t.value));
-  const tagHint = (t) => (state.active.includes(t) || state.exclude.includes(t) ? '再按一次取消' : document.getElementById('tag-action').value === 'exclude' ? '排除此標籤' : '包含此標籤（多項需同時符合）');
+  const tagHint = (t) => (state.exclude.includes(t) ? '已排除，再按一次取消' : '排除此標籤');
   host.innerHTML = `<nav class="chip-row" aria-label="追蹤來源">${chip('source', '', '全部來源', { on: !state.source })}${state.data.sources
     .map((o) => chip('source', o.source, SOURCE_LABEL[o.source] ?? o.source, { count: sources.get(o.source) ?? 0, on: state.source === o.source, hint: state.source === o.source ? '再按一次取消' : '' }))
     .join('')}</nav><nav class="chip-row${open ? ' open' : ''}" data-kind="topic" aria-label="網站標籤">${chip('topic', '', '全部標籤', { on: !state.active.length && !state.exclude.length })}${topics
     .map((t, i) => chip('topic', t.value, t.text, { count: t.count, on: state.active.includes(t.value), excluded: state.exclude.includes(t.value), hint: tagHint(t.value), extra: i >= CHIPS }))
-    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">選擇包含或排除後點標籤；再點已選標籤即可取消。包含多項時需同時符合。</span></nav>`;
+    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">點標籤即可排除，再點一次取消。</span></nav>`;
 }
 let renderVersion = 0;
 async function render() {
@@ -691,18 +690,17 @@ document.addEventListener('click', (ev) => {
   if (top) { state.bumpTop = Number(top.dataset.top); drawBumps(); writeHash(); return; }
   const pick = ev.target.closest('[data-pick-topic], [data-pick-source]');
   if (pick) {
-    // Explicit include/exclude action; 「全部標籤」 clears both. A source toggles on/off.
+    // One click excludes a tag; another restores it. 「全部標籤」 clears all tag filters.
     if ('pickTopic' in pick.dataset) {
       const topic = pick.dataset.pickTopic;
       if (!topic) {
         state.active = [];
         state.exclude = [];
       } else {
-        const exclude = document.getElementById('tag-action').value === 'exclude';
-        const active = exclude ? state.exclude.includes(topic) : state.active.includes(topic);
+        const excluded = state.exclude.includes(topic);
         state.active = state.active.filter((t) => t !== topic);
         state.exclude = state.exclude.filter((t) => t !== topic);
-        if (!active) { if (exclude) state.exclude.push(topic); else state.active.push(topic); }
+        if (!excluded) state.exclude.push(topic);
       }
     } else {
       const source = pick.dataset.pickSource || null;
