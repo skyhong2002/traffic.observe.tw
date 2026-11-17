@@ -1888,6 +1888,28 @@ svg .cross {
   transition: opacity 0.08s;
   max-width: 240px;
 }
+.coverage-note {
+  margin: -6px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.coverage-note.is-low {
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--ink-2);
+}
+.coverage-note a {
+  margin-left: 8px;
+}
+.blocked-guidance {
+  padding: 10px 12px;
+  border-left: 3px solid var(--muted);
+  background: color-mix(in srgb, var(--muted) 8%, transparent);
+}
+.mobile-filter-drawer > summary {
+  display: none;
+}
 .tip.show {
   opacity: 1;
 }
@@ -2107,6 +2129,34 @@ svg .cross {
   }
   main.wrap {
     padding-top: 16px;
+  }
+  .mobile-filter-drawer > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 0 10px;
+    padding: 9px 12px;
+    border: 1px solid var(--axis);
+    border-radius: 8px;
+    color: var(--ink-2);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    list-style: none;
+  }
+  .mobile-filter-drawer > summary::-webkit-details-marker {
+    display: none;
+  }
+  .mobile-filter-drawer > summary::after {
+    content: "＋";
+    color: var(--muted);
+  }
+  .mobile-filter-drawer[open] > summary::after {
+    content: "−";
+  }
+  .mobile-filter-drawer:not([open]) .toolbar,
+  .mobile-filter-drawer:not([open]) .chip-rows {
+    display: none;
   }
   .page-head h1 {
     font-size: 24px;
@@ -3304,4 +3354,53 @@ a.tag:hover,
   margin: 4px 0;
   padding-left: 16px;
   white-space: normal;
+}
+
+.mobile-columns {
+  display: none;
+}
+@media (max-width: 640px) {
+  .mobile-columns {
+    display: block;
+    font-size: 13px;
+    margin: 8px 0;
+  }
+  .report-page:not(.show-all-columns) .ranking-table th:nth-child(n + 5),
+  .report-page:not(.show-all-columns) .ranking-table td:nth-child(n + 5) {
+    display: none;
+  }
+  .report-page:not(.show-all-columns) .ranking-table {
+    min-width: 0;
+    width: 100%;
+  }
+  .report-page:not(.show-all-columns) .ranking-table .name-cell {
+    min-width: 0;
+    max-width: 115px;
+  }
+  .report-page:not(.show-all-columns) .ranking-table th,
+  .report-page:not(.show-all-columns) .ranking-table td {
+    padding-inline: 4px;
+    font-size: 12px;
+  }
+}
+@media (max-width: 640px) {
+  .report-page:not(.show-all-columns) .ranking-table {
+    table-layout: fixed;
+  }
+  .report-page:not(.show-all-columns) .ranking-table th:nth-child(1) {
+    width: 28px;
+  }
+  .report-page:not(.show-all-columns) .ranking-table th:nth-child(3) {
+    width: 70px;
+  }
+  .report-page:not(.show-all-columns) .ranking-table th:nth-child(4) {
+    width: 70px;
+  }
+  .report-page:not(.show-all-columns) .ranking-table .table-lead-box {
+    width: 100%;
+    max-width: 100%;
+  }
+  .report-page:not(.show-all-columns) .ranking-table .spark-cell {
+    display: none;
+  }
 }

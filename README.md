@@ -15,7 +15,7 @@
 - 試算表匯入、人工補登、網域名稱與標籤管理、標籤投票及稽核紀錄。
 - 公開 HTML 頁面、CSV 與 JSON API；管理員可查看較完整的資料欄位。
 
-社群貢獻節點與集中上傳協定正在 [Issue #3](https://github.com/skyhong2002/traffic.observe.tw/issues/3) 規劃中。現行版本尚未提供可直接使用的貢獻者上傳 API。
+社群貢獻節點的 schema 驗證、短期 HMAC token、冪等上傳與來源查詢已提供；節點範例在 `tools/contributor-node.ts`。貢獻資料會獨立保存，不會覆蓋 Similarweb、人工或試算表資料。
 
 ## 系統架構
 
@@ -73,6 +73,10 @@ npm run worker
 | `TRAFFIC_HOURLY_BUDGET`、`TRAFFIC_MIN_INTERVAL_SECONDS` | 本機的共用速率保護，不代表上游已確認額度。 |
 | `TRAFFIC_ADAPTIVE_BACKOFF` | 是否啟用拒絕後的持久化退避。 |
 | `TRAFFIC_TOKEN_<REQUESTER>` | 其他 observe 服務呼叫內部 API 的 token。 |
+| `TRAFFIC_CONTRIBUTOR_SECRET` | 簽發 contributor node 的短期 HMAC token；只放在本站環境，不提交 Git。 |
+| `TRAFFIC_COMMUNITY_ENABLED` | `1` 採用可信節點的資料；預設關閉。 |
+| `TRAFFIC_QUEUE_OPTIMIZATION` | `1` 啟用最長 24 小時的公平排序 canary，拒絕立即回 baseline；預設關閉。 |
+| `TRAFFIC_CONTRIBUTOR_TRUST` | 可選的 `node:分數,node2:分數` canonical 來源信任設定；未列出的來源為 0。 |
 | `TRAFFIC_ADMIN_EMAILS` | 可查看完整資料與管理網站的管理員。 |
 
 本機上限、週限額與冷卻是安全策略，不應被解讀為 Similarweb 官方額度。收到 401、403、429、quota exceeded 或有效 `Retry-After` 時，服務會停止當輪送出並保存退避狀態；請勿用更換帳號、Cookie、IP、出口或裝置的方式規避限制。
@@ -93,7 +97,12 @@ GET /api/v1/tech?month=YYYYMM
 GET /api/v1/tech/:domain
 GET /api/v1/status
 GET /api/v1/collection?month=YYYYMM
+GET /api/v1/contributors/:domain?month=YYYYMM
 ```
+
+Contributor node 的可重現操作、schema、來源優先序與回滾見 [社群節點與收集驗收](docs/contributor-and-queue.md)。節點只讀取貢獻者依法取得的標準化輸入檔，不附帶抓取上游或共享身分的功能。上傳全成功回 201、部分成功回 207；整個請求上限 1 MiB、最多 100 筆，每個 payload 上限 256 KiB。維護者簽發的 token 有效 15 分鐘，簽章 secret 只留在本站。
+
+首頁、完整數據、rankings API、history 與 CSV 使用相同的追蹤名單覆蓋率。預設選最新達 **80% 完整欄位覆蓋**的月份；明確選月仍可看收集中月份。`lastUpdatedAt` 是資料異動時間，`generatedAt` 只是回應組裝時間，缺資料不代表零。
 
 `/healthz` 僅表示網站程序可回應；`/readyz` 也會檢查 worker 心跳與最近的可用結果。狀態 API 會區分本機資料庫檢查、真正送往上游的請求、退避狀態與月份收集進度。沒有新請求不代表上游成功。
 
@@ -120,6 +129,7 @@ npm test
 
 ```sh
 bash tools/deploy-web.sh <commit> --activate
+bash tools/deploy-worker.sh <commit> --activate
 ```
 
 這個工具會保留既有資料目錄與環境設定，並在健康檢查失敗時回復 web release。worker 與 web 的 migration、重啟及回滾應分開驗證。
@@ -133,7 +143,7 @@ bash tools/deploy-web.sh <commit> --activate
 3. 不把估算值宣稱為 Similarweb、CrUX 或 Radar 的原始測量。
 4. 不繞過第三方服務的限制或條款。
 
-社群節點、簽名上傳、資料驗證與抓取順序最佳化的設計追蹤於 [Issue #3](https://github.com/skyhong2002/traffic.observe.tw/issues/3)。
+社群節點、簽名上傳、資料驗證與抓取順序最佳化的部署後 24 小時觀察追蹤於 [Issue #3](https://github.com/skyhong2002/traffic.observe.tw/issues/3)。
 
 ## 授權與第三方資料
 

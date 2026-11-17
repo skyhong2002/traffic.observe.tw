@@ -28,7 +28,7 @@ export type TrafficChannel = (typeof trafficChannels)[number];
  *  is returned per request, so older months only exist if they were fetched then. */
 export interface TrafficProfile {
   /** Present for months copied from the platform by an editor. */
-  source?: 'manual';
+  source?: 'manual' | 'community';
   /** Platform-only breakdowns; each table has its own denominator. */
   breakdowns?: PlatformBreakdowns;
   month: string;

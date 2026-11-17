@@ -3,6 +3,7 @@ import { createPool } from './db.ts';
 import { experimentalRequest } from './egress-experiment.ts';
 import { fetchPolicy } from './fetch-policy.ts';
 import { runRadar } from './radar.ts';
+import { releaseRevision } from './release.ts';
 import { runConfig, runOnce } from './scheduler.ts';
 import { browserFetcher } from './tech-browser.ts';
 import { runTech, techConfig } from './tech-scan.ts';
@@ -43,6 +44,7 @@ const log = <T>(job: string, work: Promise<T>) =>
       console.log(
         JSON.stringify({
           at: new Date().toISOString(),
+          sourceCommit: releaseRevision(),
           job,
           activity: sent ? 'upstream-fetch' : 'schedule-check',
           destination: !sent
@@ -87,7 +89,7 @@ const similarwebRun = async () => {
   const result = await log('similarweb', runOnce(pool, { config: runConfig(), request: similarwebRequest }));
   await schedulePaced(!!result && 'due' in result && result.due === 0);
 };
-/** Homepages for /tech/; a WAF page gets a second try in a browser started for this run only. */
+/** Homepages for /tech/; only network errors/timeouts may get a browser retry; WAF/429 stop immediately. */
 const techRun = async () => {
   const browser = browserFetcher();
   try {

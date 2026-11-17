@@ -17,6 +17,7 @@ import {
   type TechObservation,
   type TechStatus,
 } from './tech.ts';
+import { loadManualTech, type ManualTech } from './tech-manual.ts';
 import type { WappalyzerRules } from './wappalyzer.ts';
 
 // Fetches each known site's homepage itself (blog used to look only at pages its crawler already had) and keeps the
@@ -315,12 +316,12 @@ const withTimeout = <T>(work: Promise<T>, ms: number) =>
 
 /**
  * One domain's attempt: what its homepage shows, or why there was no page. When a `fallback` is given (tech-browser.ts,
- * a real browser), the homepage is tried once more through it after a WAF challenge or a 429, and after a name that
+ * a real browser), the homepage is tried once more only after network/timeout failures. A name that
  * resolved would not connect or timed out: Chromium completes a certificate chain the server leaves out
  * (citycafe.com.tw sends no intermediate) where Node refuses. Its result is kept when it got the page. A name that
  * does not resolve is not retried.
  */
-const RETRIED = new Set<TechErrorCode>(['waf', 'rate-limit', 'network', 'timeout']);
+const RETRIED = new Set<TechErrorCode>(['network', 'timeout']);
 export async function scanDomain(
   domain: string,
   rules: WappalyzerRules,
@@ -360,6 +361,7 @@ async function scanWith(domain: string, rules: WappalyzerRules, fetchPage: PageF
 }
 
 export interface TechRecord {
+  manual?: ManualTech[];
   domain: string;
   /** The latest attempt's outcome. */
   status: TechStatus;
@@ -443,7 +445,9 @@ export async function loadTech(pool: Pool, domains?: string[]) {
      FROM tech_scans ${domains ? 'WHERE domain IN (?)' : ''}`,
     domains ? [domains] : [],
   );
-  return new Map(list.map((r) => [r.domain, recordOf(r)]));
+  const manual = await loadManualTech(pool, domains);
+  const result = new Map(list.map((r) => [r.domain, { ...recordOf(r), manual: manual.get(r.domain) ?? [] }]));
+  return result;
 }
 
 /** Domains every scan covers: each service's standing list and the sheet's. */
@@ -460,7 +464,7 @@ export const dueDomains = async (pool: Pool, now: Date, limit: number) =>
       pool,
       `SELECT k.domain FROM (${KNOWN}) k LEFT JOIN tech_scans s ON s.domain = k.domain
        WHERE s.domain IS NULL OR (s.origin <> 'traffic' AND s.failures = 0)
-          OR s.last_attempt_at < DATE_SUB(?, INTERVAL IF(s.status IN ('detected', 'unknown'), ${REFRESH_DAYS}, LEAST(${REFRESH_DAYS}, POW(2, GREATEST(s.failures, 1) - 1))) DAY)
+          OR s.last_attempt_at < DATE_SUB(?, INTERVAL IF(s.status IN ('detected', 'unknown', 'blocked'), ${REFRESH_DAYS}, LEAST(${REFRESH_DAYS}, POW(2, GREATEST(s.failures, 1) - 1))) DAY)
        ORDER BY s.domain IS NOT NULL, s.origin = 'traffic', s.last_attempt_at, k.domain LIMIT ?`,
       [now, limit],
     )
@@ -500,7 +504,7 @@ export async function runTech(
   }: {
     rules?: WappalyzerRules | null;
     fetchPage?: PageFetcher;
-    /** The second try for WAF pages and failed connections (scanDomain). */
+    /** The second try for network errors/timeouts; never for refusals (scanDomain). */
     fallback?: PageFetcher;
     now?: () => Date;
     budget?: number;

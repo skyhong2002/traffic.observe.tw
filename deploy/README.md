@@ -25,3 +25,25 @@ to serving the checkout, remove only
 `~/.config/systemd/user/traffic-observe-web.service.d/20-committed-release.conf`,
 run `systemctl --user daemon-reload`, and restart `traffic-observe-web.service`.
 Only do this once the checkout is suitable for production.
+
+
+Both processes can now select committed archives independently:
+
+```sh
+bash tools/deploy-worker.sh <commit>              # prepare only
+bash tools/deploy-worker.sh <commit> --activate   # worker only
+```
+
+The worker uses `data/worker-release-current` and its own service drop-in. It
+checks startup and the running process's archive directory, restores the previous
+configuration on failure, and records activation under `data/web-releases/`.
+Every worker job log includes `sourceCommit`; `/healthz` and `/api/v1/status`
+report the web revision. A checkout without a release marker reports null.
+Apply additive migrations 0016–0018 before restarting either process. Roll back
+each process with its previous SHA; disable `TRAFFIC_COMMUNITY_ENABLED` and
+`TRAFFIC_QUEUE_OPTIMIZATION` to stop adoption/policy changes while preserving data.
+Readiness now checks the database and existing worker/provider health within two
+seconds. Liveness stays independent of the database.
+
+These helpers never activate a release unless `--activate` is passed. Neither
+helper changes systemd EnvironmentFile, provider rate limits, or database data.

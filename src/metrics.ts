@@ -1,3 +1,4 @@
+import { communityProfile, contributorTrust, loadCommunity } from './contributor.ts';
 import { loadCrowd, shownTags } from './crowd.ts';
 import { type Pool, rows } from './db.ts';
 import { loadManualMonths, manualProfile } from './manual.ts';
@@ -23,7 +24,8 @@ export interface SiteMonth {
   visits: number | null;
   prevVisits: number | null;
   /** Where the visits come from: Similarweb's free endpoint, entered by hand from its platform, or the sheet. */
-  visitsSource: 'similarweb' | 'manual' | 'sheet' | null;
+  visitsSource: 'similarweb' | 'manual' | 'community' | 'sheet' | null;
+  provenance?: { sourceNode: string; fetchedAt: string; payloadHash: string; trust: string; trustScore: number } | null;
   searchShare: number | null;
   aiShare: number | null;
   /** Similarweb's (or the sheet's) Taiwan share; null when it has none. */
@@ -66,7 +68,7 @@ interface SheetRow {
 
 export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]> {
   const prev = shiftMonth(month, -1);
-  const [months, profiles, sheet, metadata, manualRows, crowd, adjusted] = await Promise.all([
+  const [months, profiles, sheet, metadata, manualRows, crowd, adjusted, community] = await Promise.all([
     rows<{ domain: string; month: string; visits: number }>(
       pool,
       'SELECT domain, month, visits FROM traffic_months WHERE month IN (?, ?)',
@@ -91,7 +93,9 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
       'SELECT domain, name, raw FROM sheet_rows WHERE adjusted = 1 AND domain IS NOT NULL AND month <= ? ORDER BY month, row_no',
       [month],
     ),
+    loadCommunity(pool, [month, prev]),
   ]);
+  const communityRows = new Map(community.map((r) => [`${r.domain} ${r.targetMonth}`, r]));
   const manual = new Map(manualRows.map((r) => [`${r.domain} ${r.month}`, r]));
   // A month Similarweb has no estimate for falls back to the sheet, like a month it was never asked about.
   const visits = new Map(months.filter((r) => estimated(Number(r.visits))).map((r) => [`${r.domain} ${r.month}`, Number(r.visits) / 1e6]));
@@ -123,6 +127,7 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     ...label.keys(),
     ...months.filter((r) => r.month === month).map((r) => r.domain),
     ...manualRows.filter((r) => r.month === month).map((r) => r.domain),
+    ...community.filter((r) => r.targetMonth === month).map((r) => r.domain),
   ]);
   const pick = (domain: string, m: string) => {
     const sw = visits.get(`${domain} ${m}`);
@@ -130,19 +135,44 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
     const p = sw === undefined ? undefined : profile.get(`${domain} ${m}`);
     // Without a Similarweb estimate, a month entered from its platform comes before the sheet.
     const hand = sw === undefined ? manual.get(`${domain} ${m}`) : undefined;
+    const contribution = sw === undefined && !hand ? communityRows.get(`${domain} ${m}`) : undefined;
+    const cp = contribution ? communityProfile(contribution) : undefined;
     const fallback = {
-      search: hand ? hand.searchShare : (sh?.search_share ?? null),
-      ai: hand ? hand.aiShare : (sh?.ai_share ?? null),
-      taiwan: hand ? hand.taiwanShare : (sh?.taiwan_share ?? null),
+      search: hand ? hand.searchShare : cp ? (cp.channels?.SearchOrganic ?? null) : (sh?.search_share ?? null),
+      ai: hand ? hand.aiShare : cp ? (cp.channels?.GenAi ?? null) : (sh?.ai_share ?? null),
+      taiwan: hand ? hand.taiwanShare : cp ? (cp.countries?.find((c) => c.code === 'TW')?.share ?? null) : (sh?.taiwan_share ?? null),
     };
     return {
-      visits: sw ?? (hand ? hand.visits / 1e6 : null) ?? sh?.visits ?? null,
-      source: sw !== undefined ? ('similarweb' as const) : hand ? ('manual' as const) : sh?.visits != null ? ('sheet' as const) : null,
+      visits:
+        sw ??
+        (hand ? hand.visits / 1e6 : null) ??
+        (contribution?.payload.visits ? contribution.payload.visits / 1e6 : null) ??
+        sh?.visits ??
+        null,
+      source:
+        sw !== undefined
+          ? ('similarweb' as const)
+          : hand
+            ? ('manual' as const)
+            : contribution
+              ? ('community' as const)
+              : sh?.visits != null
+                ? ('sheet' as const)
+                : null,
       channels: p
         ? Object.fromEntries(trafficChannels.map((key) => [key, p.channels[key] ?? 0]))
         : hand
           ? manualProfile(hand).channels
-          : null,
+          : (cp?.channels ?? null),
+      provenance: contribution
+        ? {
+            sourceNode: contribution.sourceNode,
+            fetchedAt: contribution.fetchedAt,
+            payloadHash: contribution.payloadHash,
+            trust: 'configured',
+            trustScore: contributorTrust()[contribution.sourceNode],
+          }
+        : null,
       search: p ? searchShare(p) : fallback.search,
       ai: p ? aiShare(p) : fallback.ai,
       taiwan: p ? taiwanShare(p) : fallback.taiwan,
@@ -173,6 +203,7 @@ export async function monthView(pool: Pool, month: string): Promise<SiteMonth[]>
       visits: now.visits,
       prevVisits: before.visits,
       visitsSource: now.source,
+      provenance: now.provenance,
       searchShare: now.search,
       aiShare: now.ai,
       taiwanShare: now.taiwan,
@@ -274,7 +305,7 @@ export async function availableMonths(pool: Pool) {
   const list = await rows<{ month: string }>(
     pool,
     `SELECT month FROM traffic_months UNION SELECT month FROM sheet_rows WHERE visits IS NOT NULL
-     UNION SELECT month FROM manual_months ORDER BY month DESC`,
+     UNION SELECT month FROM manual_months ${process.env.TRAFFIC_COMMUNITY_ENABLED === '1' ? 'UNION SELECT DISTINCT target_month AS month FROM contributor_canonical WHERE observation_id IS NOT NULL' : ''} ORDER BY month DESC`,
   );
   return list.map((r) => r.month);
 }

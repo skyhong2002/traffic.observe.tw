@@ -1,0 +1,18 @@
+[
+  {
+    "domain": "example.com",
+    "targetMonth": "202610",
+    "fetchedAt": "2026-11-17T00:00:00.000Z",
+    "sourceNode": "demo-node",
+    "sourceVersion": "1.0.0",
+    "responseStatus": 200,
+    "payload": {
+      "visits": 1000000,
+      "countries": [{ "code": "TW", "share": 0.8 }],
+      "channels": { "Direct": 0.3, "SearchOrganic": 0.4, "SocialOrganic": 0.1, "Referrals": 0.1, "DisplayAds": 0.05, "GenAi": 0.05 },
+      "bounceRate": 0.4,
+      "pagesPerVisit": 2,
+      "timeOnSite": 90
+    }
+  }
+]

@@ -2,6 +2,7 @@ import {
   type CollectionEntry,
   collectionMonth,
   collectionMonths,
+  coverageFields,
   loadCollection,
   recordCollectionAttempt,
   syncCollections,
@@ -46,6 +47,10 @@ export function runConfig(env: Record<string, string | undefined> = process.env)
     /** Optional local cap; auto uses response-driven backoff, 0 disables requests. */
     weeklyBudget: env.TRAFFIC_WEEKLY_BUDGET === 'auto' ? null : num('TRAFFIC_WEEKLY_BUDGET', 15),
     collectionEnabled: env.TRAFFIC_COLLECTION_ENABLED === '1',
+    queueOptimization: env.TRAFFIC_QUEUE_OPTIMIZATION === '1',
+    queueCanary: /^[a-zA-Z0-9_-]{1,64}$/.test(env.TRAFFIC_QUEUE_CANARY ?? '') ? env.TRAFFIC_QUEUE_CANARY! : 'default',
+    queueCanaryHours: Math.min(24, Math.max(1, num('TRAFFIC_QUEUE_CANARY_HOURS', 24))),
+    collectionRefreshHours: Math.max(24, num('TRAFFIC_COLLECTION_REFRESH_HOURS', 720)),
     targetMonth: target && target !== 'auto' ? target : null,
     coreDomains: num('TRAFFIC_CORE_DOMAINS', 100),
     collectionMaxAttempts: Math.max(1, num('TRAFFIC_COLLECTION_MAX_ATTEMPTS', 3)),
@@ -413,6 +418,14 @@ export async function runOnce(
           JSON.stringify({ egressRoute: 'direct', httpClient: 'node-fetch' }),
         ],
       )) as unknown as [{ insertId: number }];
+      await pool.query('UPDATE sends SET queue_decision = ? WHERE id = ?', [
+        JSON.stringify({
+          policy: candidates.find((c) => c.domain === domain)?.collection?.decision ?? 'baseline',
+          missing: candidates.find((c) => c.domain === domain)?.collection?.missing ?? [],
+          targetMonth: requestMonth,
+        }),
+        send.insertId,
+      ]);
       tally.sent++;
       if (current.recovery) await reserveRecovery(pool, config, at);
       let data: Record<string, unknown>;
@@ -433,6 +446,12 @@ export async function runOnce(
         const status = error instanceof TrafficFetchError ? error.status : null;
         const message = (error instanceof Error ? error.message : String(error)).slice(0, 255);
         if (isRefusal(error)) {
+          if (config.queueOptimization)
+            await pool.query('UPDATE queue_canaries SET rolled_back_at = ?, reason = ? WHERE id = ? AND rolled_back_at IS NULL', [
+              at,
+              'provider refusal: baseline restored',
+              config.queueCanary,
+            ]);
           const adaptive = config.adaptiveBackoff ? await refuseProvider(pool, config, error, at) : null;
           await pool.query(
             "UPDATE sends SET outcome = ?, http_status = ?, response_meta = JSON_MERGE_PATCH(COALESCE(response_meta,'{}'),?) WHERE id = ?",
@@ -485,6 +504,11 @@ export async function runOnce(
           [
             'ok',
             JSON.stringify({
+              targetMonthSaved: traffic.monthly.some((m) => m.month === requestMonth && m.visits > 0),
+              targetMonthComplete:
+                coverageFields(traffic.monthly.find((m) => m.month === requestMonth)?.visits ?? null, [
+                  traffic.profiles[requestMonth] ?? null,
+                ]).missing.length === 0,
               latestMonth:
                 traffic.monthly
                   .map((m) => m.month)

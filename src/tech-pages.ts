@@ -16,6 +16,7 @@ import {
   twDate,
 } from './pages.ts';
 import { CATEGORIES, CATEGORY_LABEL, PRODUCTS, type TechCategory, type TechErrorCode, type TechStatus } from './tech.ts';
+import type { ManualTech } from './tech-manual.ts';
 import { type TechRecord, techConfig } from './tech-scan.ts';
 
 // /tech/ (every known site's technologies), /tech/<domain>/ (one domain, any domain) and the site page's 網站技術
@@ -55,11 +56,21 @@ export interface TechSite {
   observedAt: string | null;
   lastAttemptAt: string | null;
   origin: string | null;
-  detections: Array<{ id: string; name: string; category: TechCategory; version: string }>;
+  manual: ManualTech[];
+  detections: Array<{ id: string; name: string; category: TechCategory; version: string; source?: string }>;
 }
 export interface TechOverview {
   generatedAt: string;
-  coverage: { sites: number; checked: number; withSnapshot: number; detected: number; unknown: number; failed: number; blocked: number };
+  coverage: {
+    sites: number;
+    checked: number;
+    withSnapshot: number;
+    detected: number;
+    unknown: number;
+    failed: number;
+    blocked: number;
+    withEvidence: number;
+  };
   technologies: Array<{ id: string; name: string; category: TechCategory; sites: number }>;
   sites: TechSite[];
   filters: { source: string | null; category: TechCategory | null; technology: string | null; status: TechStatus | 'unchecked' | null };
@@ -74,11 +85,13 @@ export function techOverview(
   lists: Map<string, Set<string>>,
   query: { source?: unknown; category?: unknown; technology?: unknown; status?: unknown },
   now = new Date(),
+  manualRecords = new Map<string, ManualTech[]>(),
 ): TechOverview {
   const source = typeof query.source === 'string' && lists.has(query.source) ? query.source : null;
   const cohort = source ? domains.filter((d) => lists.get(source)?.has(d)) : domains;
   const sites: TechSite[] = cohort.map((domain) => {
     const r = records.get(domain);
+    const manual = manualRecords.get(domain) ?? r?.manual ?? [];
     return {
       domain,
       name: names.get(domain) ?? domain,
@@ -87,7 +100,11 @@ export function techOverview(
       observedAt: r?.observedAt ?? null,
       lastAttemptAt: r?.lastAttemptAt ?? null,
       origin: r?.origin ?? null,
-      detections: (r?.detections ?? []).map((d) => ({ id: d.id, name: d.name, category: d.category, version: d.version })),
+      manual,
+      detections: [
+        ...(r?.detections ?? []).map((d) => ({ id: d.id, name: d.name, category: d.category, version: d.version })),
+        ...manual.filter((m) => !r?.detections.some((d) => d.id === m.id)),
+      ],
     };
   });
   const counts = new Map<string, TechOverview['technologies'][number]>();
@@ -120,6 +137,7 @@ export function techOverview(
       unknown: tally('unknown'),
       failed: tally('failed'),
       blocked: tally('blocked'),
+      withEvidence: sites.filter((s) => s.observedAt !== null || s.manual.length).length,
     },
     technologies,
     sites: shown.sort((a, b) => b.detections.length - a.detections.length || a.name.localeCompare(b.name)),
@@ -178,13 +196,13 @@ export function techPage(o: TechOverview, view?: unknown) {
   const techRows = technologies
     .map((t) => {
       const href = link({ technology: t.id, status: null });
-      return `<li data-tech-name="${html(t.name)}" data-tech-count="${t.sites}"><a class="tech-name" href="${href}"><span class="tech-item-label">${html(t.name)}<small>${CATEGORY_LABEL[t.category]}</small></span><span class="tech-item-count">${t.sites.toLocaleString('en-US')}<small>${c.withSnapshot ? `${((t.sites / c.withSnapshot) * 100).toFixed(1)}%` : '—'}</small></span><span aria-hidden="true">→</span></a></li>`;
+      return `<li data-tech-name="${html(t.name)}" data-tech-count="${t.sites}"><a class="tech-name" href="${href}"><span class="tech-item-label">${html(t.name)}<small>${CATEGORY_LABEL[t.category]}</small></span><span class="tech-item-count">${t.sites.toLocaleString('en-US')}<small>${(c.withEvidence ?? c.withSnapshot) ? `${((t.sites / (c.withEvidence ?? c.withSnapshot)) * 100).toFixed(1)}%` : '—'}</small></span><span aria-hidden="true">→</span></a></li>`;
     })
     .join('');
   const siteRows = o.sites
     .map(
       (s) =>
-        `<tr>${siteCell(s.domain, s.name).replace(` href="/site/${html(s.domain)}/"`, ` href="/tech/${html(s.domain)}/"`)}<td class="l"><span class="tags">${s.detections
+        `<tr>${siteCell(s.domain, s.name).replace(` href="/site/${html(s.domain)}/"`, ` href="/tech/${html(s.domain)}/"`)}<td class="l"><span class="tags">${s.manual.length ? '<span class="muted">含人工確認</span>' : ''}${s.detections
           .filter((d) => !f.category || d.category === f.category)
           .sort((a, b) => Number(b.id === f.technology) - Number(a.id === f.technology))
           .map((d) =>
@@ -210,7 +228,7 @@ export function techPage(o: TechOverview, view?: unknown) {
     [`${browseLink}${browseLink.includes('?') ? '&amp;' : '?'}view=sites`, '所有網站', showingSites],
   ]);
   const content = showingSites
-    ? `${chosen ? `<div class="tech-selection"><span>${CATEGORY_LABEL[chosen.category]}</span><p>找到 <b>${o.sites.length.toLocaleString('en-US')}</b> 個網站使用這項技術。</p></div>` : ''}${filters}
+    ? `${chosen ? `<div class="tech-selection"><span>${CATEGORY_LABEL[chosen.category]}</span><p>找到 <b>${o.sites.length.toLocaleString('en-US')}</b> 個網站使用這項技術。</p></div>` : ''}${f.status === 'blocked' ? '<p class="note blocked-guidance">被阻擋的網站會保留上一次成功結果；本站不使用反偵測、Cookie 或其他出口繞過防護。若需要資料，請提供有來源的公開報告給維護者評估。</p>' : ''}${filters}
       ${section('網站清單', `<div class="tech-results"><p data-table-count="tech-sites" data-total="${o.sites.length}" role="status">${o.sites.length.toLocaleString('en-US')} 個網站</p>${search('tech-sites', '搜尋網站名稱或網域')}</div>${table('<th class="l">網站</th><th class="l">偵測到的技術</th><th class="l">檢查日期</th>', siteRows, `沒有符合條件的網站。<a href="${link({ status: null, category: null })}">清除結果與類別篩選</a>`, 3, 'tech-sites')}`)}`
     : `${filters}${section('選一項技術，查看哪些網站使用', `<div class="tech-results"><p data-table-count="tech-catalog" data-total="${technologies.length}" role="status">${technologies.length} 項技術 · 網站數 / 比例</p>${search('tech-catalog', '搜尋技術，例如 Google Tag Manager')}</div><label class="tech-sort">排序 <select data-tech-sort aria-label="技術排序"><option value="count">網站數最多</option><option value="name">名稱 A–Z</option></select></label><ul id="tech-catalog" class="tech-catalog" aria-label="技術，依網站數排序">${techRows}</ul><p data-tech-empty${technologies.length ? ' hidden' : ''}>沒有符合條件的技術。</p>`)}`;
   return layout(
@@ -224,7 +242,7 @@ export function techPage(o: TechOverview, view?: unknown) {
     `<p class="note">網站技術資料來自各站首頁掃描；使用 Similarweb 額度：否。查看本頁與 JSON 只讀已儲存結果。<a href="/status/">查看各類更新頻率</a></p><div class="tech-explorer">${content}</div>`,
     {
       nav: 'tech',
-      method: `${techMethod(PRODUCTS.size)}${methodPart('技術', `<p>每項技術出現在幾個網站的首頁；比例的分母是此來源有成功檢查結果的 ${c.withSnapshot.toLocaleString('en-US')} 個網站。一個網站可能使用多項技術。網站數與比例不受檢查結果篩選影響。</p>`)}`,
+      method: `${techMethod(PRODUCTS.size)}${methodPart('技術', `<p>每項技術出現在幾個網站的首頁；比例的分母是此來源有成功掃描或人工佐證的 ${(c.withEvidence ?? c.withSnapshot).toLocaleString('en-US')} 個網站。一個網站可能使用多項技術。網站數與比例不受檢查結果篩選影響。</p>`)}`,
     },
   );
 }
@@ -233,6 +251,7 @@ export interface TechViewer {
   loginEnabled: boolean;
   signedIn: boolean;
   message?: string;
+  editor?: boolean;
 }
 const MESSAGES: Record<string, string> = {
   checked: '已重新檢查。',
@@ -254,7 +273,14 @@ const detectionRows = (r: TechRecord) =>
     .join('');
 
 /** One domain's result; `known` when it is on a list (then it also has a site page). */
-export function techDomainPage(domain: string, name: string | null, record: TechRecord | null, known: boolean, viewer: TechViewer) {
+export function techDomainPage(
+  domain: string,
+  name: string | null,
+  record: TechRecord | null,
+  known: boolean,
+  viewer: TechViewer,
+  manual: ManualTech[] = record?.manual ?? [],
+) {
   const title = name ?? domain;
   const check = viewer.signedIn
     ? `<form class="inline" method="post" action="/tech/${html(domain)}/check"><button type="submit">${record ? '重新掃描首頁' : '掃描首頁'}</button></form>`
@@ -265,7 +291,7 @@ export function techDomainPage(domain: string, name: string | null, record: Tech
   const stat = (label: string, value: string, sub = '') =>
     `<div><span>${label}</span><b>${value || '—'}</b>${sub ? `<small>${sub}</small>` : ''}</div>`;
   const body = record
-    ? `<div class="stats">${stat('最近一次', STATUS_LABEL[record.status], record.errorCode ? (ERROR_LABEL[record.errorCode] ?? html(record.errorCode)) : '')}${stat('技術', String(record.detections.length))}${stat('結果時間', record.observedAt ? twDate(record.observedAt) : '', record.origin === 'blog' ? '來自 blog.observe.tw' : '')}${stat('最近嘗試', twDate(record.lastAttemptAt), record.httpStatus ? `HTTP ${record.httpStatus}` : '')}</div>
+    ? `${record.status === 'blocked' ? '<p class="note blocked-guidance">這個網站拒絕了本站的公開首頁讀取（防火牆、驗證頁或 429）。本站不反覆重試或繞過防護；編輯可從「人工確認技術」補充公開佐證與觀察日期。</p>' : ''}<div class="stats">${stat('最近一次', STATUS_LABEL[record.status], record.errorCode ? (ERROR_LABEL[record.errorCode] ?? html(record.errorCode)) : '')}${stat('技術', String(record.detections.length))}${stat('結果時間', record.observedAt ? twDate(record.observedAt) : '', record.origin === 'blog' ? '來自 blog.observe.tw' : '')}${stat('最近嘗試', twDate(record.lastAttemptAt), record.httpStatus ? `HTTP ${record.httpStatus}` : '')}</div>
 ${section(
   '偵測到的技術',
   `${record.observedAt === null ? '<p class="note">還沒有成功讀到首頁。</p>' : `<p class="note">${record.sourceUrl ? `讀的是 <a href="${html(record.sourceUrl)}" rel="noopener nofollow">${displayHtml(record.sourceUrl)}</a>，` : ''}${tw(record.observedAt)}。${record.status === 'failed' || record.status === 'blocked' ? '之後的檢查沒有成功，這是上一次成功的結果。' : ''}</p>`}${table(
@@ -288,9 +314,9 @@ ${section(
         ['/tech/?view=sites', '所有網站', true],
       ]),
       dek: `${favicon(domain, title)}<a href="https://${html(domain)}/" rel="noopener">${displayHtml(domain)} ↗</a>${known ? `<span class="sep" aria-hidden="true">·</span><a href="/site/${html(domain)}/">流量資料</a>` : ''}`,
-      actions: `${check}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
+      actions: `${check}${viewer.editor ? `<a href="/tech/${html(domain)}/manual/">人工確認技術</a>` : ''}<a href="/api/v1/tech/${html(domain)}">JSON</a>`,
     },
-    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${displayHtml(domain)}</span></nav>${flash}<p class="note">資料來源：直接讀取這個網站的首頁以辨識技術，使用 Similarweb 額度：否。手動掃描同一網域至少間隔 ${techConfig().manualCacheHours} 小時；此頁與 JSON 顯示已儲存的結果。</p>${body}`,
+    `<nav class="tech-breadcrumb" aria-label="技術導覽"><a href="/tech/">← 返回技術總覽</a><a href="/tech/?view=sites">所有網站</a><span aria-current="page">${displayHtml(domain)}</span></nav>${flash}<p class="note">資料來源：直接讀取這個網站的首頁以辨識技術，使用 Similarweb 額度：否。手動掃描同一網域至少間隔 ${techConfig().manualCacheHours} 小時；此頁與 JSON 顯示已儲存的結果。</p>${body}${manual.length ? section('人工確認的技術', `<p class="note">編輯依公開佐證確認，與自動掃描分開；版本與信心不由自動規則推定。</p><ul>${manual.map((r) => `<li>${html(r.name)} · ${twDate(r.observedAt)} · <a href="${html(r.sourceUrl)}" rel="noopener nofollow">公開佐證</a></li>`).join('')}</ul>`) : ''}`,
     {
       nav: 'tech',
       method: `${techMethod(PRODUCTS.size)}${record ? methodPart('偵測到的技術', '<p>「依據」是哪一類規則比對到，不是頁面內容。</p>') : ''}`,
@@ -299,11 +325,14 @@ ${section(
 }
 
 /** The site page's block: the technologies by category, linking to /tech/<domain>/. */
-export function techSection(domain: string, record: TechRecord | null) {
+export function techSection(domain: string, record: TechRecord | null, manual: ManualTech[] = record?.manual ?? []) {
+  const manualList = manual.length
+    ? `<p class="note">人工確認（公開佐證，版本未知）：${manual.map((r) => `<a href="${html(r.sourceUrl)}" rel="noopener nofollow">${html(r.name)}</a> · ${twDate(r.observedAt)}`).join('、')}。<a href="/tech/${html(domain)}/">查看來源</a></p>`
+    : '';
   if (!record)
     return section(
       '網站技術',
-      `<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。首頁還沒檢查過，排程輪到時會檢查。<a href="/tech/${html(domain)}/">技術頁</a></p>`,
+      `${manualList}<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。首頁還沒檢查過，排程輪到時會檢查。<a href="/tech/${html(domain)}/">技術頁</a></p>`,
       ' id="tech"',
     );
   const byCategory = CATEGORIES.map((k) => [k, record.detections.filter((d) => d.category === k)] as const).filter(
@@ -314,7 +343,7 @@ export function techSection(domain: string, record: TechRecord | null) {
     : `<p class="body">${record.observedAt ? '首頁沒有清單內任何技術的痕跡（未辨識）。' : `還沒有成功讀到首頁（${ERROR_LABEL[record.errorCode as TechErrorCode] ?? STATUS_LABEL[record.status]}）。`}</p>`;
   return section(
     '網站技術',
-    `${list}<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。${record.observedAt ? `${twDate(record.observedAt)} 從首頁偵測${record.origin === 'blog' ? '（blog.observe.tw 的結果）' : ''}。` : ''}<a href="/tech/${html(domain)}/">版本、依據與檢查紀錄</a></p>`,
+    `${list}${manualList}<p class="note">來源：此站首頁掃描，使用 Similarweb 額度：否。${record.observedAt ? `${twDate(record.observedAt)} 從首頁偵測${record.origin === 'blog' ? '（blog.observe.tw 的結果）' : ''}。` : ''}<a href="/tech/${html(domain)}/">版本、依據與檢查紀錄</a></p>`,
     ' id="tech"',
   );
 }

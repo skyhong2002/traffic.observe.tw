@@ -19,13 +19,20 @@
   </div>
   <div class="toolbar">
     <label class="search-field"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="search" type="search" aria-label="搜尋網站名稱或網域" placeholder="搜尋網站名稱或網域" autocomplete="off" disabled><button id="clear-search" type="button" aria-label="清除搜尋" hidden>✕</button></label>
+  </div>
+  <details class="mobile-filter-drawer" open><summary>月份、比較與篩選</summary><div class="toolbar">
     <label class="select-field"><span>月份</span><select id="to" disabled><option>載入中…</option></select></label>
     <label class="select-field"><span>比較</span><select id="from" disabled></select></label>
     <button id="reset" type="button" class="quiet" hidden>重設篩選</button>
   </div>
+  <label>標籤操作 <select id="tag-action"><option value="include">包含</option><option value="exclude">排除</option></select></label>
   <div class="chip-rows" id="chips"></div>
+  </details>
+  <button id="show-all-sites" class="quiet" type="button">清除所有條件，顯示全部觀測網站</button>
+  <label class="mobile-columns"><input id="more-columns" type="checkbox"> 顯示所有欄位</label>
   <section class="block directory" aria-label="網站排行">
     <p class="results-line" id="result-count" role="status" aria-live="polite">正在載入流量資料…</p>
+    <p class="coverage-note" id="coverage-note" role="status" hidden></p>
     <div id="sections" aria-busy="true"><div class="loading-state"><span class="loading-dot"></span>正在整理網站排行…</div></div>
     <noscript><p class="empty">請開啟 JavaScript 使用搜尋，或直接查看<a href="/table/">完整數據</a>。</p></noscript>
   </section>
@@ -87,7 +94,7 @@ function cruxText(n) {
 const V = 0, S = 1, A = 2, T = 3, ORIGIN = 4, USED = 5, BASIS = 6, CAPPED = 8;
 /** How the Taiwan share in use was found (BASIS): not measured by Similarweb, so shown with ≈ or <. */
 const BASIS_NOTE = { 1: '編輯者在試算表以 1/N 估算的台灣占比', 2: '沿用這個網站較早月份的台灣占比', 3: 'Similarweb 前 5 大國家沒有台灣：台灣占比不會超過第 5 名，也不會超過 100% 減前 5 名，這是上限' };
-const ORIGIN_NOTE = { 1: '試算表', 2: 'Similarweb 平台補登' };
+const ORIGIN_NOTE = { 1: '試算表', 2: 'Similarweb 平台補登', 3: '社群貢獻（Similarweb 估算）' };
 function calendar(first, last) {
   const out = [];
   let y = Number(first.slice(0, 4)), m = Number(first.slice(4));
@@ -282,7 +289,7 @@ function fillSelects() {
   const idx = months.indexOf(state.to);
   const named = new Map([[months[idx - 1], '上個月'], [months[idx - 3], '3 個月前'], [months[idx - 6], '6 個月前'], [prevYear, '去年同月']]);
   const fromSelect = document.getElementById('from');
-  fromSelect.innerHTML = [...months].reverse().filter((m) => m < state.to).map((m) => `<option value="${m}"${m === state.from ? ' selected' : ''}>${monthLabel(m)}${named.has(m) ? `（${named.get(m)}）` : ''}</option>`).join('');
+  fromSelect.innerHTML = [...months].reverse().filter((m) => m < state.to).map((m) => `<option value="${m}"${m === state.from ? ' selected' : ''}>${m.slice(0, 4)}/${m.slice(4)}${named.has(m) ? ` ${named.get(m)}` : ''}</option>`).join('');
   fromSelect.disabled = state.from === state.to;
   if (state.from === state.to) fromSelect.innerHTML = '<option>無更早月份</option>';
 }
@@ -293,7 +300,12 @@ function readHash() {
   if (!q.has('to') && search.has('month')) q.set('to', search.get('month'));
   for (const k of ['topic', 'source']) if (!q.has(k) && search.has(k)) q.set(k, search.get(k));
   const months = state.data.months;
-  state.to = months.includes(q.get('to')) ? q.get('to') : months.at(-1);
+  const threshold = state.data.coverageThreshold ?? 0.8;
+  const fallbackMonth = [...months].reverse().find((m) => {
+    const c = state.data.coverage?.[m];
+    return c && c.tracked > 0 && c.complete / c.tracked >= threshold;
+  }) ?? months.at(-1);
+  state.to = months.includes(q.get('to')) ? q.get('to') : fallbackMonth;
   const i = months.indexOf(state.to);
   state.from = months.includes(q.get('from')) && q.get('from') < state.to ? q.get('from') : months[i - 1] ?? months[0];
   state.active = [...new Set((q.get('topic') || '').split(',').filter(Boolean))];
@@ -340,7 +352,7 @@ function sourceCounts() {
 }
 // Sources and tags as chip rows like tag.observe.tw/media/; past the first
 // CHIPS tags the rest fold behind 「更多」 (tables.js) unless a chosen or excluded tag is there.
-// A tag chip goes off → required (several AND together) → leave it out → off; a source chip goes on and off.
+// The explicit tag action chooses inclusion or exclusion; selecting an active tag clears it.
 const CHIPS = 15;
 /** Tags left out when the page opens, until a visitor brings them back. */
 const DEFAULT_EXCLUDE = ['非台灣'];
@@ -349,15 +361,15 @@ function renderChips(topics, sources) {
   const host = document.getElementById('chips');
   const wasOpen = host.querySelector('[data-kind="topic"]')?.classList.contains('open');
   const chip = (kind, value, text, { count = null, on = false, excluded = false, hint = '', extra = false } = {}) =>
-    `<button type="button" class="chip-filter${extra ? ' extra' : ''}${excluded ? ' excluded' : ''}" data-pick-${kind}="${esc(value)}" aria-pressed="${on}"${hint ? ` title="${hint}"` : ''}>${excluded ? '−' : ''}${esc(text)}${count != null ? ` <span>${count.toLocaleString('zh-TW')}</span>` : ''}</button>`;
+    `<button type="button" class="chip-filter${extra ? ' extra' : ''}${excluded ? ' excluded' : ''}" data-pick-${kind}="${esc(value)}" aria-pressed="${on || excluded}" aria-label="${esc(text)}：${excluded ? '已排除' : on ? '已包含' : '未選取'}"${hint ? ` title="${hint}"` : ''}>${excluded ? '−' : ''}${esc(text)}${count != null ? ` <span>${count.toLocaleString('zh-TW')}</span>` : ''}</button>`;
   const hidden = topics.length - CHIPS;
   const open = wasOpen || topics.slice(CHIPS).some((t) => state.active.includes(t.value) || state.exclude.includes(t.value));
-  const tagHint = (t) => (state.active.includes(t) ? '再按一次改為排除' : state.exclude.includes(t) ? '已排除，再按一次取消' : state.active.length ? '再加上這個標籤（同時符合）' : '只看這個標籤');
+  const tagHint = (t) => (state.active.includes(t) || state.exclude.includes(t) ? '再按一次取消' : document.getElementById('tag-action').value === 'exclude' ? '排除此標籤' : '包含此標籤（多項需同時符合）');
   host.innerHTML = `<nav class="chip-row" aria-label="追蹤來源">${chip('source', '', '全部來源', { on: !state.source })}${state.data.sources
     .map((o) => chip('source', o.source, SOURCE_LABEL[o.source] ?? o.source, { count: sources.get(o.source) ?? 0, on: state.source === o.source, hint: state.source === o.source ? '再按一次取消' : '' }))
     .join('')}</nav><nav class="chip-row${open ? ' open' : ''}" data-kind="topic" aria-label="網站標籤">${chip('topic', '', '全部標籤', { on: !state.active.length && !state.exclude.length })}${topics
     .map((t, i) => chip('topic', t.value, t.text, { count: t.count, on: state.active.includes(t.value), excluded: state.exclude.includes(t.value), hint: tagHint(t.value), extra: i >= CHIPS }))
-    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">按一下只看該標籤（可多選，需同時符合），再按一下排除，第三下取消</span></nav>`;
+    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">選擇包含或排除後點標籤；再點已選標籤即可取消。包含多項時需同時符合。</span></nav>`;
 }
 let renderVersion = 0;
 async function render() {
@@ -406,8 +418,8 @@ const COLS = [
   { key: 'rank', label: '#', cls: 'rank', sort: (r) => r.rank, dir: 1, title: '排名（依台灣造訪量）' },
   { key: 'name', label: '網站', cls: 'l name-cell', sort: (r) => r.name, dir: 1 },
   { key: 'twVisits', label: '台灣造訪量', cls: 'num traffic-cell', sort: (r) => r.twVisits, dir: -1, title: '台灣造訪量 ＝ 造訪量 × 台灣占比；排名依此排序' },
-  { key: 'topics', label: '標籤', cls: 'l tags-cell', sort: (r) => (r.topics.length ? r.topics.join('、') : null), dir: 1 },
   { key: 'change', label: '區間變化', cls: 'num change-cell', sort: (r) => (typeof r.change === 'number' ? r.change : null), dir: -1, title: '台灣造訪量與所選比較月份相比' },
+  { key: 'topics', label: '標籤', cls: 'l tags-cell', sort: (r) => (r.topics.length ? r.topics.join('、') : null), dir: 1 },
   { key: 'visits', label: '造訪量', cls: 'num traffic-cell', sort: (r) => r.visits, dir: -1, title: '每月造訪估算' },
   { key: 'twSearch', label: '台灣搜尋', cls: 'num', sort: (r) => r.twSearch, dir: -1, title: '台灣自然搜尋造訪（估算）＝ 造訪量 × 自然搜尋占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
   { key: 'twAi', label: '台灣 AI', cls: 'num', sort: (r) => r.twAi, dir: -1, title: '台灣 GenAI 導流造訪（估算）＝ 造訪量 × AI 導流占比 × 台灣占比；假設台灣訪客的導流組成與全站相同' },
@@ -422,7 +434,17 @@ function currentSort() {
 function renderResults(scoped = scopedRows()) {
   const query = state.query.trim().toLocaleLowerCase();
   const rows = scoped.filter((r) => !query || `${r.name} ${r.domain} ${r.displayDomain}`.toLocaleLowerCase().includes(query));
-  document.getElementById('result-count').textContent = `${activeKey() || '全部網站'}${state.exclude.length ? `・排除 ${state.exclude.join('、')}` : ''}・${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '網站'}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}`;
+  const coverage = state.data.coverage?.[state.to];
+  const coverageNote = document.getElementById('coverage-note');
+  if (coverage && coverage.tracked > 0) {
+    const ratio = coverage.complete / coverage.tracked;
+    coverageNote.hidden = false;
+    coverageNote.className = `coverage-note${ratio < (state.data.coverageThreshold ?? 0.8) ? ' is-low' : ''}`;
+    coverageNote.innerHTML = `${monthLabel(state.to)} 已取得 <b>${coverage.withVisits.toLocaleString('zh-TW')}</b> / ${coverage.tracked.toLocaleString('zh-TW')} 個追蹤網站資料，完整 ${coverage.complete.toLocaleString('zh-TW')} 個（${(ratio * 100).toFixed(1)}%）。${ratio < (state.data.coverageThreshold ?? 0.8) ? '資料仍在收集，以下是目前已取得資料的排行。' : ''}<a href="/status/collection/?month=${state.to}">查看收集進度</a>`;
+    const stamp = document.getElementById('generated');
+    stamp.textContent = coverage.lastUpdatedAt ? `本月資料最後異動 ${new Date(coverage.lastUpdatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })} · 台北時間` : '本月尚無資料異動時間';
+  } else { coverageNote.hidden = true; document.getElementById('generated').textContent = '本月尚無資料異動時間'; }
+  document.getElementById('result-count').textContent = `${activeKey() || '全部網站'}${excludesDefault() ? '・已預設排除非台灣網站' : state.exclude.length ? `・排除 ${state.exclude.join('、')}` : ''}・${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '已取得資料的網站'}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}`;
   const host = document.getElementById('sections');
   nearEnd.disconnect();
   host.replaceChildren(section(activeKey(), state.active.length === 1 ? state.active[0] : null, rows));
@@ -451,7 +473,7 @@ function rankingRow(r, cal) {
   if (r.domain === state.hl) tr.className = 'hl';
   const cells = {
     rank: r.rank ?? '—',
-    name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.displayDomain)}">${esc(r.name)}</a>${r.name !== r.displayDomain ? `<span class="site-domain table-lead-extra" title="${esc(r.displayDomain)}">${esc(r.displayDomain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台補登的數字">人工</span>' : ''}</span>`,
+    name: `<span class="site-identity">${favicon(r.domain, r.name)}<a class="site-name" href="${siteHref(r.domain)}" title="${esc(r.name)} · ${esc(r.displayDomain)}">${esc(r.name)}</a>${r.name !== r.displayDomain ? `<span class="site-domain table-lead-extra" title="${esc(r.displayDomain)}">${esc(r.displayDomain)}</span>` : ''}${r.origin === 1 ? '<span class="tag table-lead-extra" title="此月使用試算表數字">表</span>' : r.origin === 2 ? '<span class="tag table-lead-extra" title="Similarweb 免費資料沒有估算，此月使用從 Similarweb 平台補登的數字">人工</span>' : r.origin === 3 ? '<span class="tag table-lead-extra" title="可信社群節點提交的 Similarweb 估算；詳細來源見網站頁">社群</span>' : ''}</span>`,
     topics: `<span class="tags" title="${esc(r.topics.join('、'))}">${r.topics.map((t) => `<a class="tag" href="${tagHref(t)}">${esc(t)}</a>`).join('')}</span>`,
     twVisits: twCell(r),
     visits: millions(r.visits),
@@ -669,19 +691,18 @@ document.addEventListener('click', (ev) => {
   if (top) { state.bumpTop = Number(top.dataset.top); drawBumps(); writeHash(); return; }
   const pick = ev.target.closest('[data-pick-topic], [data-pick-source]');
   if (pick) {
-    // A tag goes off → required (several AND together) → left out → off; 「全部標籤」 clears both. A source goes on and off.
+    // Explicit include/exclude action; 「全部標籤」 clears both. A source toggles on/off.
     if ('pickTopic' in pick.dataset) {
       const topic = pick.dataset.pickTopic;
       if (!topic) {
         state.active = [];
         state.exclude = [];
-      } else if (state.active.includes(topic)) {
-        state.active = state.active.filter((t) => t !== topic);
-        state.exclude = [...state.exclude, topic];
-      } else if (state.exclude.includes(topic)) {
-        state.exclude = state.exclude.filter((t) => t !== topic);
       } else {
-        state.active = [...state.active, topic];
+        const exclude = document.getElementById('tag-action').value === 'exclude';
+        const active = exclude ? state.exclude.includes(topic) : state.active.includes(topic);
+        state.active = state.active.filter((t) => t !== topic);
+        state.exclude = state.exclude.filter((t) => t !== topic);
+        if (!active) { if (exclude) state.exclude.push(topic); else state.active.push(topic); }
       }
     } else {
       const source = pick.dataset.pickSource || null;
@@ -713,6 +734,13 @@ const leaveForSite = () => {
   if (site) location.replace(siteHref(site));
   return !!site;
 };
+document.getElementById('show-all-sites').addEventListener('click', () => { state.query=''; state.active=[]; state.exclude=[]; state.source=null; resetList(); document.getElementById('search').value=''; render(); });
+document.getElementById('more-columns').addEventListener('change', (ev) => document.body.classList.toggle('show-all-columns', ev.target.checked));
+const filterDrawer = document.querySelector('.mobile-filter-drawer');
+const mobileFilters = matchMedia('(max-width: 640px)');
+const fitFilters = () => { if (filterDrawer) filterDrawer.open = !mobileFilters.matches; };
+fitFilters();
+mobileFilters.addEventListener('change', fitFilters);
 addEventListener('hashchange', () => {
   if (!state.data?.months.length || leaveForSite()) return;
   readHash(); render();
@@ -730,12 +758,12 @@ async function loadData() {
       document.getElementById('to').innerHTML = '<option>尚無資料</option>';
     } else {
       if (leaveForSite()) return;
-      readHash(); render();
+      readHash(); await render();
       document.querySelectorAll('.report-main input, .report-main select').forEach((el) => { el.disabled = false; });
       if (state.from === state.to) document.getElementById('from').disabled = true;
     }
     document.getElementById('sections').setAttribute('aria-busy', 'false');
-    document.getElementById('generated').textContent = `資料更新 ${new Date(data.generatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false, dateStyle: 'short', timeStyle: 'short' })} · 台北時間`;
+
   } catch {
     document.getElementById('sections').setAttribute('aria-busy', 'false');
     document.getElementById('result-count').textContent = '資料暫時無法載入';
