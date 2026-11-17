@@ -3223,47 +3223,18 @@ a.tag:hover,
   padding: 6px 12px;
   font-size: 13px;
 }
-.status-node-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 500px), 1fr));
-  gap: 12px;
+.status-node-table {
+  min-width: 1000px;
 }
-.status-node h3 {
-  margin: 0;
-  font-size: 16px;
-  overflow-wrap: anywhere;
+.status-node-table tbody th {
+  font-weight: 600;
 }
-.status-node-facts {
-  display: grid;
-  grid-template-columns: 1fr 2fr 1fr 1fr;
-  gap: 12px 20px;
-  margin: 0;
-}
-.status-node-facts > div {
-  min-width: 0;
-}
-.status-node-facts dt {
-  color: var(--muted);
-  font-size: 12px;
-}
-.status-node-facts dd {
-  margin: 4px 0 0;
-  font-size: 14px;
-  overflow-wrap: anywhere;
-}
-.status-node-facts small {
+.status-node-task small,
+.status-node-source small {
   display: block;
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
-}
-.status-node-facts .status-node-number {
-  font-size: 22px;
-  font-variant-numeric: tabular-nums;
-}
-.status-node > .status-caption {
-  margin-top: 12px;
-  overflow-wrap: anywhere;
 }
 .status-table th {
   padding: 7px 12px;
@@ -3349,9 +3320,6 @@ a.tag:hover,
   margin: 6px 0 12px;
 }
 @media (max-width: 760px) {
-  .status-node-facts {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .status-overview {
     grid-template-columns: 1fr;
     gap: 12px;

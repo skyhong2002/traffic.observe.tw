@@ -1542,7 +1542,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
     : `<section class="status-panel"><h2>${icon('layers')}資料月份</h2><p>最新流量 ${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'} · 組成 ${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</p><a href="${collectionHref}">查看月份收集 ${icon('arrow')}</a></section>`;
 
   const nodes = status.contributors.nodes;
-  const nodeCards = nodes
+  const nodeRows = nodes
     .map((node) => {
       const last = node.lastRequest;
       const latest = node.contribution.latest;
@@ -1571,13 +1571,11 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
                 : last.outcome === 'no-data'
                   ? '無有效資料'
                   : '錯誤';
-      return `<article class="status-panel status-node" data-node="${html(node.id)}"><header class="status-heading"><h3>${html(node.id)}</h3><span class="status-badge${node.state === 'offline' ? ' warning' : ''}">${icon(node.state === 'online' ? 'activity' : 'pause')}${state}</span></header>
-      <dl class="status-node-facts"><div><dt>最近回報</dt><dd>${time(node.lastSeenAt)}</dd></div><div><dt>最近任務</dt><dd>${last ? `<a href="/site/${html(last.domain)}/">${html(last.domain)}</a><small>${time(last.requestedAt)} · ${outcome}${last.httpStatus !== null ? ` · HTTP ${last.httpStatus}` : ''}</small>` : '尚無任務'}</dd></div><div><dt>24h 成功請求</dt><dd class="status-node-number">${node.last24h.successfulRequests}</dd></div><div><dt>已提供網站</dt><dd class="status-node-number">${node.contribution.domains}</dd></div></dl>
-      <p class="status-caption">${latest ? `最近收到資料：${html(latest.domain)} · ${monthLabel(latest.month)} · ${time(latest.fetchedAt)} · <a href="/api/v1/contributors/${html(latest.domain)}?month=${latest.month}">來源紀錄 ${icon('arrow')}</a>` : '尚未收到有效的流量資料。'}</p></article>`;
+      return `<tr class="status-node" data-node="${html(node.id)}"><th scope="row" class="l">${html(node.id)}</th><td class="l"><span class="status-badge${node.state === 'offline' ? ' warning' : ''}">${icon(node.state === 'online' ? 'activity' : 'pause')}${state}</span></td><td class="l">${time(node.lastSeenAt)}</td><td class="l status-node-task">${last ? `<a href="/site/${html(last.domain)}/">${html(last.domain)}</a><small>${time(last.requestedAt)} · ${outcome}${last.httpStatus !== null ? ` · HTTP ${last.httpStatus}` : ''}</small>` : '<span class="muted">尚無任務</span>'}</td><td class="num">${node.last24h.successfulRequests}</td><td class="num">${node.contribution.domains}</td><td class="l status-node-source">${latest ? `<a href="/api/v1/contributors/${html(latest.domain)}?month=${latest.month}">${monthLabel(latest.month)} 來源紀錄 ${icon('arrow')}</a><small>${html(latest.domain)} · ${time(latest.fetchedAt)}</small>` : '<span class="muted">尚未收到有效資料</span>'}</td></tr>`;
     })
     .join('');
   const contributors = `<section class="status-contributors" aria-labelledby="contributors-heading"><header class="status-heading"><h2 id="contributors-heading">${icon('layers')}社群貢獻節點</h2><span class="status-caption">${nodes.filter((node) => node.schedulingEnabled && node.online).length} / ${nodes.filter((node) => node.schedulingEnabled).length} 個派工節點在線</span></header>
-    ${nodeCards ? `<div class="status-node-grid">${nodeCards}</div>` : '<p class="status-caption">尚未設定社群貢獻節點。</p>'}
+    ${table('<th class="l">節點</th><th class="l">狀態</th><th class="l">最近回報</th><th class="l">最近任務</th><th class="num">24h 成功請求</th><th class="num">已提供網站</th><th class="l">最新資料</th>', nodeRows, '尚未設定社群貢獻節點。', 7, 'status-contributors', { sortable: false, pin: false, className: 'status-table status-node-table' })}
     <p class="status-caption">狀態以載入本頁時為準，${status.contributors.onlineWindowSeconds} 秒內有回報視為在線；等待配額或冷卻時仍可在線。節點與主站共用請求間隔、配額及退避。成功請求按已解析並保存的請求計數；同一次回應包含多個月份仍只算一次，提供網站按網域去重。</p></section>`;
 
   // Keep provider outcomes separate from DB-only scheduler checks. A reservation is not a confirmed request.

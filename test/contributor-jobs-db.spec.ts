@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { load } from 'cheerio';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
 import { createContributorPayload, saveContributorPayload } from '../src/contributor.ts';
@@ -127,6 +128,12 @@ describe.skipIf(!url)('contributor job HTTP pipeline', () => {
       httpClient: 'contributor-docker',
     });
     const page = statusPage(status);
+    const $ = load(page);
+    expect($('#status-contributors tbody tr[data-node="sky-mini"]')).toHaveLength(1);
+    expect($('#status-contributors tbody th[scope="row"]').text()).toBe('sky-mini');
+    expect($('#status-contributors thead th')).toHaveLength(7);
+    expect($('#status-contributors tbody td')).toHaveLength(6);
+    expect($('#status-contributors').attr('data-sortable')).toBeUndefined();
     expect(page).toContain('社群貢獻節點');
     expect(page).toContain('在線・等待派工');
     expect(page).toContain('class="l status-executor">sky-mini');
