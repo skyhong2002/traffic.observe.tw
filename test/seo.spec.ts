@@ -103,6 +103,8 @@ describe('head tags and noindex', () => {
     const index = (await app().inject('/api/v1/')).json();
     const spec = (await app().inject('/api/v1/openapi.json')).json();
     expect(spec.openapi).toBe('3.1.0');
+    expect(spec.paths['/api/v1/contributors/upload'].post.security).toEqual([{ contributorToken: [] }]);
+    expect(spec.components.schemas.ContributorObservation.properties.payload.properties.countries.type).toBe('array');
     expect(Object.keys(spec.paths).sort()).toEqual(ENDPOINTS.map((e) => e.path).sort());
     expect(Object.keys(index.endpoints)).toHaveLength(ENDPOINTS.length);
     expect(index).toMatchObject({ service: 'site.observe.tw', docs: 'https://site.observe.tw/api/' });

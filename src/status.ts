@@ -4,6 +4,7 @@ import { type Pool, rows } from './db.ts';
 import { egressExperimentStatus } from './egress-experiment.ts';
 import { type FetchPolicy, fetchPolicy } from './fetch-policy.ts';
 import { radarConfig } from './radar.ts';
+import { releaseRevision } from './release.ts';
 import { recentRequestDiagnostics } from './request-diagnostics.ts';
 import {
   type Candidate,
@@ -17,6 +18,7 @@ import {
   refusedSince,
 } from './scheduler.ts';
 import { techConfig } from './tech-scan.ts';
+import { loadThroughput } from './throughput.ts';
 
 const HOUR = 3_600_000;
 /** The worker's next run at :runMinute that is not before `from`. */
@@ -56,6 +58,7 @@ export function fetchQueue(
     targetMonth: c.collection?.month ?? null,
     importance: c.collection?.priorityLabel ?? null,
     missing: c.collection?.missing ?? null,
+    decision: c.collection?.decision ?? null,
     lastSuccessAt: c.lastSuccess ? new Date(c.lastSuccess).toISOString() : null,
     // Do not promise times beyond the known allowance or before the next probe.
     expectedAt:
@@ -150,6 +153,16 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
   const tech = techConfig();
   const sent24 = sends.reduce((n, s) => n + Number(s.n), 0);
   return {
+    sourceCommit: releaseRevision(),
+    throughput: collection
+      ? await loadThroughput(
+          pool,
+          collection.month,
+          collection.summary.total - collection.summary.complete,
+          collection.summary.missingVisits,
+          now,
+        )
+      : null,
     activities: {
       similarweb: {
         label: 'Similarweb 流量資料',

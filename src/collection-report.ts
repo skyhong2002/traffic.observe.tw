@@ -106,7 +106,7 @@ export function collectionReportPage(
   const excluded = split(query.exclude ?? '非台灣').filter((tag) => !wanted.includes(tag));
   const watchSource = query.watchSource ?? '';
   const q = (query.q ?? '').trim().toLocaleLowerCase();
-  const source = ['none', 'all', 'automatic', 'manual'].includes(query.source ?? '') ? query.source! : 'none';
+  const source = ['none', 'all', 'automatic', 'manual', 'community'].includes(query.source ?? '') ? query.source! : 'none';
   const needs = ['report', 'all', 'visits'].includes(query.needs ?? '') ? query.needs! : 'all';
   const sort = SORTS.flatMap(([key]) => [`${key}-desc`, `${key}-asc`]).includes(query.sort ?? '') ? query.sort! : 'prevVisits-desc';
   const params = new URLSearchParams({
@@ -142,7 +142,13 @@ export function collectionReportPage(
   const matches = scoped.filter(
     (entry) =>
       (source === 'all' ||
-        (source === 'none' ? !entry.hasAutomatic && !entry.hasManual : source === 'manual' ? entry.hasManual : entry.hasAutomatic)) &&
+        (source === 'none'
+          ? !entry.hasAutomatic && !entry.hasManual && !entry.hasCommunity
+          : source === 'manual'
+            ? entry.hasManual
+            : source === 'community'
+              ? entry.hasCommunity
+              : entry.hasAutomatic)) &&
       (needs === 'all' || (needs === 'visits' ? entry.visits === null : entry.missing.length > 0)) &&
       (!query.state || query.state === 'all' || (query.state === 'missing' ? !entry.complete : entry.status === query.state)) &&
       (!Number(query.priority) || entry.priority === Number(query.priority)),
@@ -214,10 +220,11 @@ export function collectionReportPage(
     'source',
     '當月資料',
     [
-      ['none', '尚無自動或人工資料'],
+      ['none', '尚無自動、人工或社群資料'],
       ['all', '全部'],
       ['automatic', '含自動資料'],
       ['manual', '含人工補登'],
+      ['community', '含可信社群'],
     ],
     source,
   )}${select(

@@ -1,7 +1,9 @@
+import { communityProfile, loadCommunity } from './contributor.ts';
 import { latestCruxRanks } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { loadManualMonths, manualProfile } from './manual.ts';
 import { monthView, shiftMonth } from './metrics.ts';
+import { baselineQueue, optimizedQueue, queueDecision } from './queue-plan.ts';
 import type { RunConfig } from './scheduler.ts';
 import { type TrafficProfile, trafficChannels } from './similarweb.ts';
 
@@ -54,6 +56,12 @@ export function coverageFields(visits: number | null, profiles: Array<Partial<Tr
 
 export async function syncCollections(pool: Pool, config: RunConfig, now = new Date()) {
   const month = collectionMonth(config, now);
+  if (config.queueOptimization)
+    await pool.query('INSERT IGNORE INTO queue_canaries (id, started_at, expires_at) VALUES (?, ?, ?)', [
+      config.queueCanary,
+      now,
+      new Date(now.getTime() + config.queueCanaryHours * 3_600_000),
+    ]);
   await pool.query('INSERT IGNORE INTO collection_months (month, created_at) VALUES (?, ?)', [month, now]);
   await pool.query(
     `INSERT IGNORE INTO collection_domains (month, domain, enrolled_at)
@@ -75,8 +83,16 @@ export async function collectionMonths(pool: Pool, config: RunConfig, now = new 
 }
 
 export async function loadCollection(pool: Pool, config: RunConfig, month = collectionMonth(config), now = new Date()) {
+  const [canary] = config.queueOptimization
+    ? await rows<{ rolled_back_at: Date | null; expires_at: Date }>(
+        pool,
+        'SELECT rolled_back_at, expires_at FROM queue_canaries WHERE id = ?',
+        [config.queueCanary],
+      )
+    : [];
+  const optimized = config.queueOptimization && !!canary && !canary.rolled_back_at && canary.expires_at > now;
   if (!validCollectionMonth(month)) throw Error('Invalid collection month');
-  const [domains, traffic, profiles, manual, overrides, attempts, states, before, provider, [allocation], requests, crux] =
+  const [domains, traffic, profiles, manual, overrides, attempts, states, before, provider, [allocation], requests, crux, community] =
     await Promise.all([
       rows<{ domain: string; sources: string | null }>(
         pool,
@@ -97,15 +113,22 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
       ),
       loadManualMonths(pool, { months: [month] }),
       rows<{ domain: string; priority: number }>(pool, 'SELECT domain, priority FROM collection_priorities'),
-      rows<{ domain: string; attempts: number; old_month_attempts: number; last_attempt_at: Date | null; last_result: string | null }>(
+      rows<{
+        domain: string;
+        attempts: number;
+        old_month_attempts: number;
+        last_attempt_at: Date | null;
+        last_result: string | null;
+        enrolled_at: Date;
+      }>(
         pool,
-        'SELECT domain, attempts, old_month_attempts, last_attempt_at, last_result FROM collection_domains WHERE month = ?',
+        'SELECT domain, attempts, old_month_attempts, last_attempt_at, last_result, enrolled_at FROM collection_domains WHERE month = ?',
         [month],
       ),
       rows<{ domain: string; next_attempt_at: Date | null }>(pool, 'SELECT domain, next_attempt_at FROM fetch_state'),
       monthView(pool, shiftMonth(month, -1)),
       rows<{ domain: string; month: string }>(pool, 'SELECT domain, MAX(month) AS month FROM traffic_profiles GROUP BY domain'),
-      rows<{ n: number }>(pool, "SELECT COUNT(*) AS n FROM sends WHERE target_month = ? AND outcome <> 'refused'", [month]),
+      rows<{ n: number }>(pool, 'SELECT COUNT(*) AS n FROM sends WHERE target_month = ?', [month]),
       rows<{ domain: string; at: Date; outcome: string; http_status: number | null }>(
         pool,
         `SELECT s.domain, s.at, s.outcome, s.http_status FROM sends s
@@ -113,7 +136,9 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         [month],
       ),
       latestCruxRanks(pool),
+      loadCommunity(pool, [month]),
     ]);
+  const communityRows = new Map(community.map((r) => [r.domain, r]));
   const visits = new Map(traffic.map((r) => [r.domain, Number(r.visits)]));
   const profile = new Map(profiles.map((r) => [r.domain, parse<Partial<TrafficProfile>>(r.profile)]));
   const hands = new Map(manual.map((r) => [r.domain, r]));
@@ -151,9 +176,11 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
   const entries = domains
     .map(({ domain, sources }) => {
       const hand = hands.get(domain);
-      const coverage = coverageFields(visits.get(domain) || hand?.visits || null, [
+      const contribution = communityRows.get(domain);
+      const coverage = coverageFields(visits.get(domain) || hand?.visits || contribution?.payload.visits || null, [
         profile.get(domain) ?? null,
         hand ? manualProfile(hand) : null,
+        contribution ? communityProfile(contribution) : null,
       ]);
       const attempt = tried.get(domain);
       const request = lastRequests.get(domain);
@@ -165,6 +192,16 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         ? month < shiftMonth([latestMonth ?? '', collectionMonth(config, now)].sort().at(-1)!, -2)
         : !!latestMonth && latestMonth > month;
       const complete = coverage.missing.length === 0;
+      const updated = Math.max(Date.parse(trafficAt.get(domain) ?? '') || 0, Date.parse(profileAt.get(domain) ?? '') || 0);
+      const refresh =
+        optimized &&
+        complete &&
+        !hand &&
+        !contribution &&
+        updated > 0 &&
+        now.getTime() - updated >= config.collectionRefreshHours * 3_600_000 &&
+        (!latestMonth || latestMonth <= month) &&
+        budgetAttempts < config.collectionMaxAttempts;
       const manualNeeded = !complete && (unavailable || budgetAttempts >= config.collectionMaxAttempts);
       const retryHours = !targetPublished && attempt?.last_result === 'old-month' ? config.probeIntervalHours : config.collectionRetryHours;
       const retryAt = count && attempt?.last_attempt_at ? new Date(attempt.last_attempt_at.getTime() + retryHours * 3_600_000) : null;
@@ -201,9 +238,14 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         lastAttemptAt: attempt?.last_attempt_at?.toISOString() ?? null,
         lastResult: attempt?.last_result ?? null,
         nextAttemptAt: nextAt > now.getTime() && !manualNeeded && !complete ? new Date(nextAt).toISOString() : null,
-        automatic: !complete && !manualNeeded && nextAt <= now.getTime(),
+        automatic: (!complete || refresh) && !manualNeeded && nextAt <= now.getTime(),
+        enrolledAt: attempt?.enrolled_at?.toISOString() ?? `${month.slice(0, 4)}-${month.slice(4)}-01T00:00:00Z`,
         hasAutomatic: profile.has(domain) || (visits.get(domain) ?? 0) > 0,
         hasManual: !!hand,
+        hasCommunity: !!contribution,
+        communityProvenance: contribution
+          ? { sourceNode: contribution.sourceNode, fetchedAt: contribution.fetchedAt, payloadHash: contribution.payloadHash }
+          : null,
         automaticVisitsAt: trafficAt.get(domain) ?? null,
         automaticProfileAt: profileAt.get(domain) ?? null,
         manualUpdatedAt: hand?.updatedAt ?? null,
@@ -223,17 +265,21 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
         (a.lastAttemptAt ?? '').localeCompare(b.lastAttemptAt ?? '') ||
         a.domain.localeCompare(b.domain),
     );
-  // Reserve every fifth slot for retries; new work still gets most of the allowance.
-  const fresh = entries.filter((e) => e.automatic && !e.attempts);
-  const retry = entries.filter((e) => e.automatic && e.attempts);
-  const queue: typeof entries = [];
-  while (fresh.length || retry.length)
-    queue.push(
-      ((Number(allocation?.n ?? 0) + queue.length + 1) % 5 === 0 && retry.length ? retry.shift() : (fresh.shift() ?? retry.shift()))!,
-    );
-  // Manual coverage lowers urgency even when a reserved retry slot is due.
-  // Stable sorting preserves the allocation order within each group.
-  queue.sort((a, b) => Number(a.hasManual) - Number(b.hasManual));
+  let queue = baselineQueue(entries, Number(allocation?.n ?? 0));
+  if (optimized) queue = optimizedQueue(entries, Number(allocation?.n ?? 0), now);
+  const decisions = new Map(
+    queue.map((e) => [
+      e.domain,
+      {
+        ...queueDecision(e, now),
+        policy: optimized ? 'fair-v1' : 'baseline',
+        canary: config.queueCanary,
+        reservedCycle: ['missing', 'partial', 'missing', 'retry', 'refresh'],
+      },
+    ]),
+  );
+  const explainedEntries = entries.map((e) => ({ ...e, decision: decisions.get(e.domain) ?? null }));
+  const explainedQueue = queue.map((e) => ({ ...e, decision: decisions.get(e.domain)! }));
   const summary = {
     total: entries.length,
     complete: entries.filter((e) => e.complete).length,
@@ -253,8 +299,8 @@ export async function loadCollection(pool: Pool, config: RunConfig, month = coll
   return {
     month,
     summary,
-    entries,
-    queue,
+    entries: explainedEntries,
+    queue: explainedQueue,
     settings: { coreDomains: config.coreDomains, maxAttempts: config.collectionMaxAttempts, retryHours: config.collectionRetryHours },
   };
 }

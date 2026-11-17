@@ -38,7 +38,7 @@
 - Similarweb 實際請求診斷見狀態頁及 `GET /api/v1/status.requests`：保存出口、HTTP client、實際 HTTP status、CloudFront／cache／POP、Retry-After 與已解析月份，不保存 body、request ID 或憑證。舊紀錄缺的欄位維持未知；CloudFront 只表示傳遞服務，不能單憑它確認 403 根因。見[拒絕診斷與部署證據](research/similarweb-refusal-diagnostics-20261111.md)。
 - `TRAFFIC_COLLECTION_ENABLED=0` 保留舊排程相容模式：來源順序 `TRAFFIC_PRIORITY=tag,blog,sheet,manual`，從未抓過的網域先取可用月份，缺上月 profile 每三天補抓，補抓數依近一天發布比例調整；單次查詢若 30 天內已有回應直接讀現有資料。共用小時／週上限、間隔與冷卻仍生效。
 
-部署先執行 `npm run db:migrate` 套用 `0013_collections.sql` 與 `0014_provider_backoff.sql`，再同步重啟 web 與 worker。2026-11-10 正式配置採月份收集、每小時本機上限 15、間隔 240 秒、週預算 auto，並啟用 adaptive 退避；已查證的舊本機七天冷卻以備份遷移為啟用後至少兩小時，伺服器指定等待仍完整保留。實際伺服器額度仍未知，不能由這些設定保證整份清單都能在月底前完成。既有查核證據見 [Similarweb 限制筆記](research/similarweb-limits-20261106.md)。
+部署先執行 `npm run db:migrate` 套用 `0013_collections.sql`、`0014_provider_backoff.sql` 與 `0016_contributors.sql`、`0017_tech_manual.sql`、`0018_queue_canary.sql`，再同步重啟 web 與 worker。Contributor observation 另存來源節點、月份、抓取時間、schema、欄位清單與 payload hash；重送以冪等鍵去重，canonical 選擇不覆蓋原始來源列。2026-11-10 正式配置採月份收集、每小時本機上限 15、間隔 240 秒、週預算 auto，並啟用 adaptive 退避；已查證的舊本機七天冷卻以備份遷移為啟用後至少兩小時，伺服器指定等待仍完整保留。實際伺服器額度仍未知，不能由這些設定保證整份清單都能在月底前完成。既有查核證據見 [Similarweb 限制筆記](research/similarweb-limits-20261106.md)。
 
 新的 429 策略、設定、測試與原始文件見 [有限恢復探查說明](research/similarweb-adaptive-backoff-20261110.md)。任何有效伺服器 Retry-After 仍優先；新策略不會自行縮短已有冷卻。這次只遷移已確認為本機七天設定的既有 429，並從啟用時間再等至少兩小時。
 
@@ -324,3 +324,6 @@ systemd user unit 在 `deploy/`（複製到 `~/.config/systemd/user/` 後 `syste
 型別、lint 通過；214 項測試中 212 項首次通過，兩項因測試庫初始化超過預設 10 秒而未進入測試，改以 `--hookTimeout=60000` 重跑完整 DB 檔案 28 項全數通過。OCR TSV 的空白行尾正規化後另重跑 7 項解析測試通過，與原輸出解析結果一致。部署後本機／公開站共 30 項路由與資源檢查通過，health／ready 均為 200，兩份 OCR JS 與 main 檔案逐字一致，未登入補登頁仍為 303。web／worker 均 active、NRestarts=0；人工補登表與異動表的筆數及 SHA-256、共用退避狀態與 sends 摘要部署前後一致，未額外向 Similarweb 探測。
 
 程式與設定備份、資料摘要、路由查核與服務狀態在 `data/main-release-20261112T181431Z/`（UTC 目錄時間），最新位置亦記於 `data/last-main-release.txt`。此目錄未納入 Git；`checkout-before.tar.gz` 是此次重啟前的工作樹快照，並非舊執行程序的完整程式還原點；較早版本的還原應使用各功能原有發布備份。資料庫本次沒有結構或補登資料異動。
+
+
+新增社群節點、人工技術補登與排序 canary 的程式操作及部署後驗收見 [contributor-and-queue.md](contributor-and-queue.md)。此連結是程式交付說明，不是正式部署紀錄。

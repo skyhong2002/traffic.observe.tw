@@ -14,6 +14,7 @@ const SOURCES = [
   ['all', '全部來源'],
   ['automatic', '含自動資料'],
   ['manual', '含人工補登'],
+  ['community', '含可信社群'],
   ['none', '尚無當月資料'],
 ];
 export const validCollectionSource = (value = '') => (SOURCES.some(([key]) => value === key) ? value : 'all');
@@ -27,7 +28,7 @@ const SORTS = [
 ];
 export const validCollectionSort = (value = '') => (SORTS.some(([key]) => value === key) ? value : 'updated-desc');
 const updatedAt = (e: CollectionEntry) =>
-  [e.automaticVisitsAt, e.automaticProfileAt, e.manualUpdatedAt].filter(Boolean).sort().at(-1) ?? null;
+  [e.automaticVisitsAt, e.automaticProfileAt, e.manualUpdatedAt, e.communityProvenance?.fetchedAt].filter(Boolean).sort().at(-1) ?? null;
 /** Display ordering only: never change the worker's priority queue. Missing timestamps always go last. */
 export function sortCollectionEntries(entries: CollectionEntry[], sort = 'updated-desc') {
   const selected = validCollectionSort(sort);
@@ -41,7 +42,15 @@ export function sortCollectionEntries(entries: CollectionEntry[], sort = 'update
   });
 }
 const matchesSource = (e: CollectionEntry, source: string) =>
-  source === 'manual' ? e.hasManual : source === 'automatic' ? e.hasAutomatic : source === 'none' ? !e.hasManual && !e.hasAutomatic : true;
+  source === 'manual'
+    ? e.hasManual
+    : source === 'automatic'
+      ? e.hasAutomatic
+      : source === 'community'
+        ? !!e.hasCommunity
+        : source === 'none'
+          ? !e.hasManual && !e.hasAutomatic && !e.hasCommunity
+          : true;
 const fieldLabel = (key: string) =>
   key.startsWith('channels.')
     ? `渠道：${CHANNELS.find(([channel]) => key === `channels.${channel}`)?.[1] ?? key.slice(9)}`
@@ -62,13 +71,17 @@ const glyph = (kind: string) => {
   return `<svg class="collection-glyph" width="14" height="14" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[kind] ?? paths.pending}</svg>`;
 };
 function sourceCell(e: CollectionEntry) {
-  if (!e.hasManual && !e.hasAutomatic) return '<span class="collection-muted" title="尚無當月資料">—</span>';
-  const kind = e.hasManual ? (e.hasAutomatic ? 'mixed' : 'manual') : 'automatic';
-  const label = { mixed: '自動＋人工', manual: '人工補登', automatic: '自動抓取' }[kind];
+  if (!e.hasManual && !e.hasAutomatic && !e.hasCommunity) return '<span class="collection-muted" title="尚無當月資料">—</span>';
+  const labels = [e.hasAutomatic ? '自動抓取' : '', e.hasManual ? '人工補登' : '', e.hasCommunity ? '可信社群' : ''].filter(Boolean);
+  const kind = labels.length > 1 ? 'mixed' : e.hasManual ? 'manual' : 'automatic';
+  const label = e.hasAutomatic && e.hasManual ? `自動＋人工${e.hasCommunity ? '＋可信社群' : ''}` : labels.join('＋');
   const details = [
     e.automaticVisitsAt ? `<div>自動流量：${stamp(e.automaticVisitsAt)}</div>` : '',
     e.automaticProfileAt ? `<div>自動組成：${stamp(e.automaticProfileAt)}</div>` : '',
     e.manualUpdatedAt ? `<div>人工補登：${stamp(e.manualUpdatedAt)}</div>` : '',
+    e.communityProvenance
+      ? `<div>可信社群 ${html(e.communityProvenance.sourceNode)}：${stamp(e.communityProvenance.fetchedAt)} <a href="/api/v1/contributors/${html(e.domain)}?month=${e.month}">來源</a></div>`
+      : '',
   ].join('');
   return `<details class="collection-source"><summary><span class="collection-source-label ${e.hasManual ? 'has-manual' : ''}">${glyph(kind)}${label}</span></summary>${details || '<div>更新時間未記錄。</div>'}</details>`;
 }
@@ -167,6 +180,7 @@ export function collectionPage(
     ['all', '全部'],
     ['automatic', '含自動資料'],
     ['manual', '含人工補登'],
+    ['community', '含可信社群'],
     ['none', '尚無當月資料'],
   ]
     .map(

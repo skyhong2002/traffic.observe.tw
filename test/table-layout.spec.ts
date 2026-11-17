@@ -33,6 +33,10 @@ const entries: Collection['entries'] = Array.from({ length: 121 }, (_, i) => ({
   automatic: false,
   hasAutomatic: false,
   hasManual: false,
+  hasCommunity: false,
+  communityProvenance: null,
+  decision: null,
+  enrolledAt: '2026-11-01T00:00:00Z',
   automaticVisitsAt: null,
   automaticProfileAt: null,
   manualUpdatedAt: null,
@@ -61,7 +65,7 @@ const collection: Collection = {
 it('lists only sites without automatic or manual data in the selected month', () => {
   const fixture = {
     ...collection,
-    entries: [entries[0], { ...entries[1], hasAutomatic: true }, { ...entries[2], hasManual: true }],
+    entries: [entries[0], { ...entries[1], hasAutomatic: true }, { ...entries[2], hasManual: true }, { ...entries[3], hasCommunity: true }],
   };
   const page = load(collectionPage(fixture, ['202610'], false, 'all', 0, 1, '', 'none'));
   expect(page('h1').text()).toBe('2026/10 尚未有資料的網站');
@@ -225,7 +229,7 @@ it.skipIf(!existsSync(chromium.executablePath()))(
             return box.right <= viewport.right && box.left >= viewport.left;
           }),
         ).toBe(true);
-        expect(await scroller.locator('..').locator('..').locator('.table-scroll-hint:visible').count()).toBe(1);
+        expect(await page.locator('.table-scroll-hint').count()).toBe(0);
       }
       await page.getByRole('navigation', { name: '逐站缺漏上方分頁' }).getByRole('link', { name: '下一頁' }).click();
       expect(new URL(page.url()).searchParams.get('priority')).toBe('2');

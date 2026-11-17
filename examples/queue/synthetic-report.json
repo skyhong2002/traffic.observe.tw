@@ -1,0 +1,206 @@
+{
+  "at": "2026-11-17T00:00:00Z",
+  "budget": 8,
+  "reports": [
+    {
+      "strategy": "baseline",
+      "assumptions": "historical per-domain outcome replay; counterfactual ordering assumes outcomes independent of request time; no upstream calls",
+      "selected": [
+        "fixture-0.example.tw",
+        "fixture-3.example.tw",
+        "fixture-1.example.tw",
+        "fixture-4.example.tw",
+        "fixture-0.example.tw",
+        "fixture-5.example.tw",
+        "fixture-7.example.tw",
+        "fixture-9.example.tw"
+      ],
+      "completedDomains": 4,
+      "savedDomains": 6,
+      "refusals": 1,
+      "rareTagCoverage": 1,
+      "taiwanTrafficCoverage": 0.6444444444444445,
+      "meanFreshnessDays": 12.458333333333332,
+      "unknownFreshnessDomains": 8,
+      "priorities": [
+        {
+          "priority": 1,
+          "total": 4,
+          "complete": 3
+        },
+        {
+          "priority": 2,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 3,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 4,
+          "total": 4,
+          "complete": 1
+        }
+      ],
+      "tags": [
+        {
+          "tag": "local-news",
+          "total": 6,
+          "saved": 3
+        }
+      ]
+    },
+    {
+      "strategy": "rare-tag",
+      "assumptions": "historical per-domain outcome replay; counterfactual ordering assumes outcomes independent of request time; no upstream calls",
+      "selected": [
+        "fixture-0.example.tw",
+        "fixture-0.example.tw",
+        "fixture-3.example.tw",
+        "fixture-6.example.tw",
+        "fixture-9.example.tw",
+        "fixture-12.example.tw",
+        "fixture-15.example.tw",
+        "fixture-15.example.tw"
+      ],
+      "completedDomains": 4,
+      "savedDomains": 6,
+      "refusals": 1,
+      "rareTagCoverage": 1,
+      "taiwanTrafficCoverage": 0.482962962962963,
+      "meanFreshnessDays": 12.447916666666666,
+      "unknownFreshnessDomains": 8,
+      "priorities": [
+        {
+          "priority": 1,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 2,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 3,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 4,
+          "total": 4,
+          "complete": 2
+        }
+      ],
+      "tags": [
+        {
+          "tag": "local-news",
+          "total": 6,
+          "saved": 6
+        }
+      ]
+    },
+    {
+      "strategy": "traffic",
+      "assumptions": "historical per-domain outcome replay; counterfactual ordering assumes outcomes independent of request time; no upstream calls",
+      "selected": [
+        "fixture-0.example.tw",
+        "fixture-0.example.tw",
+        "fixture-1.example.tw",
+        "fixture-2.example.tw",
+        "fixture-3.example.tw",
+        "fixture-4.example.tw",
+        "fixture-5.example.tw",
+        "fixture-5.example.tw"
+      ],
+      "completedDomains": 5,
+      "savedDomains": 6,
+      "refusals": 1,
+      "rareTagCoverage": 1,
+      "taiwanTrafficCoverage": 0.7256296296296296,
+      "meanFreshnessDays": 16.287037037037038,
+      "unknownFreshnessDomains": 7,
+      "priorities": [
+        {
+          "priority": 1,
+          "total": 4,
+          "complete": 4
+        },
+        {
+          "priority": 2,
+          "total": 4,
+          "complete": 3
+        },
+        {
+          "priority": 3,
+          "total": 4,
+          "complete": 1
+        },
+        {
+          "priority": 4,
+          "total": 4,
+          "complete": 1
+        }
+      ],
+      "tags": [
+        {
+          "tag": "local-news",
+          "total": 6,
+          "saved": 2
+        }
+      ]
+    },
+    {
+      "strategy": "fair",
+      "assumptions": "historical per-domain outcome replay; counterfactual ordering assumes outcomes independent of request time; no upstream calls",
+      "selected": [
+        "fixture-0.example.tw",
+        "fixture-1.example.tw",
+        "fixture-4.example.tw",
+        "fixture-0.example.tw",
+        "fixture-15.example.tw",
+        "fixture-8.example.tw",
+        "fixture-5.example.tw",
+        "fixture-12.example.tw"
+      ],
+      "completedDomains": 5,
+      "savedDomains": 5,
+      "refusals": 1,
+      "rareTagCoverage": 1,
+      "taiwanTrafficCoverage": 0.5591111111111111,
+      "meanFreshnessDays": 21.412037037037038,
+      "unknownFreshnessDomains": 7,
+      "priorities": [
+        {
+          "priority": 1,
+          "total": 4,
+          "complete": 3
+        },
+        {
+          "priority": 2,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 3,
+          "total": 4,
+          "complete": 2
+        },
+        {
+          "priority": 4,
+          "total": 4,
+          "complete": 2
+        }
+      ],
+      "tags": [
+        {
+          "tag": "local-news",
+          "total": 6,
+          "saved": 2
+        }
+      ]
+    }
+  ]
+}

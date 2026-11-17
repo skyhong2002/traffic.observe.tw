@@ -1,0 +1,475 @@
+{
+  "description": "Synthetic offline fixture, not production observations. Includes refusals, partial profiles, retries, refreshes and rare tags.",
+  "entries": [
+    {
+      "domain": "fixture-0.example.tw",
+      "priority": 1,
+      "score": 1000,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 10000,
+      "fields": {
+        "visits": false,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-1.example.tw",
+      "priority": 1,
+      "score": 500,
+      "rareTags": [],
+      "cruxRank": 20000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-2.example.tw",
+      "priority": 1,
+      "score": 333,
+      "rareTags": [],
+      "cruxRank": 30000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 1,
+      "lastAttemptAt": "2026-11-15T00:00:00Z",
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-3.example.tw",
+      "priority": 1,
+      "score": 250,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 40000,
+      "fields": {
+        "visits": true,
+        "countries": true,
+        "channels.GenAi": true
+      },
+      "complete": true,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": "2026-10-01T00:00:00Z",
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-4.example.tw",
+      "priority": 2,
+      "score": 200,
+      "rareTags": [],
+      "cruxRank": 50000,
+      "fields": {
+        "visits": false,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-5.example.tw",
+      "priority": 2,
+      "score": 166,
+      "rareTags": [],
+      "cruxRank": 60000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-6.example.tw",
+      "priority": 2,
+      "score": 142,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 70000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 1,
+      "lastAttemptAt": "2026-11-15T00:00:00Z",
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-7.example.tw",
+      "priority": 2,
+      "score": 125,
+      "rareTags": [],
+      "cruxRank": 80000,
+      "fields": {
+        "visits": true,
+        "countries": true,
+        "channels.GenAi": true
+      },
+      "complete": true,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": "2026-10-01T00:00:00Z",
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-8.example.tw",
+      "priority": 3,
+      "score": 111,
+      "rareTags": [],
+      "cruxRank": 90000,
+      "fields": {
+        "visits": false,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-9.example.tw",
+      "priority": 3,
+      "score": 100,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 100000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-10.example.tw",
+      "priority": 3,
+      "score": 90,
+      "rareTags": [],
+      "cruxRank": 110000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 1,
+      "lastAttemptAt": "2026-11-15T00:00:00Z",
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-11.example.tw",
+      "priority": 3,
+      "score": 83,
+      "rareTags": [],
+      "cruxRank": 120000,
+      "fields": {
+        "visits": true,
+        "countries": true,
+        "channels.GenAi": true
+      },
+      "complete": true,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": "2026-10-01T00:00:00Z",
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-12.example.tw",
+      "priority": 4,
+      "score": 76,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 130000,
+      "fields": {
+        "visits": false,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-13.example.tw",
+      "priority": 4,
+      "score": 71,
+      "rareTags": [],
+      "cruxRank": 140000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-14.example.tw",
+      "priority": 4,
+      "score": 66,
+      "rareTags": [],
+      "cruxRank": 150000,
+      "fields": {
+        "visits": true,
+        "countries": false,
+        "channels.GenAi": false
+      },
+      "complete": false,
+      "attempts": 1,
+      "lastAttemptAt": "2026-11-15T00:00:00Z",
+      "enrolledAt": "2026-11-15T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": null,
+      "manualUpdatedAt": null,
+      "hasManual": false
+    },
+    {
+      "domain": "fixture-15.example.tw",
+      "priority": 4,
+      "score": 62,
+      "rareTags": [
+        "local-news"
+      ],
+      "cruxRank": 160000,
+      "fields": {
+        "visits": true,
+        "countries": true,
+        "channels.GenAi": true
+      },
+      "complete": true,
+      "attempts": 0,
+      "lastAttemptAt": null,
+      "enrolledAt": "2026-11-01T00:00:00Z",
+      "automatic": true,
+      "automaticVisitsAt": "2026-10-01T00:00:00Z",
+      "manualUpdatedAt": null,
+      "hasManual": false
+    }
+  ],
+  "observations": [
+    {
+      "domain": "fixture-0.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": false,
+      "complete": false,
+      "refused": true
+    },
+    {
+      "domain": "fixture-0.example.tw",
+      "at": "2026-11-16T03:00:00Z",
+      "saved": true,
+      "complete": true
+    },
+    {
+      "domain": "fixture-1.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-2.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-3.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-4.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-5.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": false,
+      "complete": false,
+      "refused": false
+    },
+    {
+      "domain": "fixture-5.example.tw",
+      "at": "2026-11-16T03:00:00Z",
+      "saved": true,
+      "complete": true
+    },
+    {
+      "domain": "fixture-6.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-7.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-8.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-9.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-10.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": false,
+      "complete": false,
+      "refused": false
+    },
+    {
+      "domain": "fixture-10.example.tw",
+      "at": "2026-11-16T03:00:00Z",
+      "saved": true,
+      "complete": true
+    },
+    {
+      "domain": "fixture-11.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-12.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-13.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-14.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": true,
+      "complete": true,
+      "refused": false
+    },
+    {
+      "domain": "fixture-15.example.tw",
+      "at": "2026-11-16T01:00:00Z",
+      "saved": false,
+      "complete": false,
+      "refused": false
+    },
+    {
+      "domain": "fixture-15.example.tw",
+      "at": "2026-11-16T03:00:00Z",
+      "saved": true,
+      "complete": true
+    }
+  ]
+}

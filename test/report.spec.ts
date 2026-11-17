@@ -37,7 +37,7 @@ it('does not invent Taiwan growth when a share or comparable baseline is missing
 });
 
 it('downloads the comparison month selected on the report instead of defaulting to the nearest month', () => {
-  const start = report.indexOf('  const q = new URLSearchParams({ month: state.to });');
+  const start = report.indexOf("  const q = new URLSearchParams({ month: state.to, topicMode: 'or' });");
   const end = report.indexOf('  renderResults(scoped);', start);
   const anchor = { href: '' };
   runInNewContext(report.slice(start, end), {
@@ -50,4 +50,5 @@ it('downloads the comparison month selected on the report instead of defaulting 
   expect(url.searchParams.get('month')).toBe('202610');
   expect(url.searchParams.get('topic')).toBe('電商');
   expect(url.searchParams.get('source')).toBe('manual');
+  expect(url.searchParams.get('topicMode')).toBe('or');
 });

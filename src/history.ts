@@ -1,3 +1,4 @@
+import { COVERAGE_THRESHOLD, loadMonthCoverage, type MonthCoverage } from './coverage.ts';
 import { loadCrux } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { availableMonths, monthView } from './metrics.ts';
@@ -17,6 +18,9 @@ export interface History {
   generatedAt: string;
   /** Oldest first. */
   months: string[];
+  /** Coverage of the tracked cohort for each month, oldest first. */
+  coverage: Record<string, MonthCoverage>;
+  coverageThreshold: number;
   fields: string[];
   topics: string[];
   sources: Array<{ source: string; domains: number }>;
@@ -34,7 +38,7 @@ export interface History {
           number | null,
           number | null,
           number | null,
-          0 | 1 | 2,
+          0 | 1 | 2 | 3,
           (number | null)?,
           (0 | 1 | 2 | 3 | null)?,
           (number | null)?,
@@ -55,9 +59,10 @@ const GROUP_ORDER = ['tag', 'blog', 'manual'];
 
 export async function buildHistory(pool: Pool, now = new Date()): Promise<History> {
   const months = [...(await availableMonths(pool))].reverse();
-  const [views, watched, radar, crux] = await Promise.all([
+  const [views, watched, coverage, radar, crux] = await Promise.all([
     Promise.all(months.map((month) => monthView(pool, month))),
     rows<{ requester: string; domain: string }>(pool, "SELECT DISTINCT requester, domain FROM watches WHERE kind = 'watch'"),
+    loadMonthCoverage(pool, months),
     loadRadar(pool),
     loadCrux(pool),
   ]);
@@ -81,7 +86,7 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
         s.searchShare !== null ? s.visits * s.searchShare : null,
         s.aiShare !== null ? s.visits * s.aiShare : null,
         s.taiwanShare,
-        s.visitsSource === 'sheet' ? 1 : s.visitsSource === 'manual' ? 2 : 0,
+        s.visitsSource === 'sheet' ? 1 : s.visitsSource === 'manual' ? 2 : s.visitsSource === 'community' ? 3 : 0,
         s.taiwanShareUsed,
         s.taiwanBasis === null ? null : BASIS_CODE[s.taiwanBasis],
         s.taiwanShareMax,
@@ -94,6 +99,8 @@ export async function buildHistory(pool: Pool, now = new Date()): Promise<Histor
   return {
     generatedAt: now.toISOString(),
     months,
+    coverage,
+    coverageThreshold: COVERAGE_THRESHOLD,
     fields: [
       'visits(M)',
       'search(M)',

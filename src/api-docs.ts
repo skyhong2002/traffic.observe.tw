@@ -1,4 +1,5 @@
 import { html, layout } from './pages.ts';
+import { trafficChannels } from './similarweb.ts';
 
 // The public API, described once: the HTML page at /api/ (laid out like
 // tag.observe.tw/api/), the index at /api/v1 and the OpenAPI document at
@@ -19,6 +20,7 @@ interface Field {
 }
 interface Endpoint {
   id: string;
+  method?: 'GET' | 'POST';
   group: string;
   path: string;
   summary: string;
@@ -35,8 +37,13 @@ const MONTH: Param = {
   name: 'month',
   in: 'query',
   type: 'string (YYYYMM)',
-  desc: '資料月份；不在資料範圍內時改用最新月份',
-  default: '最新月份',
+  desc: '資料月份；未指定或不在範圍內時選最新達 80% 完整欄位覆蓋的月份，沒有月份達標才用最新月份',
+  default: '最新達 80% 完整覆蓋的月份',
+};
+const COVERAGE_FIELD: Field = {
+  name: 'coverage',
+  type: 'object',
+  desc: 'month、scope=tracked、tracked、withVisits、complete、lastUpdatedAt（真實資料時間）；tracked 為追蹤與該月收集名單聯集，complete 不使用估算。CSV 以前置 coverage_* 欄與 X-Coverage-* headers 提供相同值。',
 };
 const SITE_ROW: Field[] = [
   { name: 'sites[].rank', type: 'integer', desc: '依台灣造訪量（taiwanVisits）的名次，只在篩選後的網站之間計算' },
@@ -50,8 +57,8 @@ const SITE_ROW: Field[] = [
   { name: 'sites[].prevRank', type: 'integer | null', desc: '比較月份在同一篩選下的名次' },
   {
     name: 'sites[].visitsSource',
-    type: '"similarweb" | "manual" | "sheet"',
-    desc: '造訪量來源：Similarweb 免費資料、從 Similarweb 平台手動補登、GeneHong 試算表',
+    type: '"similarweb" | "manual" | "community" | "sheet"',
+    desc: '造訪量來源：Similarweb 免費資料、從 Similarweb 平台手動補登、可信社群節點、GeneHong 試算表',
   },
   { name: 'sites[].searchShare', type: 'number | null', desc: '自然搜尋占造訪的比例（0–1，不含付費搜尋）' },
   { name: 'sites[].aiShare', type: 'number | null', desc: 'GenAI 導流占比（0–1）' },
@@ -94,7 +101,13 @@ const SITE_ROW: Field[] = [
 const RANKING_PARAMS: Param[] = [
   { name: 'q', in: 'query', type: 'string', desc: '搜尋網站名稱或網域；先搜尋再套用筆數上限' },
   MONTH,
-  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，需同時有這些標籤（AND）' },
+  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，預設需同時有這些標籤（AND）' },
+  {
+    name: 'topicMode',
+    in: 'query',
+    type: '"and" | "or"',
+    desc: '多標籤比對方式，預設 and；首頁使用 or（符合任一包含的標籤即可），並繼續套用 exclude',
+  },
   {
     name: 'exclude',
     in: 'query',
@@ -141,6 +154,7 @@ export const ENDPOINTS: Endpoint[] = [
       { name: 'topics[].topic', type: 'string' },
       { name: 'topics[].sites', type: 'integer' },
       { name: 'sites', type: 'object[]', desc: '排行' },
+      COVERAGE_FIELD,
       ...SITE_ROW,
     ],
   },
@@ -167,12 +181,18 @@ export const ENDPOINTS: Endpoint[] = [
     example: '/api/v1/history',
     type: 'application/json',
     fields: [
-      { name: 'generatedAt', type: 'string (ISO 時間)' },
+      { name: 'generatedAt', type: 'string (ISO 時間)', desc: '回應組裝時間；資料最近異動見 coverage[month].lastUpdatedAt' },
+      {
+        name: 'coverage',
+        type: 'object',
+        desc: '依月份提供 month、scope=tracked、tracked、withVisits、complete、lastUpdatedAt；分母為 standing watches 與該月收集名單聯集。complete 使用原始欄位，估算不補欄位。',
+      },
+      { name: 'coverageThreshold', type: 'number', desc: '預設選月門檻 0.8' },
       { name: 'months', type: 'string[]', desc: 'YYYYMM，舊到新' },
       {
         name: 'fields',
         type: 'string[]',
-        desc: '每月陣列的欄位：造訪量、搜尋S、AI（百萬次）、台灣占比、來源（0 Similarweb、1 試算表、2 平台補登）、排名採用的台灣占比、其依據（0 實測、1 編輯者 1/N、2 較早月份、3 上限）、上限、是否因超過上限而改用上限（1 是）',
+        desc: '每月陣列的欄位：造訪量、搜尋S、AI（百萬次）、台灣占比、來源（0 Similarweb、1 試算表、2 平台補登、3 可信社群）、排名採用的台灣占比、其依據（0 實測、1 編輯者 1/N、2 較早月份、3 上限）、上限、是否因超過上限而改用上限（1 是）',
       },
       { name: 'topics', type: 'string[]', desc: '所有用到的標籤' },
       { name: 'sources', type: 'object[]', desc: '各追蹤來源的網域數（tag、blog、manual）' },
@@ -473,6 +493,46 @@ export const ENDPOINTS: Endpoint[] = [
     ],
   },
   {
+    id: 'contributors-upload',
+    method: 'POST',
+    group: '社群資料',
+    path: '/api/v1/contributors/upload',
+    summary: '提交社群節點觀察紀錄',
+    detail:
+      '需要維護者簽發的 15 分鐘 Bearer token。單筆或最多 100 筆陣列，整個 request 最多 1 MiB，每個 payload 最多 256 KiB；節點每分鐘 30 次。造訪量為整數次（不是百萬）。不接受 Cookie、裝置 ID、headers 或任何額外欄位。只接受已追蹤網域。2xx 來源必須有正整數 visits；失敗來源必須是空 payload。批次部分成功回 207，每筆有 ok/error；全成功 201。重送冪等。',
+    params: [],
+    example: '/api/v1/contributors/upload',
+    type: 'application/json',
+    fields: [
+      { name: 'accepted', type: 'integer' },
+      { name: 'rejected', type: 'integer' },
+      { name: 'results', type: 'object[]', desc: 'ok、idempotencyKey、duplicate、canonicalId、reason 或安全錯誤碼。回應順序與輸入一致。' },
+    ],
+  },
+  {
+    id: 'contributors',
+    group: '來源與狀態',
+    path: '/api/v1/contributors/{domain}',
+    summary: '查詢社群節點觀測與 canonical 選擇',
+    detail:
+      '只讀已保存的 contributor provenance；所有來源列都保留，canonical 依來源信任、欄位完整度與抓取時間決定。上傳需短期 token，不會由此端點觸發上游請求。',
+    params: [
+      { name: 'domain', in: 'path', type: 'string', desc: '網域，例如 example.com', required: true },
+      { name: 'month', in: 'query', type: 'string (YYYYMM)', desc: '只看指定月份' },
+    ],
+    example: '/api/v1/contributors/example.com?month=202610',
+    type: 'application/json',
+    fields: [
+      { name: 'domain', type: 'string' },
+      {
+        name: 'canonical',
+        type: 'object',
+        desc: '以月份為鍵的持久 canonical；來源信任被移除時為 null。enabled 決定是否納入前台，decisions 顯示寫入時理由與時間。',
+      },
+      { name: 'observations', type: 'object[]', desc: '所有來源列與 payload hash' },
+    ],
+  },
+  {
     id: 'collection',
     group: '抓取與服務',
     path: '/api/v1/collection',
@@ -539,7 +599,7 @@ export const apiIndex = (origin: string) => ({
   openapi: `${origin}/api/v1/openapi.json`,
   endpoints: Object.fromEntries(
     ENDPOINTS.map((e) => [
-      `GET ${e.path}${
+      `${e.method ?? 'GET'} ${e.path}${
         e.params.some((p) => p.in === 'query')
           ? `?${e.params
               .filter((p) => p.in === 'query')
@@ -574,11 +634,87 @@ export const openApi = (origin: string) => ({
     description: '台灣網站每月的 Similarweb 造訪估算、搜尋與 AI 導流、Cloudflare Radar 排名與標籤彙整。造訪量單位為百萬次，占比為 0–1。',
   },
   servers: [{ url: origin }],
+  components: {
+    securitySchemes: { contributorToken: { type: 'http', scheme: 'bearer', description: 'Node-bound HMAC token, valid for 15 minutes' } },
+    schemas: {
+      ContributorObservation: {
+        type: 'object',
+        additionalProperties: false,
+        required: [
+          'domain',
+          'targetMonth',
+          'fetchedAt',
+          'sourceNode',
+          'sourceVersion',
+          'schemaVersion',
+          'responseStatus',
+          'fields',
+          'payloadHash',
+          'payload',
+        ],
+        properties: {
+          domain: { type: 'string' },
+          targetMonth: { type: 'string', pattern: '^20[0-9]{2}(0[1-9]|1[0-2])$' },
+          fetchedAt: { type: 'string', format: 'date-time' },
+          sourceNode: { type: 'string', maxLength: 64 },
+          sourceVersion: { type: 'string', maxLength: 64 },
+          schemaVersion: { const: 1 },
+          responseStatus: { type: 'integer', minimum: 100, maximum: 599 },
+          fields: { type: 'array', items: { type: 'string' } },
+          payloadHash: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          payload: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              visits: { type: 'integer', minimum: 0 },
+              channels: {
+                type: 'object',
+                additionalProperties: false,
+                properties: Object.fromEntries(trafficChannels.map((key) => [key, { type: 'number', minimum: 0, maximum: 1 }])),
+                description: 'Known channel shares; total <= 1.001',
+              },
+              countries: {
+                type: 'array',
+                maxItems: 250,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  required: ['code', 'share'],
+                  properties: { code: { type: 'string', pattern: '^[A-Z]{2}$' }, share: { type: 'number', minimum: 0, maximum: 1 } },
+                },
+              },
+              bounceRate: { type: 'number', minimum: 0, maximum: 1 },
+              pagesPerVisit: { type: 'number', minimum: 0 },
+              timeOnSite: { type: 'number', minimum: 0 },
+            },
+          },
+        },
+      },
+    },
+  },
   paths: Object.fromEntries(
     ENDPOINTS.map((e) => [
       e.path,
       {
-        get: {
+        [(e.method ?? 'GET').toLowerCase()]: {
+          ...(e.method === 'POST'
+            ? {
+                security: [{ contributorToken: [] }],
+                requestBody: {
+                  required: true,
+                  content: {
+                    'application/json': {
+                      schema: {
+                        oneOf: [
+                          { $ref: '#/components/schemas/ContributorObservation' },
+                          { type: 'array', minItems: 1, maxItems: 100, items: { $ref: '#/components/schemas/ContributorObservation' } },
+                        ],
+                      },
+                    },
+                  },
+                },
+              }
+            : {}),
           operationId: e.id,
           tags: [e.group],
           summary: e.summary,
@@ -591,7 +727,7 @@ export const openApi = (origin: string) => ({
             schema: { type: 'string', ...(p.default && p.default !== '最新月份' ? { default: p.default } : {}) },
           })),
           responses: {
-            200: {
+            [e.method === 'POST' ? 201 : 200]: {
               description: e.summary,
               content: {
                 [e.type]: {
@@ -609,6 +745,14 @@ export const openApi = (origin: string) => ({
                 },
               },
             },
+            ...(e.method === 'POST'
+              ? {
+                  207: { description: 'Batch partially accepted; inspect each results[].ok' },
+                  400: { description: 'Invalid observation or batch' },
+                  401: { description: 'Missing, expired or invalid node token' },
+                  429: { description: 'Node rate limit; honor Retry-After' },
+                }
+              : {}),
             ...(e.params.some((p) => p.in === 'path') || e.id === 'topics-all' ? { 404: { description: '{"error": "..."}' } } : {}),
           },
         },
@@ -637,9 +781,9 @@ export function apiDocsPage(origin: string) {
           .map((f) => `<tr><td>${code(f.name)}</td><td>${html(f.type)}</td><td>${html(f.desc ?? '')}</td></tr>`)
           .join('')}</tbody></table></details>`
       : '';
-    return `<section class="doc-endpoint" id="${anchor(e)}"><h3><span class="method">GET</span><span class="path">${html(e.path)}</span></h3>
+    return `<section class="doc-endpoint" id="${anchor(e)}"><h3><span class="method">${e.method ?? 'GET'}</span><span class="path">${html(e.path)}</span></h3>
 <p class="doc-summary">${html(e.summary)}</p>${e.detail ? `<p class="note">${html(e.detail)}</p>` : ''}${params}
-<div class="doc-example"><pre><code>curl -s '${html(url)}'</code></pre><a href="${html(e.example)}" rel="noopener">在瀏覽器開啟這個範例 ↗</a></div>${fields}</section>`;
+${e.method === 'POST' ? '<p class="note">節點範例、標準化輸入與重試操作見專案 README。請以 Authorization: Bearer 傳送節點 token。</p>' : `<div class="doc-example"><pre><code>curl -s '${html(url)}'</code></pre><a href="${html(e.example)}" rel="noopener">在瀏覽器開啟這個範例 ↗</a></div>`}${fields}</section>`;
   };
   const quick = `# 2026 年 9 月的排行，排除「非台灣」，取前 10 名
 curl -s '${origin}/api/v1/rankings?month=202609&exclude=%E9%9D%9E%E5%8F%B0%E7%81%A3' | jq '.sites[:10][] | {rank, name, visits}'
@@ -657,7 +801,7 @@ for s in r.json()["sites"][:10]:
   const rules = [
     '未登入或已登入的非管理員，流量數值只提供兩位有效數字、國家只提供台灣，導流來源只提供自然搜尋、直接、連入、社群與 AI。',
     '非管理員的網站清單在任何篩選條件下最多回傳 30 筆，不提供載入更多；CSV 也適用。只有登入的管理員可查看完整資料與全部筆數。',
-    `基底網址 ${code(origin)}，全部是 ${code('GET')}，回傳 UTF-8 JSON（CSV 與圖示除外）。不需要 API 金鑰。`,
+    `基底網址 ${code(origin)}，查詢使用 ${code('GET')}，回傳 UTF-8 JSON（CSV 與圖示除外），不需要 API 金鑰。社群上傳使用 POST，必須提供節點 Bearer token。`,
     `允許跨網域（CORS ${code('Access-Control-Allow-Origin: *')}），瀏覽器前端可直接呼叫。`,
     `造訪量單位是<b>百萬次</b>（${code('757.3')} ＝ 757.3m）；占比與成長率是 0–1 的小數（${code('0.36')} ＝ 36%）；月份寫成 ${code('YYYYMM')}；時間一律是 UTC 的 ISO 8601。`,
     `數字是 Similarweb 的造訪估算，不是 page views。Similarweb 沒有估算的月份改用從 Similarweb 平台補登的數字或 GeneHong 試算表，以 ${code('visitsSource')} 標明；Similarweb 回傳 0 視為沒有估算。`,
@@ -671,7 +815,7 @@ for s in r.json()["sites"][:10]:
     .map(
       (g) =>
         `<a href="#group-${html(g)}">${html(g)}</a>${ENDPOINTS.filter((e) => e.group === g)
-          .map((e) => `<a class="sub" href="#${anchor(e)}">GET ${html(e.path)}</a>`)
+          .map((e) => `<a class="sub" href="#${anchor(e)}">${e.method ?? 'GET'} ${html(e.path)}</a>`)
           .join('')}`,
     )
     .join('')}</nav>`;
@@ -686,7 +830,7 @@ for s in r.json()["sites"][:10]:
 <section class="block" id="rules"><h2>使用規則</h2><ul class="doc-rules">${rules.map((r) => `<li>${r}</li>`).join('')}</ul></section>
 <section class="block" id="quick"><h2>快速開始</h2><p class="note">命令列（curl + jq）</p><pre><code>${html(quick)}</code></pre><p class="note">JavaScript（瀏覽器或 Node 18+）</p><pre><code>${html(js)}</code></pre><p class="note">Python</p><pre><code>${html(py)}</code></pre></section>
 <section class="block" id="list"><h2>端點一覽</h2><table class="doc-table"><thead><tr><th>端點</th><th>用途</th></tr></thead><tbody>${ENDPOINTS.map(
-      (e) => `<tr><td><a href="#${anchor(e)}">${code(`GET ${e.path}`)}</a></td><td>${html(e.summary)}</td></tr>`,
+      (e) => `<tr><td><a href="#${anchor(e)}">${code(`${e.method ?? 'GET'} ${e.path}`)}</a></td><td>${html(e.summary)}</td></tr>`,
     ).join('')}</tbody></table></section>
 ${groups
   .map(

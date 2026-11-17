@@ -212,7 +212,7 @@ describe('fetching a homepage', () => {
     };
     expect(await scanDomain('k.example', rules, plain('timeout'), at, refused)).toMatchObject({ status: 'failed', errorCode: 'timeout' });
   });
-  it('tries the browser after a WAF page or 429 but not after an HTTP error, and keeps the plain result when the browser fails too', async () => {
+  it('does not retry WAF, rate limits or HTTP errors in a browser', async () => {
     const plain = (status: number) => homepageFetcher(net({ 'https://f.example/': { status } }).get);
     const browser = async () => ({
       url: 'https://f.example/',
@@ -220,19 +220,16 @@ describe('fetching a homepage', () => {
       headers: {},
       html: '<meta name="generator" content="Hugo 0.1">',
     });
-    const failing = async (): Promise<never> => {
-      throw new ScanFailure('network');
-    };
     let used = 0;
     const counted = async () => {
       used++;
       return browser();
     };
-    expect(await scanDomain('f.example', rules, plain(403), at, browser)).toMatchObject({
-      status: 'detected',
-      detections: [{ id: 'hugo' }],
+    expect(await scanDomain('f.example', rules, plain(403), at, counted)).toMatchObject({
+      status: 'blocked',
+      errorCode: 'waf',
     });
-    expect(await scanDomain('f.example', rules, plain(429), at, failing)).toMatchObject({ status: 'blocked', errorCode: 'rate-limit' });
+    expect(await scanDomain('f.example', rules, plain(429), at, counted)).toMatchObject({ status: 'blocked', errorCode: 'rate-limit' });
     expect(await scanDomain('f.example', rules, plain(503), at, counted)).toMatchObject({ status: 'failed', errorCode: 'http-error' });
     expect(used).toBe(0);
   });

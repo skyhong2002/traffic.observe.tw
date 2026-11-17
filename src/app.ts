@@ -15,6 +15,17 @@ import {
 import { collectionPage, validCollectionSort, validCollectionSource } from './collection-pages.ts';
 import { type CollectionReportQuery, collectionReportPage, loadCollectionReport } from './collection-report.ts';
 import {
+  communityEnabled,
+  communityProfile,
+  contributorObservations,
+  contributorTrust,
+  loadCommunity,
+  saveContributorPayload,
+  validateContributorPayload,
+  verifyContributorToken,
+} from './contributor.ts';
+import { COVERAGE_THRESHOLD, defaultCoverageMonth, loadMonthCoverage } from './coverage.ts';
+import {
   cleanTag,
   loadCrowd,
   overridesOf,
@@ -72,6 +83,7 @@ import {
   whoSlot,
 } from './pages.ts';
 import { lastRadarRun, loadRadar } from './radar.ts';
+import { releaseRevision } from './release.ts';
 import { reportComparison } from './report-comparison.ts';
 import { addWatches, fetchStates, lookupResults, MANUAL, removeWatch, setWatchList, submitLookup, watchList } from './requests.ts';
 import { fetchProblems, runConfig } from './scheduler.ts';
@@ -84,6 +96,7 @@ import { STYLE, STYLE_HREF, TABLES_HREF, TABLES_SCRIPT } from './style.ts';
 import { latestTopics } from './tags.ts';
 import { activeRules, PRODUCTS } from './tech.ts';
 import { browserFetcher } from './tech-browser.ts';
+import { loadManualTech, manualTechPage, saveManualTech } from './tech-manual.ts';
 import { techDomainPage, techOverview, techPage, techSection } from './tech-pages.ts';
 import { checkNow, knownTechDomains, lastTechRun, loadTech, type TechRecord } from './tech-scan.ts';
 import { aggregateTopics } from './topics.ts';
@@ -162,19 +175,23 @@ export function buildApp(
   );
   const editors = registerLogin(app, pool, login, { exchange });
   app.addHook('preHandler', (request, reply, done) => {
-    if (request.url.startsWith('/internal/')) return done();
+    const path = request.url.split('?')[0];
+    if (path.startsWith('/internal/') || path === '/healthz' || path === '/readyz') return done();
     editors.currentUser(request).then((user) => {
       reply.header('cache-control', 'private, no-store').header('vary', 'Cookie');
       trafficAccess.run(Boolean(user && editors.isEditor(user.email)), done);
     }, done);
   });
-  app.addHook('preSerialization', async (_request, _reply, payload) => publicTraffic(payload));
+  app.addHook('preSerialization', async (request, _reply, payload) =>
+    request.url.split('?')[0] === '/api/v1/openapi.json' ? payload : publicTraffic(payload),
+  );
   // Every page's header shows the sign-in state; pages themselves stay unaware of it.
   app.addHook('onSend', async (request, reply, payload) => {
     if (typeof payload !== 'string' || !payload.includes('<!--who-->')) return payload;
     const user = await editors.currentUser(request);
     if (user) reply.header('cache-control', 'private, no-store');
-    return payload.replace('<!--who-->', whoSlot(user, editors.enabled, request.url, Boolean(user && editors.isEditor(user.email))));
+    const rendered = !user || !editors.isEditor(user.email) ? payload.replace(/<div><h2>管理<\/h2>.*?<\/div>/g, '') : payload;
+    return rendered.replace('<!--who-->', whoSlot(user, editors.enabled, request.url, Boolean(user && editors.isEditor(user.email))));
   });
 
   // monthView reads a few thousand rows; pages and the API share one short-lived copy per month.
@@ -187,9 +204,19 @@ export function buildApp(
     views.set(month, fresh);
     return fresh.view;
   };
+  const coverageCache = new Map<string, { at: number; data: ReturnType<typeof loadMonthCoverage> }>();
+  const coverageFor = (months: string[]) => {
+    const key = [...months].sort().join(',');
+    const hit = coverageCache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
+    const data = loadMonthCoverage(pool, months);
+    data.catch(() => coverageCache.delete(key));
+    coverageCache.set(key, { at: Date.now(), data });
+    return data;
+  };
   const pickMonth = async (raw: unknown) => {
     const months = await availableMonths(pool);
-    const month = typeof raw === 'string' && months.includes(raw) ? raw : (months[0] ?? null);
+    const month = typeof raw === 'string' && months.includes(raw) ? raw : defaultCoverageMonth(months, await coverageFor(months));
     return { months, month };
   };
   const topicList = (list: SiteMonth[]) =>
@@ -236,7 +263,7 @@ export function buildApp(
     const list = only ? all.filter((s) => only.has(s.domain)) : all;
     // Tag chips count before exclusion, so an excluded tag stays on the page to bring back.
     const topics = topicList(list);
-    // topic may list several tags (comma-separated); a site must carry all of them.
+    // Multi-tag API requests default to AND; the homepage explicitly requests OR.
     const wanted = [
       ...new Set(
         String(query.topic ?? '')
@@ -253,7 +280,9 @@ export function buildApp(
           .filter(Boolean),
       ),
     ].filter((t) => !wanted.includes(t));
-    const kept = list.filter((s) => wanted.every((t) => s.topics.includes(t)) && !s.topics.some((t) => exclude.includes(t)));
+    const matchesTopics = (tags: string[]) =>
+      !wanted.length || (query.topicMode === 'or' ? wanted.some((t) => tags.includes(t)) : wanted.every((t) => tags.includes(t)));
+    const kept = list.filter((s) => matchesTopics(s.topics) && !s.topics.some((t) => exclude.includes(t)));
     // The comparison month (the nearest earlier month by default): growth, the earlier rank and every share's change are against it.
     const older = months.filter((m) => m < month);
     const from =
@@ -263,17 +292,27 @@ export function buildApp(
         ? query.from
         : (older[0] ?? null);
     const previous = (from ? await view(from) : []).filter(
-      (site) =>
-        (!only || only.has(site.domain)) &&
-        wanted.every((tag) => site.topics.includes(tag)) &&
-        !site.topics.some((tag) => exclude.includes(tag)),
+      (site) => (!only || only.has(site.domain)) && matchesTopics(site.topics) && !site.topics.some((tag) => exclude.includes(tag)),
     );
     const compared = reportComparison(kept, previous, includePreviousOnly);
     const queryText = (query.q ?? '').trim().toLowerCase();
     const placed = limitRows(compared.filter((s) => !queryText || `${s.name} ${s.domain}`.toLowerCase().includes(queryText)));
     const show: 'share' | 'change' = query.show === 'change' && from ? 'change' : 'share';
     const unit: 'share' | 'count' | 'tw' = query.unit === 'count' || query.unit === 'tw' ? query.unit : 'share';
-    return { months, month, from, show, unit, topics, topic, exclude, source, sources, list: placed };
+    return {
+      months,
+      month,
+      from,
+      show,
+      unit,
+      topics,
+      topic,
+      exclude,
+      source,
+      sources,
+      list: placed,
+      coverage: (await coverageFor([month]))[month],
+    };
   };
 
   type RankingQuery = {
@@ -283,6 +322,7 @@ export function buildApp(
     show?: string;
     unit?: string;
     topic?: string;
+    topicMode?: string;
     exclude?: string;
     source?: string;
   };
@@ -354,6 +394,7 @@ export function buildApp(
         admin: editors.isEditor(voter),
       });
       views.clear();
+      coverageCache.clear();
       historyCache = null;
       contextCache = null;
       return { tag: done };
@@ -466,6 +507,7 @@ export function buildApp(
       );
       request.log.info({ by: editor.email, domain: site.domain, month, remove }, 'manual month saved');
       views.clear();
+      coverageCache.clear();
       historyCache = null;
       contextCache = null;
       return reply.redirect(`/site/${site.domain}/manual/?done=${remove ? 'deleted' : 'saved'}&month=${month}`, 303);
@@ -492,6 +534,7 @@ export function buildApp(
           single: { domain: site.domain, name: body.name, topics: body.topics, revision: Number(body.revision) },
         });
         views.clear();
+        coverageCache.clear();
         historyCache = null;
         contextCache = null;
         return reply.redirect(`/site/${site.domain}/edit/?saved=1`, 303);
@@ -520,6 +563,7 @@ export function buildApp(
       const domains = request.body.domains.split(/[\s,]+/).filter(Boolean);
       const count = await editSites(pool, editor.email, { domains, add: request.body.add ?? '', remove: request.body.remove ?? '' });
       views.clear();
+      coverageCache.clear();
       historyCache = null;
       contextCache = null;
       return reply.redirect(`/sites/?updated=${count}`, 303);
@@ -532,10 +576,23 @@ export function buildApp(
     }
   });
 
-  app.get('/healthz', async () => ({ ok: true }));
+  app.get('/healthz', async () => ({ ok: true, sourceCommit: releaseRevision() }));
   // Whether Similarweb fetching works, for status.skyhong.tw: 503 with the problems when it does not.
   app.get('/readyz', async (_request, reply) => {
-    const problems = await fetchProblems(pool, config);
+    let timer: NodeJS.Timeout | undefined;
+    let problems: string[];
+    try {
+      problems = await Promise.race([
+        rows(pool, 'SELECT 1').then(() => fetchProblems(pool, config)),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(Error('dependency timeout')), 2000);
+        }),
+      ]);
+    } catch {
+      problems = ['database or readiness dependency unavailable'];
+    } finally {
+      clearTimeout(timer);
+    }
     reply.header('cache-control', 'no-store').code(problems.length ? 503 : 200);
     return problems.length ? { status: 'not_ready', problems } : { status: 'ready' };
   });
@@ -577,6 +634,11 @@ export function buildApp(
   // robots.txt, the sitemap, canonical links, and noindex on everything that is not a public entry page.
   registerSeo(app);
 
+  app.setNotFoundHandler((request, reply) => {
+    if (!request.url.startsWith('/api/') && !request.url.startsWith('/internal/') && request.headers.accept?.includes('text/html'))
+      return reply.code(404).type('text/html').send(notFoundPage('找不到這個頁面'));
+    return reply.code(404).send({ error: 'not_found' });
+  });
   // Pages.
   // The report: any two months compared, sources and topics filtered, rank trajectories per topic.
   app.get('/', async (_request, reply) => {
@@ -596,6 +658,7 @@ export function buildApp(
           from: r.from,
           show: r.show,
           unit: r.unit,
+          coverage: r.coverage,
         })
       : rankingPage('', [], [], null, []);
   });
@@ -650,7 +713,7 @@ export function buildApp(
           : {},
         message: typeof request.query.tags === 'string' ? request.query.tags : undefined,
       },
-      techSection(site.domain, tech),
+      techSection(site.domain, tech, (await loadManualTech(pool, [site.domain])).get(site.domain) ?? []),
     );
   });
   // Votes, added tags and admin overrides from the site page's tag block; back to the block afterwards.
@@ -674,15 +737,25 @@ export function buildApp(
   );
   // Technologies on each site's homepage (tech-scan.ts runs in the worker). The overview reads every record, so one
   // copy serves for CACHE_MS; a check from /tech/<domain>/ clears it.
-  let techCache: { at: number; data: Promise<{ domains: string[]; names: Map<string, string>; records: Map<string, TechRecord> }> } | null =
-    null;
+  let techCache: {
+    at: number;
+    data: Promise<{
+      domains: string[];
+      names: Map<string, string>;
+      records: Map<string, TechRecord>;
+      manual: Awaited<ReturnType<typeof loadManualTech>>;
+    }>;
+  } | null = null;
   const techData = () => {
     if (techCache && Date.now() - techCache.at < CACHE_MS) return techCache.data;
-    const data = Promise.all([knownTechDomains(pool), tagContext(), loadTech(pool)]).then(([domains, { sites }, records]) => ({
-      domains,
-      names: new Map([...sites].map(([d, site]) => [d, site.name])),
-      records,
-    }));
+    const data = Promise.all([knownTechDomains(pool), tagContext(), loadTech(pool), loadManualTech(pool)]).then(
+      ([domains, { sites }, records, manual]) => ({
+        domains,
+        names: new Map([...sites].map(([d, site]) => [d, site.name])),
+        records,
+        manual,
+      }),
+    );
     data.catch(() => {
       techCache = null;
     });
@@ -691,8 +764,8 @@ export function buildApp(
   };
   type TechQuery = { source?: string; category?: string; technology?: string; status?: string };
   const overview = async (query: TechQuery) => {
-    const [{ domains, names, records }, lists] = await Promise.all([techData(), watched()]);
-    return techOverview(domains, names, records, lists, query);
+    const [{ domains, names, records, manual }, lists] = await Promise.all([techData(), watched()]);
+    return techOverview(domains, names, records, lists, query, undefined, manual);
   };
   // Checks asked for on /tech/<domain>/: ten an hour per account, so the page is not a free crawler.
   const checks = new Map<string, number[]>();
@@ -721,11 +794,42 @@ export function buildApp(
       loadTech(pool, [domain]).then((m) => m.get(domain) ?? null),
       editors.currentUser(request),
     ]);
-    return techDomainPage(domain, names.get(domain) ?? null, record, domains.includes(domain), {
-      loginEnabled: editors.enabled,
-      signedIn: !!user,
-      message: request.query.done,
-    });
+    return techDomainPage(
+      domain,
+      names.get(domain) ?? null,
+      record,
+      domains.includes(domain),
+      {
+        loginEnabled: editors.enabled,
+        signedIn: !!user,
+        editor: !!user && editors.isEditor(user.email),
+        message: request.query.done,
+      },
+      (await loadManualTech(pool, [domain])).get(domain) ?? [],
+    );
+  });
+  app.get<{ Params: { domain: string } }>('/tech/:domain/manual/', async (request, reply) => {
+    if (!(await requireEditor(request, reply, request.url))) return reply;
+    const domain = publicDomain(request.params.domain);
+    if (!domain || !(await knownTechDomains(pool)).includes(domain)) return reply.code(404).send({ error: 'unknown_domain' });
+    return reply.type('text/html').send(manualTechPage(domain, (await loadManualTech(pool, [domain])).get(domain) ?? []));
+  });
+  app.post<{ Params: { domain: string }; Body: Record<string, unknown> }>('/tech/:domain/manual/', async (request, reply) => {
+    const editor = await requireEditor(request, reply, request.url);
+    if (!editor) return reply;
+    const domain = publicDomain(request.params.domain);
+    if (!domain || !(await knownTechDomains(pool)).includes(domain)) return reply.code(404).send({ error: 'unknown_domain' });
+    try {
+      await saveManualTech(pool, domain, editor.email, request.body ?? {});
+      techCache = null;
+      return reply.redirect(`/tech/${domain}/`, 303);
+    } catch (error) {
+      if (!(error instanceof EditError)) throw error;
+      return reply
+        .code(400)
+        .type('text/html')
+        .send(manualTechPage(domain, (await loadManualTech(pool, [domain])).get(domain) ?? [], error.message));
+    }
   });
   app.post<{ Params: { domain: string } }>('/tech/:domain/check', async (request, reply) => {
     reply.header('cache-control', 'no-store');
@@ -973,14 +1077,36 @@ export function buildApp(
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings', async (request, reply) => {
     const r = publicTraffic(await rankingFor(request.query));
     if (!r) return reply.code(404).send({ error: 'no_data' });
-    return { month: r.month, from: r.from, topic: r.topic, exclude: r.exclude, source: r.source, topics: r.topics, sites: r.list };
+    return {
+      month: r.month,
+      from: r.from,
+      topic: r.topic,
+      exclude: r.exclude,
+      source: r.source,
+      topics: r.topics,
+      coverage: r.coverage,
+      coverageThreshold: COVERAGE_THRESHOLD,
+      sites: r.list,
+    };
   });
   app.get<{ Querystring: RankingQuery }>('/api/v1/rankings.csv', async (request, reply) => {
     const r = publicTraffic(await rankingFor(request.query, true));
     if (!r) return reply.code(404).send({ error: 'no_data' });
     const cell = (v: unknown) =>
       v === null || v === undefined ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v);
+    reply
+      .header('x-coverage-month', r.coverage.month)
+      .header('x-coverage-scope', r.coverage.scope)
+      .header('x-coverage-last-updated-at', r.coverage.lastUpdatedAt ?? '')
+      .header('x-coverage-threshold', String(COVERAGE_THRESHOLD))
+      .header('x-coverage-tracked', String(r.coverage.tracked))
+      .header('x-coverage-with-visits', String(r.coverage.withVisits))
+      .header('x-coverage-complete', String(r.coverage.complete));
     const head = [
+      '觀測總數',
+      '本月有資料',
+      '完整網域數',
+      '資料最後更新',
       '名次',
       '網站名',
       '網域',
@@ -1024,6 +1150,10 @@ export function buildApp(
     ];
     const body = r.list.map((s) =>
       [
+        r.coverage.tracked,
+        r.coverage.withVisits,
+        r.coverage.complete,
+        r.coverage.lastUpdatedAt,
         s.rank,
         s.name,
         s.domain,
@@ -1124,10 +1254,107 @@ export function buildApp(
   app.get<{ Params: { domain: string } }>('/api/v1/tech/:domain', async (request, reply) => {
     const domain = publicDomain(request.params.domain);
     const record = domain ? (await loadTech(pool, [domain])).get(domain) : undefined;
-    if (!record) return reply.code(404).send({ error: 'not_found' });
-    return record;
+    const manual = domain ? ((await loadManualTech(pool, [domain])).get(domain) ?? []) : [];
+    if (!record && !manual.length) return reply.code(404).send({ error: 'not_found' });
+    return record ?? { domain, status: null, manual };
   });
   app.get('/api/v1/status', async () => serviceStatus(pool, config));
+  // Community nodes submit provenance-bearing observations with a short-lived
+  // HMAC token. The endpoint never receives credentials, cookies, or request
+  // headers from the upstream provider.
+  const uploads = new Map<string, { window: number; count: number }>();
+  app.post<{ Body: unknown }>('/api/v1/contributors/upload', { bodyLimit: 1024 * 1024 }, async (request, reply) => {
+    const token =
+      typeof request.headers.authorization === 'string' && request.headers.authorization.startsWith('Bearer ')
+        ? request.headers.authorization.slice(7)
+        : null;
+    const node = verifyContributorToken(token);
+    if (!node) return reply.code(401).send({ error: 'invalid_contributor_token' });
+    const window = Math.floor(Date.now() / 60_000);
+    for (const [key, state] of uploads) if (state.window !== window) uploads.delete(key);
+    const state = uploads.get(node) ?? { window, count: 0 };
+    if (++state.count > 30) return reply.code(429).header('retry-after', '60').send({ error: 'upload_rate_limit' });
+    uploads.set(node, state);
+    const isBatch = Array.isArray(request.body);
+    const input: unknown[] = isBatch ? (request.body as unknown[]) : [request.body];
+    if (!input.length || input.length > 100) return reply.code(400).send({ error: 'invalid_batch' });
+    const results = [];
+    for (const row of input) {
+      const checked = validateContributorPayload(row, node);
+      if (!checked.ok) {
+        await pool.query('INSERT INTO contributor_rejections (source_node, reason, field, received_at) VALUES (?, ?, ?, ?)', [
+          node,
+          checked.error,
+          checked.field ?? null,
+          new Date(),
+        ]);
+        if (!isBatch) return reply.code(400).send(checked);
+        results.push(checked);
+        continue;
+      }
+      const [watched] = await rows(pool, "SELECT domain FROM watches WHERE domain = ? AND kind = 'watch' LIMIT 1", [
+        checked.payload.domain,
+      ]);
+      if (!watched) {
+        await pool.query('INSERT INTO contributor_rejections (source_node, reason, received_at) VALUES (?, ?, ?)', [
+          node,
+          'untracked_domain',
+          new Date(),
+        ]);
+        const failure = { ok: false, error: 'untracked_domain' };
+        if (!isBatch) return reply.code(400).send(failure);
+        results.push(failure);
+        continue;
+      }
+      const saved = await saveContributorPayload(pool, checked.payload);
+      request.log.info(
+        { node, domain: checked.payload.domain, month: checked.payload.targetMonth, duplicate: saved.duplicate },
+        'contributor observation accepted',
+      );
+      views.clear();
+      coverageCache.clear();
+      historyCache = null;
+      results.push({ ok: true, ...saved });
+    }
+    const accepted = results.filter((row) => row.ok).length;
+    return reply
+      .code(accepted === results.length ? 201 : 207)
+      .send({ ok: accepted === results.length, accepted, rejected: results.length - accepted, results });
+  });
+  app.get<{ Params: { domain: string }; Querystring: { month?: string } }>('/api/v1/contributors/:domain', async (request, reply) => {
+    const domain = publicDomain(request.params.domain);
+    if (!domain) return reply.code(400).send({ error: 'invalid_domain' });
+    const month = request.query.month;
+    if (month !== undefined && !validCollectionMonth(month)) return reply.code(400).send({ error: 'invalid_month' });
+    const observations = await contributorObservations(pool, domain, month);
+    const decisions = await rows<{ target_month: string; observation_id: number | null; reason: string; updated_at: Date }>(
+      pool,
+      `SELECT target_month, observation_id, reason, updated_at FROM contributor_canonical WHERE domain = ?${month ? ' AND target_month = ?' : ''}`,
+      month ? [domain, month] : [domain],
+    );
+    const trust = contributorTrust();
+    const canonical = Object.fromEntries(
+      decisions.map((decision) => {
+        const chosen = observations.find((r) => r.id === Number(decision.observation_id));
+        return [decision.target_month, chosen && (trust[chosen.sourceNode] ?? 0) > 0 ? chosen : null];
+      }),
+    );
+    return {
+      domain,
+      month: month ?? null,
+      enabled: communityEnabled(),
+      selection: 'trusted positive score, field count, freshest, stable node/hash; automatic > manual > community > sheet',
+      trust: Object.fromEntries([...new Set(observations.map((r) => r.sourceNode))].map((node) => [node, contributorTrust()[node] ?? 0])),
+      canonical,
+      decisions: Object.fromEntries(
+        decisions.map((r) => [
+          r.target_month,
+          { observationId: r.observation_id, reason: r.reason, decidedAt: r.updated_at.toISOString() },
+        ]),
+      ),
+      observations: limitRows(observations),
+    };
+  });
   app.get<{ Querystring: { month?: string } }>('/api/v1/collection', async (request, reply) => {
     const month = request.query.month ?? collectionMonth(config);
     if (!validCollectionMonth(month)) return reply.code(400).send({ error: 'invalid month' });
@@ -1279,6 +1506,7 @@ export function buildApp(
     const changed = await setAiTags(pool, requester, list);
     if (changed) {
       views.clear();
+      coverageCache.clear();
       historyCache = null;
       contextCache = null;
     }
@@ -1366,7 +1594,7 @@ export function buildApp(
 }
 
 export async function siteData(pool: Pool, domain: string): Promise<SitePage | null> {
-  const [traffic, labels, watchers, [state], radar, metadata, manual, crowd, crux] = await Promise.all([
+  const [traffic, labels, watchers, [state], radar, metadata, manual, crowd, crux, community] = await Promise.all([
     loadTraffic(pool, [domain]),
     rows<{
       month: string;
@@ -1403,23 +1631,42 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
     loadManualMonths(pool, { domain }),
     loadCrowd(pool, [domain]),
     loadCrux(pool, [domain]),
+    loadCommunity(pool, undefined, [domain]),
   ]);
   const t = traffic.get(domain);
-  if (!t && !labels.length && !watchers.length && !radar.size && !metadata.has(domain) && !manual.length && !crowd.size) return null;
+  if (
+    !t &&
+    !labels.length &&
+    !watchers.length &&
+    !radar.size &&
+    !metadata.has(domain) &&
+    !manual.length &&
+    !crowd.size &&
+    !community.length
+  )
+    return null;
   const custom = metadata.get(domain)?.topics;
   const tags = resolveTags(
     custom ?? latestTopics(labels.map((l) => ({ ...l, group: l.group_label }))),
     crowd.get(domain),
     custom ? 'editor' : 'sheet',
   );
+  const contributions = new Map(community.map((r) => [r.targetMonth, r]));
   const byHand = new Map(manual.map((m) => [m.month, m]));
   const sheetByMonth = new Map<string, (typeof labels)[number]>();
   for (const l of labels) if (!sheetByMonth.has(l.month) || sheetByMonth.get(l.month)?.adjusted) sheetByMonth.set(l.month, l);
-  const months = [...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys(), ...byHand.keys()])].sort();
+  const months = [
+    ...new Set([...(t?.monthly.map((m) => m.month) ?? []), ...sheetByMonth.keys(), ...byHand.keys(), ...contributions.keys()]),
+  ].sort();
   const profiles = (t?.profiles ?? {}) as Record<string, TrafficProfile>;
   const profiled = Object.values(profiles)
     .filter((p) => t?.monthly.some((m) => m.month === p.month && estimated(m.visits)))
     .concat(manual.filter((m) => !t?.monthly.some((v) => v.month === m.month && estimated(v.visits))).map(manualProfile))
+    .concat(
+      community
+        .filter((c) => !byHand.has(c.targetMonth) && !t?.monthly.some((m) => m.month === c.targetMonth && estimated(m.visits)))
+        .map(communityProfile),
+    )
     .sort((a, b) => a.month.localeCompare(b.month));
   const raw = state?.result;
   const summary = (typeof raw === 'string' ? JSON.parse(raw) : raw) as { category?: string | null; similarSites?: string[] } | null;
@@ -1450,15 +1697,25 @@ export async function siteData(pool: Pool, domain: string): Promise<SitePage | n
       const p = noEstimate ? undefined : profiles[month];
       // As in the rankings: Similarweb, then a month entered from its platform, then the sheet.
       const hand = sw && !noEstimate ? undefined : byHand.get(month);
+      const c = contributions.get(month);
+      const cp = !hand && (!sw || noEstimate) && c ? communityProfile(c) : null;
       return {
+        community: c?.payload.visits ? c.payload.visits / 1e6 : null,
+        provenance: c ? { sourceNode: c.sourceNode, fetchedAt: c.fetchedAt, payloadHash: c.payloadHash, adopted: !!cp } : null,
         month,
         similarweb: sw && !noEstimate ? sw.visits / 1e6 : null,
         noEstimate,
         manual: byHand.has(month) ? (byHand.get(month)?.visits ?? 0) / 1e6 : null,
         sheet: sh && !sh.adjusted ? sh.visits : null,
-        searchShare: p ? searchShare(p) : hand ? hand.searchShare : (sh?.search_share ?? null),
-        aiShare: p ? aiShare(p) : hand ? hand.aiShare : (sh?.ai_share ?? null),
-        taiwanShare: p ? taiwanShare(p) : hand ? hand.taiwanShare : (sh?.taiwan_share ?? null),
+        searchShare: p ? searchShare(p) : hand ? hand.searchShare : cp ? (cp.channels.SearchOrganic ?? null) : (sh?.search_share ?? null),
+        aiShare: p ? aiShare(p) : hand ? hand.aiShare : cp ? (cp.channels.GenAi ?? null) : (sh?.ai_share ?? null),
+        taiwanShare: p
+          ? taiwanShare(p)
+          : hand
+            ? hand.taiwanShare
+            : cp
+              ? (cp.countries.find((r) => r.code === 'TW')?.share ?? null)
+              : (sh?.taiwan_share ?? null),
       };
     }),
     // The newest month Similarweb profiled with an estimate: rank, engagement, every channel and the top countries.

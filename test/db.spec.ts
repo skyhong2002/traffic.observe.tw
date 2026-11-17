@@ -685,7 +685,8 @@ describe.skipIf(!url)('with a database', () => {
     const without = (await server.inject(`/api/v1/rankings?month=202609&exclude=${encodeURIComponent('新聞')}`)).json();
     expect(without.exclude).toEqual(['新聞']);
     expect(without.sites.map((s: { domain: string; rank: number }) => [s.domain, s.rank])).toEqual([['b.com.tw', 1]]);
-    expect((await server.inject(`/table/?month=202609&exclude=${encodeURIComponent('新聞')}`)).body).toContain('排除 新聞');
+    const excludedTable = load((await server.inject(`/table/?month=202609&exclude=${encodeURIComponent('新聞')}`)).body);
+    expect(excludedTable('a.chip-filter.excluded').text()).toContain('新聞');
     expect((await server.inject('/site/a.com.tw/')).body).toContain('清楚的名稱');
     expect((await server.inject('/api/v1/sites/a.com.tw')).json()).toMatchObject({ name: '清楚的名稱', topics: ['台灣', '新聞', '社群'] });
     expect((await server.inject('/api/v1/topics/all?topic=新聞')).json().sites.map((s: { domain: string }) => s.domain)).toEqual([
@@ -714,6 +715,17 @@ describe.skipIf(!url)('with a database', () => {
     // Several tags in topic are ANDed: only a.com.tw carries 新聞 as well as 部落格.
     const both = (await server.inject(`/api/v1/rankings?month=202609&topic=${encodeURIComponent('新聞,部落格')}`)).json();
     expect(both.sites.map((s: { domain: string; rank: number }) => [s.domain, s.rank])).toEqual([['a.com.tw', 1]]);
+    const unionQuery = `month=202609&topic=${encodeURIComponent('新聞,部落格')}&topicMode=or`;
+    const union = (await server.inject(`/api/v1/rankings?${unionQuery}`)).json();
+    expect(union.sites.map((s: { domain: string }) => s.domain).sort()).toEqual(['a.com.tw', 'b.com.tw']);
+    const unionHistory = (await server.inject(`/api/v1/history?${unionQuery}`)).json();
+    expect(Object.keys(unionHistory.sites).sort()).toEqual(['a.com.tw', 'b.com.tw']);
+    const unionCsv = await server.inject(`/api/v1/rankings.csv?${unionQuery}`);
+    expect(unionCsv.body).toContain('a.com.tw');
+    expect(unionCsv.body).toContain('b.com.tw');
+    const excluded = (await server.inject(`/api/v1/rankings?${unionQuery}&exclude=${encodeURIComponent('社群')}`)).json();
+    expect(excluded.sites.map((s: { domain: string }) => s.domain)).toEqual(['b.com.tw']);
+
     expect((await form('/sites/', { domains: 'missing.tw', add: '新聞', remove: '' })).statusCode).toBe(400);
     expect(await rows(pool, 'SELECT * FROM site_metadata_log')).toHaveLength(3);
     // Independent batches must merge against the latest committed tags.
@@ -726,8 +738,8 @@ describe.skipIf(!url)('with a database', () => {
     );
     // Both sites now carry 非台灣: the pages leave them out until told otherwise; the API leaves nothing out unless asked.
     const fresh = app();
-    expect((await fresh.inject('/table/?month=202609')).body).toContain('排除 非台灣');
-    expect((await fresh.inject('/table/?month=202609&exclude=')).body).not.toContain('排除 非台灣');
+    expect(load((await fresh.inject('/table/?month=202609')).body)('a.chip-filter.excluded').text()).toContain('非台灣');
+    expect(load((await fresh.inject('/table/?month=202609&exclude=')).body)('a.chip-filter.excluded')).toHaveLength(0);
     expect((await fresh.inject('/api/v1/rankings?month=202609')).json().exclude).toEqual([]);
     await fresh.close();
     await server.close();
@@ -1083,7 +1095,13 @@ describe.skipIf(!url)('with a database', () => {
     const shares = (await server.inject('/table/?month=202609')).body;
     expect(shares).not.toContain('>郵件 %</th>');
     expect(shares).toContain('aria-label="數值"');
-    expect(shares.indexOf('</table>')).toBeLessThan(shares.indexOf('table-note'));
+    const tablePage = load(shares);
+    expect(tablePage('.table-note')).toHaveLength(0);
+    expect(tablePage('#method[open]')).toHaveLength(0);
+    expect(tablePage('#method').text()).toContain('台灣占比低的網站誤差較大');
+    expect(tablePage('main .coverage-note')).toHaveLength(0);
+    expect(tablePage('.coverage-disclosure[open]')).toHaveLength(0);
+    expect(tablePage('.coverage-disclosure summary').text()).toBe('資料收集中');
     expect(shares).toContain('30%');
     const changes = (await server.inject('/table/?month=202609&from=202608&show=change')).body;
     expect(changes).not.toContain('郵件 % ±');
