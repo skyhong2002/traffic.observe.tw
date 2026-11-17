@@ -47,9 +47,9 @@ export function optimizedQueue<T extends QueueSite>(entries: T[], ordinal: numbe
       y = queueDecision(b, now);
     return (
       Number(y.components.starvationProtection) - Number(x.components.starvationProtection) ||
-      (x.components.starvationProtection && y.components.starvationProtection
-        ? x.since.localeCompare(y.since)
-        : a.priority - b.priority || y.score - x.score) ||
+      (x.components.starvationProtection && y.components.starvationProtection ? x.since.localeCompare(y.since) : 0) ||
+      a.priority - b.priority ||
+      y.score - x.score ||
       a.domain.localeCompare(b.domain)
     );
   };

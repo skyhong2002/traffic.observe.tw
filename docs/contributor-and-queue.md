@@ -61,7 +61,7 @@ diff -u examples/queue/synthetic-report.json /tmp/replay.json
 
 報告比較 baseline、rare-tag、traffic、fair，列完成數、稀有 tag／台灣流量覆蓋、平均資料年齡、priority、拒絕數與選擇順序。輸入可帶 `observations` 歷史 domain/at/saved/complete/refused；各策略依該網域的實際逐次結果回放，不把拒絕算成功。這是假設回應不隨請求時間改變的反事實比較，無 observations 時明確標示每次完整成功的假設；不宣稱吞吐量改善已在正式站量測。
 
-啟用 `TRAFFIC_QUEUE_OPTIMIZATION=1` 並指定固定 `TRAFFIC_QUEUE_CANARY` ID。worker 首次同步才建立最長 24 小時 canary，讀 API 不開始實驗。四 lane cycle 為 missing/partial/missing/retry/refresh，空 lane 讓出名額，ordinal 取持久 sends（含 pending reservation）。七天未嘗試的網域在自身 lane 優先於新高流量資料，先服務最老者；有限待辦下有界名額，不在供應端拒絕或額度為零時承諾牆鐘時間。重試等待及最大嘗試數繼續有效。
+啟用 `TRAFFIC_QUEUE_OPTIMIZATION=1` 並指定固定 `TRAFFIC_QUEUE_CANARY` ID。worker 首次同步才建立最長 24 小時 canary，讀 API 不開始實驗。四 lane cycle 為 missing/partial/missing/retry/refresh，空 lane 讓出名額，ordinal 取持久 sends（含 pending reservation）。七天未嘗試的網域在自身 lane 優先於新高流量資料，先服務最老者；同批同時加入時仍按優先級、價值分數決勝，避免退化成網域字母排序。有限待辦下有界名額，不在供應端拒絕或額度為零時承諾牆鐘時間。重試等待及最大嘗試數繼續有效。
 
 完整資料只在自動來源超過 `TRAFFIC_COLLECTION_REFRESH_HOURS`（預設 720、至少 24 小時）且沒有較新月份時考慮 refresh。每次 sends 預留保存 policy 分數組件、目標月與缺欄位；所有入口仍共用原有 named lock／quota。遇拒絕立即標記 canary 回 baseline，原 403/429、Retry-After、adaptive backoff 照常執行；到期不自動重開。設 flag=0 可回滾；不要為反覆被拒絕而更換 canary ID。
 

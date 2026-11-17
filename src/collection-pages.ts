@@ -74,7 +74,7 @@ function sourceCell(e: CollectionEntry) {
   if (!e.hasManual && !e.hasAutomatic && !e.hasCommunity) return '<span class="collection-muted" title="尚無當月資料">—</span>';
   const labels = [e.hasAutomatic ? '自動抓取' : '', e.hasManual ? '人工補登' : '', e.hasCommunity ? '可信社群' : ''].filter(Boolean);
   const kind = labels.length > 1 ? 'mixed' : e.hasManual ? 'manual' : 'automatic';
-  const label = labels.join('＋');
+  const label = e.hasAutomatic && e.hasManual ? `自動＋人工${e.hasCommunity ? '＋可信社群' : ''}` : labels.join('＋');
   const details = [
     e.automaticVisitsAt ? `<div>自動流量：${stamp(e.automaticVisitsAt)}</div>` : '',
     e.automaticProfileAt ? `<div>自動組成：${stamp(e.automaticProfileAt)}</div>` : '',

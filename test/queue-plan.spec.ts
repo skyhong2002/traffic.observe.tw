@@ -47,6 +47,16 @@ it('services aging low-priority work despite continuous higher-traffic arrivals 
     expect(queue.findIndex((e) => e.domain === old.domain)).toBe(0);
   }
 });
+it('preserves priority and value when overdue sites joined in the same batch', () => {
+  const enrolledAt = '2026-11-01T00:00:00Z';
+  const entries = [
+    site('a-low.tw', { priority: 4, score: 1000, enrolledAt }),
+    site('z-core.tw', { priority: 2, score: 1, enrolledAt }),
+    site('b-small.tw', { priority: 3, score: 1, enrolledAt }),
+    site('y-large.tw', { priority: 3, score: 100, enrolledAt }),
+  ];
+  expect(optimizedQueue(entries, 0, now).map((e) => e.domain)).toEqual(['z-core.tw', 'y-large.tw', 'b-small.tw', 'a-low.tw']);
+});
 it('keeps the rare-tag baseline and uses recorded failures instead of assuming every attempt completes', () => {
   const entries = [
     site('large', { score: 100 }),
