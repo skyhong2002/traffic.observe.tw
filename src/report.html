@@ -27,7 +27,6 @@
   </div>
   <div class="chip-rows" id="chips"></div>
   </details>
-  <button id="show-all-sites" class="quiet" type="button">清除所有條件，顯示全部觀測網站</button>
   <label class="mobile-columns"><input id="more-columns" type="checkbox"> 顯示所有欄位</label>
   <section class="block directory" aria-label="網站排行">
     <p class="results-line" id="result-count" role="status" aria-live="polite">正在載入流量資料…</p>
@@ -159,13 +158,13 @@ function rowsFor(topic) {
   return numberRanks(out);
 }
 /**
- * The sites the tag filters leave: those carrying every tag in state.active (AND),
+ * The sites the tag filters leave: those carrying any tag in state.active (OR),
  * none carrying an excluded tag. Ranks are recounted among them, as for a single
  * tag. Every redraw (filters, sorting, paging) goes through here.
  */
 function scopedRows(all = rowsFor(null)) {
   if (!state.active.length && !state.exclude.length) return all;
-  return numberRanks(all.filter((r) => state.active.every((t) => r.topics.includes(t)) && !r.topics.some((t) => state.exclude.includes(t))));
+  return numberRanks(all.filter((r) => (!state.active.length || state.active.some((t) => r.topics.includes(t))) && !r.topics.some((t) => state.exclude.includes(t))));
 }
 /** The key a tag selection sorts and draws under: the tag itself when alone, else the whole selection. */
 const activeKey = () => (state.active.length ? state.active.join('、') : null);
@@ -351,7 +350,7 @@ function sourceCounts() {
 }
 // Sources and tags as chip rows like tag.observe.tw/media/; past the first
 // CHIPS tags the rest fold behind 「更多」 (tables.js) unless a chosen or excluded tag is there.
-// Tag buttons toggle exclusion directly; existing topic links can still scope the report.
+// Tag buttons cycle through OR inclusion, exclusion, and no filter.
 const CHIPS = 15;
 /** Tags left out when the page opens, until a visitor brings them back. */
 const DEFAULT_EXCLUDE = ['非台灣'];
@@ -363,18 +362,18 @@ function renderChips(topics, sources) {
     `<button type="button" class="chip-filter${extra ? ' extra' : ''}${excluded ? ' excluded' : ''}" data-pick-${kind}="${esc(value)}" aria-pressed="${on || excluded}" aria-label="${esc(text)}：${excluded ? '已排除' : on ? '已包含' : '未選取'}"${hint ? ` title="${hint}"` : ''}>${excluded ? '−' : ''}${esc(text)}${count != null ? ` <span>${count.toLocaleString('zh-TW')}</span>` : ''}</button>`;
   const hidden = topics.length - CHIPS;
   const open = wasOpen || topics.slice(CHIPS).some((t) => state.active.includes(t.value) || state.exclude.includes(t.value));
-  const tagHint = (t) => (state.exclude.includes(t) ? '已排除，再按一次取消' : '排除此標籤');
+  const tagHint = (t) => (state.active.includes(t) ? '已包含，再按一次排除' : state.exclude.includes(t) ? '已排除，再按一次取消' : '包含此標籤（符合任一標籤即可）');
   host.innerHTML = `<nav class="chip-row" aria-label="追蹤來源">${chip('source', '', '全部來源', { on: !state.source })}${state.data.sources
     .map((o) => chip('source', o.source, SOURCE_LABEL[o.source] ?? o.source, { count: sources.get(o.source) ?? 0, on: state.source === o.source, hint: state.source === o.source ? '再按一次取消' : '' }))
     .join('')}</nav><nav class="chip-row${open ? ' open' : ''}" data-kind="topic" aria-label="網站標籤">${chip('topic', '', '全部標籤', { on: !state.active.length && !state.exclude.length })}${topics
     .map((t, i) => chip('topic', t.value, t.text, { count: t.count, on: state.active.includes(t.value), excluded: state.exclude.includes(t.value), hint: tagHint(t.value), extra: i >= CHIPS }))
-    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">點標籤即可排除，再點一次取消。</span></nav>`;
+    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">點一下包含，再點一下排除，第三下取消；包含多個標籤時符合任一即可。</span></nav>`;
 }
 let renderVersion = 0;
 async function render() {
   const version = ++renderVersion;
   if (limitedTraffic) {
-    const params = new URLSearchParams({ month: state.to, topic: state.active.join(','), exclude: state.exclude.join(','), source: state.source || '', q: state.query });
+    const params = new URLSearchParams({ month: state.to, topic: state.active.join(','), topicMode: 'or', exclude: state.exclude.join(','), source: state.source || '', q: state.query });
     try {
       const response = await fetch(`/api/v1/history?${params}`);
       if (!response.ok) throw Error('無法取得資料');
@@ -402,7 +401,7 @@ async function render() {
   const scoped = scopedRows(all);
   document.getElementById('clear-search').hidden = !state.query;
   document.getElementById('reset').hidden = !state.active.length && excludesDefault() && !state.source && !state.query;
-  const q = new URLSearchParams({ month: state.to });
+  const q = new URLSearchParams({ month: state.to, topicMode: 'or' });
   if (state.from && state.from !== state.to) q.set('from', state.from);
   if (state.active.length) q.set('topic', state.active.join(','));
   // The API leaves nothing out by default, so the download always says what to leave out.
@@ -690,17 +689,19 @@ document.addEventListener('click', (ev) => {
   if (top) { state.bumpTop = Number(top.dataset.top); drawBumps(); writeHash(); return; }
   const pick = ev.target.closest('[data-pick-topic], [data-pick-source]');
   if (pick) {
-    // One click excludes a tag; another restores it. 「全部標籤」 clears all tag filters.
+    // Cycle: neutral -> OR inclusion -> exclusion -> neutral. 「全部標籤」 clears all tag filters.
     if ('pickTopic' in pick.dataset) {
       const topic = pick.dataset.pickTopic;
       if (!topic) {
         state.active = [];
         state.exclude = [];
       } else {
+        const included = state.active.includes(topic);
         const excluded = state.exclude.includes(topic);
         state.active = state.active.filter((t) => t !== topic);
         state.exclude = state.exclude.filter((t) => t !== topic);
-        if (!excluded) state.exclude.push(topic);
+        if (included) state.exclude.push(topic);
+        else if (!excluded) state.active.push(topic);
       }
     } else {
       const source = pick.dataset.pickSource || null;
@@ -732,7 +733,6 @@ const leaveForSite = () => {
   if (site) location.replace(siteHref(site));
   return !!site;
 };
-document.getElementById('show-all-sites').addEventListener('click', () => { state.query=''; state.active=[]; state.exclude=[]; state.source=null; resetList(); document.getElementById('search').value=''; render(); });
 document.getElementById('more-columns').addEventListener('change', (ev) => document.body.classList.toggle('show-all-columns', ev.target.checked));
 const filterDrawer = document.querySelector('.mobile-filter-drawer');
 const mobileFilters = matchMedia('(max-width: 640px)');

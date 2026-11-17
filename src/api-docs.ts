@@ -101,7 +101,13 @@ const SITE_ROW: Field[] = [
 const RANKING_PARAMS: Param[] = [
   { name: 'q', in: 'query', type: 'string', desc: '搜尋網站名稱或網域；先搜尋再套用筆數上限' },
   MONTH,
-  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，需同時有這些標籤（AND）' },
+  { name: 'topic', in: 'query', type: 'string', desc: '只列出有這個標籤的網站；以逗號分隔多個標籤時，預設需同時有這些標籤（AND）' },
+  {
+    name: 'topicMode',
+    in: 'query',
+    type: '"and" | "or"',
+    desc: '多標籤比對方式，預設 and；首頁使用 or（符合任一包含的標籤即可），並繼續套用 exclude',
+  },
   {
     name: 'exclude',
     in: 'query',

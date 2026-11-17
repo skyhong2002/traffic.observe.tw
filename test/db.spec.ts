@@ -714,6 +714,17 @@ describe.skipIf(!url)('with a database', () => {
     // Several tags in topic are ANDed: only a.com.tw carries 新聞 as well as 部落格.
     const both = (await server.inject(`/api/v1/rankings?month=202609&topic=${encodeURIComponent('新聞,部落格')}`)).json();
     expect(both.sites.map((s: { domain: string; rank: number }) => [s.domain, s.rank])).toEqual([['a.com.tw', 1]]);
+    const unionQuery = `month=202609&topic=${encodeURIComponent('新聞,部落格')}&topicMode=or`;
+    const union = (await server.inject(`/api/v1/rankings?${unionQuery}`)).json();
+    expect(union.sites.map((s: { domain: string }) => s.domain).sort()).toEqual(['a.com.tw', 'b.com.tw']);
+    const unionHistory = (await server.inject(`/api/v1/history?${unionQuery}`)).json();
+    expect(Object.keys(unionHistory.sites).sort()).toEqual(['a.com.tw', 'b.com.tw']);
+    const unionCsv = await server.inject(`/api/v1/rankings.csv?${unionQuery}`);
+    expect(unionCsv.body).toContain('a.com.tw');
+    expect(unionCsv.body).toContain('b.com.tw');
+    const excluded = (await server.inject(`/api/v1/rankings?${unionQuery}&exclude=${encodeURIComponent('社群')}`)).json();
+    expect(excluded.sites.map((s: { domain: string }) => s.domain)).toEqual(['b.com.tw']);
+
     expect((await form('/sites/', { domains: 'missing.tw', add: '新聞', remove: '' })).statusCode).toBe(400);
     expect(await rows(pool, 'SELECT * FROM site_metadata_log')).toHaveLength(3);
     // Independent batches must merge against the latest committed tags.

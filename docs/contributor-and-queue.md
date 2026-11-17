@@ -46,7 +46,7 @@ node tools/contributor-node.ts --queue /var/lib/contributor/queue.json \
 
 同一個 coverage 契約用於首頁、完整表、history、rankings 與 CSV（前四欄及 X-Coverage-* headers，空結果仍有 headers）：`month/scope=tracked/tracked/withVisits/complete/lastUpdatedAt`。分母是 standing watches 與該月 collection_domains 聯集，不隨標籤或搜尋改變。withVisits 可包含試算表，complete 只用原始實際欄位，與 collection 相同，允許來源互補但不抹去來源。估算台灣占比不算完整欄位。預設選最新 complete/tracked >=80% 的月份，沒有達標月才選最新；明確 URL 選月保留。`generatedAt` 只表示回應組裝，資料時間使用真實異動時間。
 
-首頁手機預設收合月份／標籤，保留搜尋；主要四欄可容納 390px，其他欄由「顯示所有欄位」展開。首頁點一下標籤即可排除，再點一次取消；aria-pressed 標示已套用的標籤篩選，提供一鍵清除預設非台灣排除。
+首頁手機預設收合月份／標籤，保留搜尋；主要四欄可容納 390px，其他欄由「顯示所有欄位」展開。首頁標籤依序切換包含（OR）→ 排除 → 未選取；包含多個標籤時符合任一即可，排除仍生效。點「全部標籤」清除標籤篩選（含預設非台灣排除），點「全部來源」清除來源篩選；aria-pressed 標示已套用的標籤篩選。首頁資料與 CSV 使用 topicMode=or，API 未指定時維持 AND。
 
 編輯可由 `/tech/:domain/` 的「人工確認技術」填入既有技術代碼、公開 HTTPS 佐證和觀察日期。需登入管理員且同來源 POST；會新增 audit，不改 tech_scans 或將阻擋改成成功。人工紀錄獨立顯示於總覽、網站頁及 API，未知版本維持未知。遇 WAF／429 不再用 browser 重試；一般排程最早 30 天後重新檢查，人工即時檢查仍受既有 cache 限制。network/timeout 可維持既有 browser fallback，不加入反偵測或換出口。
 

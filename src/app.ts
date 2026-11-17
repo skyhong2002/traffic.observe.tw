@@ -263,7 +263,7 @@ export function buildApp(
     const list = only ? all.filter((s) => only.has(s.domain)) : all;
     // Tag chips count before exclusion, so an excluded tag stays on the page to bring back.
     const topics = topicList(list);
-    // topic may list several tags (comma-separated); a site must carry all of them.
+    // Multi-tag API requests default to AND; the homepage explicitly requests OR.
     const wanted = [
       ...new Set(
         String(query.topic ?? '')
@@ -280,7 +280,9 @@ export function buildApp(
           .filter(Boolean),
       ),
     ].filter((t) => !wanted.includes(t));
-    const kept = list.filter((s) => wanted.every((t) => s.topics.includes(t)) && !s.topics.some((t) => exclude.includes(t)));
+    const matchesTopics = (tags: string[]) =>
+      !wanted.length || (query.topicMode === 'or' ? wanted.some((t) => tags.includes(t)) : wanted.every((t) => tags.includes(t)));
+    const kept = list.filter((s) => matchesTopics(s.topics) && !s.topics.some((t) => exclude.includes(t)));
     // The comparison month (the nearest earlier month by default): growth, the earlier rank and every share's change are against it.
     const older = months.filter((m) => m < month);
     const from =
@@ -290,10 +292,7 @@ export function buildApp(
         ? query.from
         : (older[0] ?? null);
     const previous = (from ? await view(from) : []).filter(
-      (site) =>
-        (!only || only.has(site.domain)) &&
-        wanted.every((tag) => site.topics.includes(tag)) &&
-        !site.topics.some((tag) => exclude.includes(tag)),
+      (site) => (!only || only.has(site.domain)) && matchesTopics(site.topics) && !site.topics.some((tag) => exclude.includes(tag)),
     );
     const compared = reportComparison(kept, previous, includePreviousOnly);
     const queryText = (query.q ?? '').trim().toLowerCase();
@@ -323,6 +322,7 @@ export function buildApp(
     show?: string;
     unit?: string;
     topic?: string;
+    topicMode?: string;
     exclude?: string;
     source?: string;
   };
