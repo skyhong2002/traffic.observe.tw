@@ -435,6 +435,11 @@ export const ENDPOINTS: Endpoint[] = [
     fields: [
       { name: 'budget', type: 'integer', desc: 'Similarweb 每輪上限' },
       {
+        name: 'contributors',
+        type: 'object',
+        desc: '社群節點的唯讀摘要：generatedAt、onlineWindowSeconds（60）、nodes。每個節點包含 id、state（online／offline／unseen／disabled）、online、schedulingEnabled、lastSeenAt、lastRequest（網域、送出與回傳時間、outcome、httpStatus、expired）、last24h（requests、successfulRequests、refused、failed、pending）與 contribution（domains、observations、latest）。成功請求按已保存的 sends 計數，多個月份不重算請求；domains 按有成功觀察的網域去重。在線代表近期回報，不代表供應端成功或可跳過配額。',
+      },
+      {
         name: 'cruxUntracked',
         type: 'object',
         desc: 'Chrome UX Report 最新一期台灣前 5,000 名中，不屬於任何追蹤網域的網址：month、top、total、hosts（host、rank，最多 300 個）',
@@ -483,7 +488,7 @@ export const ENDPOINTS: Endpoint[] = [
       {
         name: 'requests',
         type: 'object[]',
-        desc: '最近 24 筆已保存請求的安全診斷：sendId、at、domain、outcome、httpStatus、egressRoute、httpClient、experiment、diagnosticsRecorded、provider、cache、pop、contentType、retryAfter、retrySource、quotaExceeded、latestMonth、latestProfileMonth。沒有 response body、request ID、Cookie 或憑證。舊紀錄缺少的欄位會是 null。',
+        desc: '最近 24 筆已保存請求的安全診斷：sendId、at、domain、outcome、httpStatus、sourceNode（社群節點 ID；主站或未記錄時為 null）、egressRoute（包含 contributor:<node>）、httpClient、experiment、diagnosticsRecorded、provider、cache、pop、contentType、retryAfter、retrySource、quotaExceeded、latestMonth、latestProfileMonth。沒有 response body、request ID、Cookie 或憑證。舊紀錄缺少的欄位會是 null。',
       },
       {
         name: 'runs',

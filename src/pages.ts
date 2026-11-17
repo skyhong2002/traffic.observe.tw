@@ -1541,6 +1541,45 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
       <p class="status-caption">最新收到：流量 ${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無'} · 組成 ${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無'}</p></section>`
     : `<section class="status-panel"><h2>${icon('layers')}資料月份</h2><p>最新流量 ${policy.latestMonth ? monthLabel(policy.latestMonth) : '尚無資料'} · 組成 ${policy.latestProfileMonth ? monthLabel(policy.latestProfileMonth) : '尚無資料'}</p><a href="${collectionHref}">查看月份收集 ${icon('arrow')}</a></section>`;
 
+  const nodes = status.contributors.nodes;
+  const nodeCards = nodes
+    .map((node) => {
+      const last = node.lastRequest;
+      const latest = node.contribution.latest;
+      const state =
+        node.state === 'disabled'
+          ? '未啟用派工'
+          : node.state === 'unseen'
+            ? '尚未連線'
+            : node.state === 'offline'
+              ? '離線'
+              : last?.outcome === 'pending' && !last.expired
+                ? '執行任務中'
+                : '在線・等待派工';
+      const outcome = !last
+        ? ''
+        : last.expired
+          ? '逾時・待確認'
+          : last.outcome === 'ok'
+            ? '已存資料'
+            : last.outcome === 'refused'
+              ? '拒絕'
+              : last.outcome === 'pending'
+                ? last.claimedAt
+                  ? '抓取中'
+                  : '等待領取'
+                : last.outcome === 'no-data'
+                  ? '無有效資料'
+                  : '錯誤';
+      return `<article class="status-panel status-node" data-node="${html(node.id)}"><header class="status-heading"><h3>${html(node.id)}</h3><span class="status-badge${node.state === 'offline' ? ' warning' : ''}">${icon(node.state === 'online' ? 'activity' : 'pause')}${state}</span></header>
+      <dl class="status-node-facts"><div><dt>最近回報</dt><dd>${time(node.lastSeenAt)}</dd></div><div><dt>最近任務</dt><dd>${last ? `<a href="/site/${html(last.domain)}/">${html(last.domain)}</a><small>${time(last.requestedAt)} · ${outcome}${last.httpStatus !== null ? ` · HTTP ${last.httpStatus}` : ''}</small>` : '尚無任務'}</dd></div><div><dt>24h 成功請求</dt><dd class="status-node-number">${node.last24h.successfulRequests}</dd></div><div><dt>已提供網站</dt><dd class="status-node-number">${node.contribution.domains}</dd></div></dl>
+      <p class="status-caption">${latest ? `最近收到資料：${html(latest.domain)} · ${monthLabel(latest.month)} · ${time(latest.fetchedAt)} · <a href="/api/v1/contributors/${html(latest.domain)}?month=${latest.month}">來源紀錄 ${icon('arrow')}</a>` : '尚未收到有效的流量資料。'}</p></article>`;
+    })
+    .join('');
+  const contributors = `<section class="status-contributors" aria-labelledby="contributors-heading"><header class="status-heading"><h2 id="contributors-heading">${icon('layers')}社群貢獻節點</h2><span class="status-caption">${nodes.filter((node) => node.schedulingEnabled && node.online).length} / ${nodes.filter((node) => node.schedulingEnabled).length} 個派工節點在線</span></header>
+    ${nodeCards ? `<div class="status-node-grid">${nodeCards}</div>` : '<p class="status-caption">尚未設定社群貢獻節點。</p>'}
+    <p class="status-caption">狀態以載入本頁時為準，${status.contributors.onlineWindowSeconds} 秒內有回報視為在線；等待配額或冷卻時仍可在線。節點與主站共用請求間隔、配額及退避。成功請求按已解析並保存的請求計數；同一次回應包含多個月份仍只算一次，提供網站按網域去重。</p></section>`;
+
   // Keep provider outcomes separate from DB-only scheduler checks. A reservation is not a confirmed request.
   const recent = [...status.requests].sort((a, b) => b.at.localeCompare(a.at) || b.sendId - a.sendId).slice(0, 12);
   const requestRows = recent
@@ -1556,8 +1595,9 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
             : r.outcome === 'no-data'
               ? '無有效資料'
               : '錯誤';
-      const route =
-        r.egressRoute === 'direct'
+      const route = r.sourceNode
+        ? `社群節點 ${r.sourceNode}`
+        : r.egressRoute === 'direct'
           ? '台灣（原出口）'
           : r.egressRoute === 'vessel-tokyo'
             ? '日本'
@@ -1575,7 +1615,8 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
       ]
         .map(([label, value]) => `<div><dt>${label}</dt><dd>${html(value)}</dd></div>`)
         .join('');
-      return `<tr><td class="l">${time(r.at)}</td>${siteCell(r.domain, r.domain)}<td class="l"><span class="status-result${refused || (!saved && r.outcome !== 'pending') ? ' down' : saved ? ' up' : ''}">${icon(saved ? 'check' : refused ? 'pause' : 'clock')}${outcome}</span>${r.httpStatus !== null ? `<span class="status-http">HTTP ${r.httpStatus}</span>` : ''}${r.quotaExceeded ? '<span class="status-http down">quota exceeded</span>' : ''}</td><td class="l status-months">${r.latestMonth ? monthLabel(r.latestMonth) : '—'}<span class="muted"> / </span>${r.latestProfileMonth ? monthLabel(r.latestProfileMonth) : '—'}</td><td class="l"><details class="status-request-detail"><summary aria-label="${html(r.domain)} ${html(tw(r.at))} 回應證據">詳情</summary><dl>${evidence}</dl>${!r.diagnosticsRecorded ? '<p>此筆未保存診斷標頭，無法事後補判。</p>' : ''}</details></td></tr>`;
+      const executor = r.sourceNode ? html(r.sourceNode) : r.egressRoute ? '主站' : '未記錄';
+      return `<tr><td class="l">${time(r.at)}</td>${siteCell(r.domain, r.domain)}<td class="l status-executor">${executor}</td><td class="l"><span class="status-result${refused || (!saved && r.outcome !== 'pending') ? ' down' : saved ? ' up' : ''}">${icon(saved ? 'check' : refused ? 'pause' : 'clock')}${outcome}</span>${r.httpStatus !== null ? `<span class="status-http">HTTP ${r.httpStatus}</span>` : ''}${r.quotaExceeded ? '<span class="status-http down">quota exceeded</span>' : ''}</td><td class="l status-months">${r.latestMonth ? monthLabel(r.latestMonth) : '—'}<span class="muted"> / </span>${r.latestProfileMonth ? monthLabel(r.latestProfileMonth) : '—'}</td><td class="l"><details class="status-request-detail"><summary aria-label="${html(r.domain)} ${html(tw(r.at))} 回應證據">詳情</summary><dl>${evidence}</dl>${!r.diagnosticsRecorded ? '<p>此筆未保存診斷標頭，無法事後補判。</p>' : ''}</details></td></tr>`;
     })
     .join('');
   const flow = status.throughput;
@@ -1583,8 +1624,8 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
     ? `<section class="block"><h2>實際吞吐量與條件式完成時間</h2><p>尚缺 ${flow.remainingDomains} 個完整網域；24 小時成功 ${flow.success24h} 站，7 天成功 ${flow.success7d} 站、完整 ${flow.complete7d} 站。${flow.conditionalCompletionAt ? `若維持最近 7 天吞吐量，預計 ${tw(flow.conditionalCompletionAt)} 完成。` : '尚無足夠成功資料，完成時間未知。'}</p><p class="note">只計入已確認保存目標月份的成功，重送同站不重複計數。此為條件式估計，新增網域、供應端拒絕與資料品質會改變結果。</p></section>`
     : '';
   const requests = `<section class="status-recent" aria-labelledby="requests-heading"><header class="status-heading"><h2 id="requests-heading">最近 Similarweb 請求 <small>最新在前 · 最多 12 筆</small></h2><a href="/api/v1/status">完整 JSON ${icon('arrow')}</a></header>
-    ${table('<th class="l" aria-sort="descending">送出／預留時間 ↓</th><th class="l">網域</th><th class="l">結果</th><th class="l">流量 / 組成月份</th><th class="l">診斷</th>', requestRows, '尚無請求或預留紀錄；排程檢查不代表已向 Similarweb 送出。', 5, 'status-requests', { sortable: false, pin: false, className: 'status-table' })}
-    <p class="status-caption">僅列自動資料請求；人工補登見<a href="${collectionHref}">月份收集</a>。預留不代表已收到回應，HTTP 200 仍可能因額度訊息被拒絕。</p></section>`;
+    ${table('<th class="l" aria-sort="descending">送出／預留時間 ↓</th><th class="l">網域</th><th class="l">執行節點</th><th class="l">結果</th><th class="l">流量 / 組成月份</th><th class="l">診斷</th>', requestRows, '尚無請求或預留紀錄；排程檢查不代表已向 Similarweb 送出。', 6, 'status-requests', { sortable: false, pin: false, className: 'status-table' })}
+    <p class="status-caption">列出主站與社群節點的自動資料請求；人工補登見<a href="${collectionHref}">月份收集</a>。預留不代表已收到回應，HTTP 200 仍可能因額度訊息被拒絕。</p></section>`;
   const others = `<section class="status-other" aria-labelledby="other-heading"><header class="status-heading"><h2 id="other-heading">其他資料來源</h2><span class="status-caption">各自排程，不使用 Similarweb 額度</span></header>${table(
     '<th class="l">來源</th><th class="l">最近活動</th><th class="l">頻率</th>',
     `<tr><td class="l"><a href="/tech/">${icon('layers')}網站技術掃描</a></td><td class="l">24h ${activity.websiteTechnology.last24hAutomaticDomainScans} 站 · ${time(activity.websiteTechnology.lastRunAt)}</td><td class="l">每 ${activity.websiteTechnology.intervalHours} 小時一批</td></tr>
@@ -1616,7 +1657,7 @@ export function statusPage(status: Awaited<ReturnType<typeof serviceStatus>>) {
       title: '資料更新狀態',
       dek: '抓取狀態、月份進度與最近回應。查看本頁只讀取本站資料。',
     },
-    `<div class="status-dashboard"><div class="status-overview">${hero}${progress}</div>${throughput}${requests}${others}${details}</div>`,
+    `<div class="status-dashboard"><div class="status-overview">${hero}${progress}</div>${contributors}${throughput}${requests}${others}${details}</div>`,
     {
       nav: 'status',
       method: methodPart(

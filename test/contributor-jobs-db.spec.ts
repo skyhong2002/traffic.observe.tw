@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../src/app.ts';
+import { createContributorPayload, saveContributorPayload } from '../src/contributor.ts';
 import { completeContributorJob, type JobResult } from '../src/contributor-jobs.ts';
 import { recoverContributorRefusals } from '../src/contributor-recovery.ts';
+import { contributorStatus } from '../src/contributor-status.ts';
 import { contributorTransport } from '../src/contributor-transport.ts';
 import { createPool, migrate, type Pool, rows } from '../src/db.ts';
+import { statusPage } from '../src/pages.ts';
+import { recentRequestDiagnostics } from '../src/request-diagnostics.ts';
 import { previousMonth, runConfig, runOnce } from '../src/scheduler.ts';
+import { serviceStatus } from '../src/status.ts';
 
 const url = process.env.TRAFFIC_TEST_DB_URL;
 const token = `cn1:sky-mini:${'x'.repeat(43)}`;
@@ -109,6 +114,94 @@ describe.skipIf(!url)('contributor job HTTP pipeline', () => {
     const publicResponse = await app.inject(`/api/v1/contributors/a.tw?month=${month}`);
     expect(publicResponse.statusCode).toBe(200);
     expect(publicResponse.body).toContain('sky-mini');
+    const status = await serviceStatus(pool, config);
+    expect(status.contributors.nodes[0]).toMatchObject({
+      id: 'sky-mini',
+      state: 'online',
+      last24h: { successfulRequests: 1 },
+      contribution: { domains: 1, observations: 1 },
+    });
+    expect(status.requests[0]).toMatchObject({
+      sourceNode: 'sky-mini',
+      egressRoute: 'contributor:sky-mini',
+      httpClient: 'contributor-docker',
+    });
+    const page = statusPage(status);
+    expect(page).toContain('社群貢獻節點');
+    expect(page).toContain('在線・等待派工');
+    expect(page).toContain('class="l status-executor">sky-mini');
+    expect(page).toContain(`/api/v1/contributors/a.tw?month=${month}`);
+    expect(page).not.toContain(token);
+    expect(local).not.toHaveBeenCalled();
+  });
+  it('separates heartbeat state from success, counts domains once across months, and handles disabled or unseen nodes', async () => {
+    const at = new Date();
+    vi.stubEnv('TRAFFIC_CONTRIBUTOR_NODES', 'sky-mini,unseen');
+    vi.stubEnv('TRAFFIC_CONTRIBUTOR_TRUST', 'sky-mini:10,unseen:5');
+    await pool.query('INSERT INTO contributor_nodes (source_node,source_version,last_seen_at) VALUES (?,?,?)', ['sky-mini', 'v1', at]);
+    for (const targetMonth of ['202608', '202609', '202610'])
+      await saveContributorPayload(
+        pool,
+        createContributorPayload({
+          domain: 'a.tw',
+          targetMonth,
+          fetchedAt: at.toISOString(),
+          sourceNode: 'sky-mini',
+          sourceVersion: 'v1',
+          responseStatus: 200,
+          payload: { visits: 100 },
+        }),
+      );
+    // A failed observation is provenance, not an additional provided website.
+    await saveContributorPayload(
+      pool,
+      createContributorPayload({
+        domain: 'b.tw',
+        targetMonth: '202610',
+        fetchedAt: at.toISOString(),
+        sourceNode: 'sky-mini',
+        sourceVersion: 'v1',
+        responseStatus: 429,
+        payload: {},
+      }),
+    );
+    const online = await contributorStatus(pool, at);
+    expect(online.nodes.find((node) => node.id === 'sky-mini')).toMatchObject({
+      state: 'online',
+      last24h: { successfulRequests: 0 },
+      contribution: { domains: 1, observations: 3, latest: { domain: 'a.tw', month: '202610', selected: true } },
+    });
+    expect(online.nodes.find((node) => node.id === 'unseen')).toMatchObject({ state: 'unseen', online: false, lastRequest: null });
+    expect((await contributorStatus(pool, new Date(at.getTime() + 60_000))).nodes.find((node) => node.id === 'sky-mini')).toMatchObject({
+      state: 'offline',
+      contribution: { domains: 1 },
+    });
+    vi.stubEnv('TRAFFIC_COMMUNITY_ENABLED', '0');
+    expect((await contributorStatus(pool, at)).nodes.find((node) => node.id === 'sky-mini')).toMatchObject({
+      state: 'disabled',
+      online: true,
+      contribution: { latest: { selected: false } },
+    });
+    expect(await rows(pool, 'SELECT id FROM contributor_observations')).toHaveLength(4);
+  });
+  it('keeps expired reservations unconfirmed and does not publish unrecognised node metadata', async () => {
+    const at = new Date();
+    await pool.query("INSERT INTO sends (id,domain,at,outcome,response_meta) VALUES (1,'a.tw',?,'pending',?)", [
+      at,
+      JSON.stringify({ sourceNode: '<unsafe>', egressRoute: 'contributor:<unsafe>', httpClient: 'secret-client' }),
+    ]);
+    await pool.query('INSERT INTO contributor_jobs (send_id,source_node,domain,created_at,expires_at) VALUES (1,?,?,?,?)', [
+      'sky-mini',
+      'a.tw',
+      at,
+      new Date(at.getTime() + 45_000),
+    ]);
+    const state = await contributorStatus(pool, new Date(at.getTime() + 50_000));
+    expect(state.nodes.find((node) => node.id === 'sky-mini')).toMatchObject({
+      lastRequest: { outcome: 'pending', expired: true, httpStatus: null },
+      last24h: { successfulRequests: 0, pending: 1 },
+    });
+    expect((await recentRequestDiagnostics(pool))[0]).toMatchObject({ sourceNode: null, egressRoute: null, httpClient: null });
   });
   it('preserves Retry-After and stops every node and the local worker after refusal', async () => {
     await claim();

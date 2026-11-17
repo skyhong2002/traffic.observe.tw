@@ -441,6 +441,7 @@ describe.skipIf(!url)('with a database', () => {
       domain: `site-${i}.tw`,
       outcome: i === 15 ? 'pending' : i === 14 ? 'refused' : i === 13 ? 'no-data' : 'ok',
       httpStatus: i === 15 ? null : 200,
+      sourceNode: null,
       egressRoute: null,
       httpClient: null,
       experiment: null,

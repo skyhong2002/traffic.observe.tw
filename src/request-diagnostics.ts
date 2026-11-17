@@ -14,14 +14,21 @@ export async function recentRequestDiagnostics(pool: Pool) {
     const meta: Record<string, unknown> =
       typeof request.response_meta === 'string' ? JSON.parse(request.response_meta) : (request.response_meta ?? {});
     const text = (key: string) => (typeof meta[key] === 'string' ? meta[key].slice(0, 256) : null);
+    const node = text('sourceNode');
+    const sourceNode = node && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(node) ? node : null;
+    const route = text('egressRoute');
     return {
       sendId: request.id,
       at: request.at.toISOString(),
       domain: request.domain,
       outcome: request.outcome,
       httpStatus: request.http_status,
-      egressRoute: ['direct', 'vessel-tokyo', 'vessel-singapore'].includes(text('egressRoute') ?? '') ? text('egressRoute') : null,
-      httpClient: ['node-fetch', 'curl'].includes(text('httpClient') ?? '') ? text('httpClient') : null,
+      sourceNode,
+      egressRoute:
+        ['direct', 'vessel-tokyo', 'vessel-singapore'].includes(route ?? '') || (sourceNode && route === `contributor:${sourceNode}`)
+          ? route
+          : null,
+      httpClient: ['node-fetch', 'curl', 'contributor-docker'].includes(text('httpClient') ?? '') ? text('httpClient') : null,
       experiment: text('egressExperiment'),
       diagnosticsRecorded: text('diagnosticsVersion') === '1',
       provider: text('provider') === 'CloudFront' ? 'CloudFront' : null,

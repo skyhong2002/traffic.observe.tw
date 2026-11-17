@@ -1,4 +1,5 @@
 import { collectionMonth, loadCollection } from './collection.ts';
+import { contributorStatus } from './contributor-status.ts';
 import { cruxStatus, untrackedPopular } from './crux.ts';
 import { type Pool, rows } from './db.ts';
 import { egressExperimentStatus } from './egress-experiment.ts';
@@ -108,6 +109,7 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     requests,
     crux,
     untracked,
+    contributors,
   ] = await Promise.all([
     rows<{
       id: number;
@@ -148,12 +150,14 @@ export async function serviceStatus(pool: Pool, config: RunConfig, now = new Dat
     recentRequestDiagnostics(pool),
     cruxStatus(pool),
     untrackedPopular(pool, 5000),
+    contributorStatus(pool, now),
   ]);
   const queue = fetchQueue(candidates, config, cooling, now, share, refused, policy);
   const tech = techConfig();
   const sent24 = sends.reduce((n, s) => n + Number(s.n), 0);
   return {
     sourceCommit: releaseRevision(),
+    contributors,
     throughput: collection
       ? await loadThroughput(
           pool,
