@@ -6,7 +6,7 @@ import { saveTraffic } from './store.ts';
 
 /** Alternate local and configured contributors. Refusals keep the global cooldown. */
 export function contributorTransport(pool: Pool, nodes: string[], version: string, ordinary: typeof fetch = fetch) {
-  if (nodes.some((node) => !/^[a-z0-9][a-z0-9.-]{0,63}$/.test(node)) || new Set(nodes).size !== nodes.length)
+  if (nodes.some((node) => !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(node)) || new Set(nodes).size !== nodes.length)
     throw Error('invalid contributor nodes');
   let selected: string | null = null;
   let fetchedAt: string | null = null;
