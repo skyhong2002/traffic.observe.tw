@@ -1,8 +1,30 @@
 {
   "name": "traffic-observe",
   "version": "0.1.0",
+  "description": "Open-source website traffic observatory with Similarweb collection, CrUX Taiwan rankings, Cloudflare Radar, technology detection, and public APIs.",
   "private": false,
   "license": "MIT",
+  "author": "traffic.observe.tw contributors",
+  "homepage": "https://site.observe.tw",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/skyhong2002/traffic.observe.tw.git"
+  },
+  "bugs": {
+    "url": "https://github.com/skyhong2002/traffic.observe.tw/issues"
+  },
+  "keywords": [
+    "web-analytics",
+    "similarweb",
+    "crux",
+    "cloudflare-radar",
+    "technology-detection",
+    "taiwan",
+    "fastify",
+    "typescript",
+    "mariadb",
+    "open-source"
+  ],
   "type": "module",
   "engines": {
     "node": ">=24 <25"
