@@ -29,8 +29,13 @@
   </details>
   <label class="mobile-columns"><input id="more-columns" type="checkbox"> 顯示所有欄位</label>
   <section class="block directory" aria-label="網站排行">
-    <p class="results-line" id="result-count" role="status" aria-live="polite">正在載入流量資料…</p>
-    <p class="coverage-note" id="coverage-note" role="status" hidden></p>
+    <div class="report-meta">
+      <p class="results-line" id="result-count" role="status" aria-live="polite">正在載入流量資料…</p>
+      <details class="coverage-disclosure" id="coverage-note" hidden>
+        <summary id="coverage-summary">收集進度</summary>
+        <p id="coverage-detail"></p>
+      </details>
+    </div>
     <div id="sections" aria-busy="true"><div class="loading-state"><span class="loading-dot"></span>正在整理網站排行…</div></div>
     <noscript><p class="empty">請開啟 JavaScript 使用搜尋，或直接查看<a href="/table/">完整數據</a>。</p></noscript>
   </section>
@@ -367,7 +372,7 @@ function renderChips(topics, sources) {
     .map((o) => chip('source', o.source, SOURCE_LABEL[o.source] ?? o.source, { count: sources.get(o.source) ?? 0, on: state.source === o.source, hint: state.source === o.source ? '再按一次取消' : '' }))
     .join('')}</nav><nav class="chip-row${open ? ' open' : ''}" data-kind="topic" aria-label="網站標籤">${chip('topic', '', '全部標籤', { on: !state.active.length && !state.exclude.length })}${topics
     .map((t, i) => chip('topic', t.value, t.text, { count: t.count, on: state.active.includes(t.value), excluded: state.exclude.includes(t.value), hint: tagHint(t.value), extra: i >= CHIPS }))
-    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}<span class="chip-note">點一下包含，再點一下排除，第三下取消；包含多個標籤時符合任一即可。</span></nav>`;
+    .join('')}${hidden > 0 ? `<button type="button" class="chip-more" data-chip-more data-more="更多（+${hidden}）" data-less="收合">${open ? '收合' : `更多（+${hidden}）`}</button>` : ''}</nav>`;
 }
 let renderVersion = 0;
 async function render() {
@@ -437,12 +442,13 @@ function renderResults(scoped = scopedRows()) {
   if (coverage && coverage.tracked > 0) {
     const ratio = coverage.complete / coverage.tracked;
     coverageNote.hidden = false;
-    coverageNote.className = `coverage-note${ratio < (state.data.coverageThreshold ?? 0.8) ? ' is-low' : ''}`;
-    coverageNote.innerHTML = `${monthLabel(state.to)} 已取得 <b>${coverage.withVisits.toLocaleString('zh-TW')}</b> / ${coverage.tracked.toLocaleString('zh-TW')} 個追蹤網站資料，完整 ${coverage.complete.toLocaleString('zh-TW')} 個（${(ratio * 100).toFixed(1)}%）。${ratio < (state.data.coverageThreshold ?? 0.8) ? '資料仍在收集，以下是目前已取得資料的排行。' : ''}<a href="/status/collection/?month=${state.to}">查看收集進度</a>`;
+    const collecting = coverage.withVisits < coverage.tracked || coverage.complete < coverage.tracked;
+    document.getElementById('coverage-summary').textContent = collecting ? '資料收集中' : '收集進度';
+    document.getElementById('coverage-detail').innerHTML = `${monthLabel(state.to)} 已取得 ${coverage.withVisits.toLocaleString('zh-TW')} / ${coverage.tracked.toLocaleString('zh-TW')} 個追蹤網站資料，欄位完整 ${coverage.complete.toLocaleString('zh-TW')} 個（${(ratio * 100).toFixed(1)}%）。排行依已收錄的資料計算，未收錄不代表零流量。<a href="/status/collection/?month=${state.to}">查看收集進度</a>`;
     const stamp = document.getElementById('generated');
     stamp.textContent = coverage.lastUpdatedAt ? `本月資料最後異動 ${new Date(coverage.lastUpdatedAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })} · 台北時間` : '本月尚無資料異動時間';
   } else { coverageNote.hidden = true; document.getElementById('generated').textContent = '本月尚無資料異動時間'; }
-  document.getElementById('result-count').textContent = `${activeKey() || '全部網站'}${excludesDefault() ? '・已預設排除非台灣網站' : state.exclude.length ? `・排除 ${state.exclude.join('、')}` : ''}・${rows.length.toLocaleString('zh-TW')} 個${query ? '搜尋結果' : '已取得資料的網站'}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}`;
+  document.getElementById('result-count').textContent = `${activeKey() ? `${activeKey()}・` : ''}${query ? `${rows.length.toLocaleString('zh-TW')} 個搜尋結果` : `已收錄 ${rows.length.toLocaleString('zh-TW')} 個網站`}・${monthLabel(state.to)}${state.from === state.to ? '' : ` 對比 ${monthLabel(state.from)}`}`;
   const host = document.getElementById('sections');
   nearEnd.disconnect();
   host.replaceChildren(section(activeKey(), state.active.length === 1 ? state.active[0] : null, rows));

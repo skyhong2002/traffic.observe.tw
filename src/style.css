@@ -1888,6 +1888,33 @@ svg .cross {
   transition: opacity 0.08s;
   max-width: 240px;
 }
+.report-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin-bottom: 10px;
+}
+.report-meta .results-line {
+  margin: 0;
+}
+.coverage-disclosure {
+  color: var(--muted);
+  font-size: 12px;
+}
+.coverage-disclosure > summary {
+  cursor: pointer;
+}
+.coverage-disclosure[open] {
+  flex-basis: 100%;
+}
+.coverage-disclosure p {
+  margin: 6px 0 0;
+  max-width: 64ch;
+}
+.coverage-disclosure a {
+  margin-left: 8px;
+}
 .coverage-note {
   margin: -6px 0 14px;
   color: var(--muted);
